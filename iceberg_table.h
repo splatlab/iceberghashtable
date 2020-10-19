@@ -18,7 +18,6 @@ extern "C" {
 	typedef struct iceberg_block {
 		uint64_t tags[BUCKETS_PER_BLOCK];
 		ValueType vals[BUCKETS_PER_BLOCK];
-		uint64_t metadata;
 	} iceberg_block;
 
 	typedef struct iceberg_metadata {
@@ -27,10 +26,11 @@ extern "C" {
 		uint64_t nelts;
 		uint64_t nslots;
 		uint64_t block_bits;
+		uint64_t block_metadata[];
 	} iceberg_metadata;
 
 	typedef struct iceberg_table {
-		iceberg_metadata metadata;
+		iceberg_metadata * metadata;
 		iceberg_block blocks[];
 	} iceberg_table;
 
@@ -38,7 +38,7 @@ extern "C" {
 
 	bool iceberg_insert(iceberg_table * restrict table, KeyType key, ValueType value);
 
-	bool iceberg_remove(iceberg_table * restrict table, KeyType key);
+	bool iceberg_remove(iceberg_table * restrict table, KeyType key, ValueType value);
 
 	bool iceberg_get_value(iceberg_table * restrict table, KeyType key, ValueType& value);
 
