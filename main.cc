@@ -58,7 +58,7 @@ int main (int argc, char** argv) {
 	
 	high_resolution_clock::time_point t2 = high_resolution_clock::now();
 	printf("Inserts: %f /sec\n", N / elapsed(t1, t2));
-	printf("Percent of non-level 1 inserts: %f\n", (double)ct / N);
+	printf("Percent of non-level 1 inserts: %f\n", ((double)ct) / N);
 
 	printf("QUERIES\n");
 
@@ -67,30 +67,26 @@ int main (int argc, char** argv) {
 	
 	uint64_t val;
 	t1 = high_resolution_clock::now();
-		
+
+	ct = 0;
+
 	for(uint64_t i = 0; i < N; i++)
-		if(iceberg_get_value(table, not_in_table[i].first, val)) {
-			printf("False positive query\n");
-			exit(EXIT_FAILURE);
-		}
+		if(iceberg_get_value(table, not_in_table[i].first, val)) ct++;
 	
 	t2 = high_resolution_clock::now();
 	printf("Negative queries: %f /sec\n", N / elapsed(t1, t2));
+	printf("Error rate: %f\n", ((double)ct) / N);
 	
 	t1 = high_resolution_clock::now();
 		
 	ct = 0;
 
 	for(uint64_t i = 0; i < N; i++)
-		if(!iceberg_get_value(table, in_table[i].first, val)  || val != in_table[i].second) {
-			//printf("False negative query\n");
-			//exit(EXIT_FAILURE);
-			ct++;
-		}
+		if(!iceberg_get_value(table, in_table[i].first, val)  || val != in_table[i].second) ct++;
 
 	t2 = high_resolution_clock::now();
 	printf("Positive queries: %f /sec\n", N / elapsed(t1, t2));
-	printf("Error rate: %f\n", ct / (double)N);
+	printf("Error rate: %f\n", ((double)ct) / N);
 
 	printf("REMOVALS\n");
 
@@ -111,33 +107,29 @@ int main (int argc, char** argv) {
 	
 	t2 = high_resolution_clock::now();
 	printf("Removals: %f /sec\n", (N / 2) / elapsed(t1, t2));
-	printf("Percent of failed removals: %f\n", (double)ct / (N / 2));
+	printf("Percent of failed removals: %f\n", ((double)ct) / (N / 2));
 
 	shuffle(removed.begin(), removed.end(), g);
 
 	t1 = high_resolution_clock::now();
 
+	ct = 0;
+
 	for(uint64_t i = 0; i < N / 2; i++)
-		if(iceberg_get_value(table, removed[i].first, val) && val == removed[i].second) {
-			printf("False positive query\n");
-			exit(EXIT_FAILURE);
-		}
+		if(iceberg_get_value(table, removed[i].first, val) && val == removed[i].second) ct++;
 
 	t2 = high_resolution_clock::now();
 	printf("Negative queries after removals: %f /sec\n", N / elapsed(t1, t2));
+	printf("Error rate: %f\n", ((double)ct) / (N / 2));
 
 	t1 = high_resolution_clock::now();
 		
 	ct = 0;
 
 	for(uint64_t i = 0; i < N / 2; i++)
-		if(!iceberg_get_value(table, non_removed[i].first, val) || val != non_removed[i].second) {
-			//printf("False negative query\n");
-			//exit(EXIT_FAILURE);
-			ct++;
-		}
+		if(!iceberg_get_value(table, non_removed[i].first, val) || val != non_removed[i].second) ct++;
 
 	t2 = high_resolution_clock::now();
 	printf("Positive queries after removals: %f /sec\n", N / elapsed(t1, t2));
-	printf("Error rate: %f\n", ct / (double)N);
+	printf("Error rate: %f\n", ct * 2 / (double)N);
 }
