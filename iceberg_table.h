@@ -9,16 +9,15 @@
 extern "C" {
 #endif
 
-	#define BITS_PER_BUCKET 5
-	#define BUCKETS_PER_BLOCK 32
+	#define SLOT_BITS 5
 	#define FPRINT_BITS 8
 
 	typedef uint64_t KeyType;
 	typedef uint64_t ValueType;
 
 	typedef struct __attribute__ ((__packed__)) iceberg_block {
-		uint64_t tags[BUCKETS_PER_BLOCK];
-		ValueType vals[BUCKETS_PER_BLOCK];
+		uint64_t tags[1 << SLOT_BITS];
+		ValueType vals[1 << SLOT_BITS];
 	} iceberg_block;
 
 	typedef struct iceberg_metadata {

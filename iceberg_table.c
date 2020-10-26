@@ -23,7 +23,7 @@ iceberg_table * iceberg_init(uint64_t log_slots) {
 
 	iceberg_table * table;
 
-	uint64_t total_blocks = 1 << (log_slots - BITS_PER_BUCKET);
+	uint64_t total_blocks = 1 << (log_slots - SLOT_BITS);
   	uint64_t total_size_in_bytes = sizeof(iceberg_block) * total_blocks;
 
     	table = (iceberg_table *)malloc(sizeof(*table) + total_size_in_bytes);
@@ -36,7 +36,7 @@ iceberg_table * iceberg_init(uint64_t log_slots) {
 	table->metadata->total_size_in_bytes = total_size_in_bytes;
 	table->metadata->nslots = 1 << log_slots;
 	table->metadata->nblocks = total_blocks;
-	table->metadata->block_bits = log_slots - BITS_PER_BUCKET;
+	table->metadata->block_bits = log_slots - SLOT_BITS;
 
 	for (uint64_t i = 0; i < (1 << log_slots); ++i)
 		table->metadata->block_md[i] = 0;
@@ -46,7 +46,7 @@ iceberg_table * iceberg_init(uint64_t log_slots) {
 
 __mmask32 slot_mask(iceberg_metadata * restrict metadata, uint8_t fprint, uint64_t index) {
 	__m256i bcast = _mm256_set1_epi8(fprint);
-	__m256i block = _mm256_loadu_si256(reinterpret_cast<__m256i*>(&metadata->block_md[index * BUCKETS_PER_BLOCK]));
+	__m256i block = _mm256_loadu_si256(reinterpret_cast<__m256i*>(&metadata->block_md[index << SLOT_BITS]));
 	return _mm256_cmp_epi8_mask(bcast, block, _MM_CMPINT_EQ);
 }
 
@@ -67,7 +67,7 @@ bool iceberg_insert(iceberg_table * restrict table, KeyType key, ValueType value
 
 	uint8_t slot = word_select(md_mask, 0);
 
-	metadata->block_md[index * BUCKETS_PER_BLOCK + slot] = fprint;
+	metadata->block_md[(index << SLOT_BITS) + slot] = fprint;
 	blocks[index].tags[slot] = tag;
 	blocks[index].vals[slot] = value;
 	
@@ -94,7 +94,7 @@ bool iceberg_remove(iceberg_table * restrict table, KeyType key, ValueType value
 		uint8_t slot = word_select(md_mask, i);
 
 		if(blocks[index].tags[slot] == tag && blocks[index].vals[slot] == value) {
-			metadata->block_md[index * BUCKETS_PER_BLOCK + slot] = 0;
+			metadata->block_md[(index << SLOT_BITS) + slot] = 0;
 			return true;
 		}
 	}
