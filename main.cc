@@ -47,7 +47,7 @@ int main (int argc, char** argv) {
 		not_in_table.push_back({other_vals[i], other_vals[i + 1]});
 	}
 	
-	printf("INSERTIONS\n");
+	printf("\nINSERTIONS\n");
 
 	high_resolution_clock::time_point t1 = high_resolution_clock::now();
 	
@@ -60,7 +60,7 @@ int main (int argc, char** argv) {
 	printf("Inserts: %f /sec\n", N / elapsed(t1, t2));
 	printf("Percent of non-level 1 inserts: %f\n", ((double)ct) / N);
 
-	printf("QUERIES\n");
+	printf("\nQUERIES\n");
 
 	std::mt19937 g(__builtin_ia32_rdtsc());
 	std::shuffle(in_table.begin(), in_table.end(), g);
@@ -88,7 +88,7 @@ int main (int argc, char** argv) {
 	printf("Positive queries: %f /sec\n", N / elapsed(t1, t2));
 	printf("Error rate: %f\n", ((double)ct) / N);
 
-	printf("REMOVALS\n");
+	printf("\nREMOVALS\n");
 
 	std::vector<std::pair<uint64_t, uint64_t>> removed, non_removed;
 
