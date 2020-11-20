@@ -27,7 +27,7 @@ int main (int argc, char** argv) {
 	}
 
 	uint64_t tbits = atoi(argv[1]);
-	uint64_t N = (1ULL << tbits) * 0.95;
+	uint64_t N = (1ULL << tbits) * 1.07;
 	uint64_t nslots = 1ULL << tbits;
 
 	if ((table = iceberg_init(tbits)) == NULL) {
@@ -51,15 +51,21 @@ int main (int argc, char** argv) {
 
 	high_resolution_clock::time_point t1 = high_resolution_clock::now();
 	
-	uint64_t ct = 0;
+	uint64_t ct = 0, aaa;
 
 	for(uint64_t i = 0; i < N; i++)
-		if(!iceberg_insert(table, in_table[i].first, in_table[i].second)) ct++;	
+		if(!iceberg_insert(table, in_table[i].first, in_table[i].second)) {
+			ct++;
+			printf("%f\n", iceberg_load_factor(table));
+			exit(0);
+		}
 	
 	high_resolution_clock::time_point t2 = high_resolution_clock::now();
 	printf("Inserts: %f /sec\n", N / elapsed(t1, t2));
 	printf("Percent of non-level 1 inserts: %f\n", ((double)ct) / N);
-
+	printf("Load factor: %f\n", iceberg_load_factor(table));
+	printf("Number level3 inserts: %ld\n", table->metadata->lv3_pslsum);
+	printf("%d\n", table->metadata->lv3_balls);
 	printf("\nQUERIES\n");
 
 	std::mt19937 g(__builtin_ia32_rdtsc());
@@ -75,8 +81,8 @@ int main (int argc, char** argv) {
 	
 	t2 = high_resolution_clock::now();
 	printf("Negative queries: %f /sec\n", N / elapsed(t1, t2));
-	printf("Error rate: %f\n", ((double)ct) / N);
-	
+	printf("Error rate: %f\n", ((double)ct) / N);	
+
 	t1 = high_resolution_clock::now();
 		
 	ct = 0;
@@ -87,6 +93,7 @@ int main (int argc, char** argv) {
 	t2 = high_resolution_clock::now();
 	printf("Positive queries: %f /sec\n", N / elapsed(t1, t2));
 	printf("Error rate: %f\n", ((double)ct) / N);
+	printf("Load factor: %f\n", iceberg_load_factor(table));
 
 	printf("\nREMOVALS\n");
 
@@ -108,6 +115,7 @@ int main (int argc, char** argv) {
 	t2 = high_resolution_clock::now();
 	printf("Removals: %f /sec\n", (N / 2) / elapsed(t1, t2));
 	printf("Percent of failed removals: %f\n", ((double)ct) / (N / 2));
+	printf("Load factor: %f\n", iceberg_load_factor(table));
 
 	shuffle(removed.begin(), removed.end(), g);
 
@@ -132,4 +140,5 @@ int main (int argc, char** argv) {
 	t2 = high_resolution_clock::now();
 	printf("Positive queries after removals: %f /sec\n", N / elapsed(t1, t2));
 	printf("Error rate: %f\n", ct * 2 / (double)N);
+	printf("Load factor: %f\n", iceberg_load_factor(table));
 }
