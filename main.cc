@@ -27,8 +27,7 @@ int main (int argc, char** argv) {
 	}
 
 	uint64_t tbits = atoi(argv[1]);
-	uint64_t N = (1ULL << tbits) * 1.07;
-	uint64_t nslots = 1ULL << tbits;
+	uint64_t N = (1ULL << tbits) * 1.1;
 
 	if ((table = iceberg_init(tbits)) == NULL) {
 		fprintf(stderr, "Can't allocate iceberg table.\n");
@@ -47,25 +46,34 @@ int main (int argc, char** argv) {
 		not_in_table.push_back({other_vals[i], other_vals[i + 1]});
 	}
 	
-	printf("\nINSERTIONS\n");
+	printf("INSERTIONS\n");
 
 	high_resolution_clock::time_point t1 = high_resolution_clock::now();
 	
-	uint64_t ct = 0, aaa;
+	uint64_t ct = 0;
 
 	for(uint64_t i = 0; i < N; i++)
-		if(!iceberg_insert(table, in_table[i].first, in_table[i].second)) {
+		if(!iceberg_insert(table, in_table[i].first, in_table[i].second))
 			ct++;
-			printf("%f\n", iceberg_load_factor(table));
-			exit(0);
-		}
 	
 	high_resolution_clock::time_point t2 = high_resolution_clock::now();
 	printf("Inserts: %f /sec\n", N / elapsed(t1, t2));
-	printf("Percent of non-level 1 inserts: %f\n", ((double)ct) / N);
+	printf("Percent of failed inserts: %f\n", ((double)ct) / N);
 	printf("Load factor: %f\n", iceberg_load_factor(table));
-	printf("Number level3 inserts: %ld\n", table->metadata->lv3_pslsum);
-	printf("%d\n", table->metadata->lv3_balls);
+	printf("Number level 1 inserts: %ld\n", table->metadata->total_balls - table->metadata->lv2_balls - table->metadata->lv3_balls);
+	printf("Number level 2 inserts: %ld\n", table->metadata->lv2_balls);
+	printf("Number level 3 inserts: %ld\n", table->metadata->lv3_balls);
+	printf("Total inserts: %ld\n", table->metadata->total_balls);
+
+	uint64_t max_size = 0, sum_sizes = 0;
+	for(uint64_t i = 0; i < table->metadata->nblocks; ++i) {
+		max_size = std::max(max_size, table->metadata->lv3_sizes[i]);
+		sum_sizes += table->metadata->lv3_sizes[i];
+	}
+
+	printf("Average list size: %f\n", sum_sizes / (double)table->metadata->nblocks);
+	printf("Max list size: %ld\n", max_size);
+
 	printf("\nQUERIES\n");
 
 	std::mt19937 g(__builtin_ia32_rdtsc());
