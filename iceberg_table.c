@@ -109,7 +109,7 @@ bool iceberg_lv3_insert(iceberg_table * restrict table, KeyType key, ValueType v
 	uint64_t index = (hash >> FPRINT_BITS) & ((1 << metadata->block_bits) - 1);;
 
 	iceberg_lv3_node * new_node = (iceberg_lv3_node *)malloc(sizeof(iceberg_lv3_node));
-	new_node->hash = hash;
+	new_node->key = key;
 	new_node->val = value;
 
 	if(metadata->lv3_sizes[index] == 0) {	
@@ -135,7 +135,7 @@ bool iceberg_lv2_insert(iceberg_table * restrict table, KeyType key, ValueType v
 	if(metadata->lv2_balls == C_LV2 * metadata->nblocks) return iceberg_lv3_insert(table, key, value);
 
 	uint8_t best_fprint, most_spots = 0, slot;
-	uint64_t best_index = 0, best_tag;
+	uint64_t best_index = 0;
 
 	for(uint8_t i = 0; i < D_CHOICES; ++i) {
 
@@ -150,7 +150,6 @@ bool iceberg_lv2_insert(iceberg_table * restrict table, KeyType key, ValueType v
 		if(md_mask && (spots > most_spots || (spots == most_spots && index < best_index))) {
 			best_fprint = fprint;
 			best_index = index;
-			best_tag = tag;
 			most_spots = spots;
 			slot = word_select(md_mask, 0);
 		}
@@ -159,7 +158,7 @@ bool iceberg_lv2_insert(iceberg_table * restrict table, KeyType key, ValueType v
 	if(most_spots) {
 
 		metadata->lv2_md[best_index].block_md[slot] = best_fprint;
-		blocks[best_index].tags[slot] = best_tag;
+		blocks[best_index].keys[slot] = key;
 		blocks[best_index].vals[slot] = value;
 		metadata->lv2_balls++;
 		metadata->total_balls++;
@@ -187,7 +186,7 @@ bool iceberg_insert(iceberg_table * restrict table, KeyType key, ValueType value
 	uint8_t slot = word_select(md_mask, 0);
 
 	metadata->lv1_md[index].block_md[slot] = fprint;
-	blocks[index].tags[slot] = tag;
+	blocks[index].keys[slot] = key;
 	blocks[index].vals[slot] = value;
 	metadata->total_balls++;
 
@@ -202,7 +201,7 @@ bool iceberg_lv3_remove(iceberg_table * restrict table, KeyType key, ValueType v
 	uint64_t hash = lv1_hash(key);
 	uint64_t index = (hash >> FPRINT_BITS) & ((1 << metadata->block_bits) - 1);;
 
-	if(lists[index].head->hash == hash) {
+	if(lists[index].head->key == key) {
 
 		iceberg_lv3_node * old_head = lists[index].head;
 		lists[index].head = lists[index].head->next_node;
@@ -218,7 +217,7 @@ bool iceberg_lv3_remove(iceberg_table * restrict table, KeyType key, ValueType v
 
 	for(uint64_t i = 0; i < metadata->lv3_sizes[index] - 1; ++i) {
 
-		if(current_node->next_node->hash == hash) {
+		if(current_node->next_node->key == key) {
 
 			iceberg_lv3_node * old_node = current_node->next_node;
 			current_node->next_node = current_node->next_node->next_node;
@@ -257,7 +256,7 @@ bool iceberg_lv2_remove(iceberg_table * restrict table, KeyType key, ValueType v
 
 			uint8_t slot = word_select(md_mask, i);
 
-			if(blocks[index].tags[slot] == tag && blocks[index].vals[slot] == value) {
+			if(blocks[index].keys[slot] == key && blocks[index].vals[slot] == value) {
 				metadata->lv2_md[index].block_md[slot] = 0;
 				metadata->lv2_balls--;
 				metadata->total_balls--;
@@ -287,7 +286,7 @@ bool iceberg_remove(iceberg_table * restrict table, KeyType key, ValueType value
 
 		uint8_t slot = word_select(md_mask, i);
 
-		if(blocks[index].tags[slot] == tag && blocks[index].vals[slot] == value) {
+		if(blocks[index].keys[slot] == key && blocks[index].vals[slot] == value) {
 			metadata->lv1_md[index].block_md[slot] = 0;
 			metadata->total_balls--;
 
@@ -310,7 +309,7 @@ bool iceberg_lv3_get_value(iceberg_table * restrict table, KeyType key, ValueTyp
 
 	for(uint8_t i = 0; i < metadata->lv3_sizes[index]; ++i) {
 
-		if(current_node->hash == hash) {
+		if(current_node->key == key) {
 			value = current_node->val;
 			return true;
 		}
@@ -341,7 +340,7 @@ bool iceberg_lv2_get_value(iceberg_table * restrict table, KeyType key, ValueTyp
 
 			uint8_t slot = word_select(md_mask, i);
 
-			if(blocks[index].tags[slot] == tag) {
+			if(blocks[index].keys[slot] == key) {
 				value = blocks[index].vals[slot];
 				return true;
 			}
@@ -369,7 +368,7 @@ bool iceberg_get_value(iceberg_table * restrict table, KeyType key, ValueType& v
 
 		uint8_t slot = word_select(md_mask, i);
 
-		if(blocks[index].tags[slot] == tag) {
+		if(blocks[index].keys[slot] == key) {
 			value = blocks[index].vals[slot];
 			return true;
 		}
