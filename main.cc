@@ -27,12 +27,19 @@ int main (int argc, char** argv) {
 	}
 
 	uint64_t tbits = atoi(argv[1]);
-	uint64_t N = (1ULL << tbits) * 1.1;
+	uint64_t N = (1ULL << tbits) * 1.09;
+
+	
+	high_resolution_clock::time_point t1 = high_resolution_clock::now();
 
 	if ((table = iceberg_init(tbits)) == NULL) {
 		fprintf(stderr, "Can't allocate iceberg table.\n");
 		exit(EXIT_FAILURE);
 	}
+
+
+	high_resolution_clock::time_point t2 = high_resolution_clock::now();
+	printf("Creation time: %f\n", elapsed(t1, t2));
 
 	srand(time(NULL));
 
@@ -45,21 +52,36 @@ int main (int argc, char** argv) {
 		in_table.push_back({vals[i], vals[i + 1]});
 		not_in_table.push_back({other_vals[i], other_vals[i + 1]});
 	}
-	
+
 	printf("INSERTIONS\n");
 
-	high_resolution_clock::time_point t1 = high_resolution_clock::now();
-	
+	uint64_t splits = 19;
+
+	N -= N % splits;
+	while(in_table.size() % splits) {
+		in_table.pop_back();
+		not_in_table.pop_back();
+	}
+
+	uint64_t size = N / splits;
 	uint64_t ct = 0;
 
-	for(uint64_t i = 0; i < N; i++)
-		if(!iceberg_insert(table, in_table[i].first, in_table[i].second))
-			ct++;
+	for(uint64_t i = 0; i < splits; ++i) {
+		
+		t1 = high_resolution_clock::now();
+
+		for(uint64_t j = 0; j < size; ++j)
+			if(!iceberg_insert(table, in_table[i * size + j].first, in_table[i * size + j].second))
+				ct++;
+
+		t2 = high_resolution_clock::now();
+
+		printf("%f\n", size / elapsed(t1, t2));
+		//printf("Inserts at load factor %f: %f\n", iceberg_load_factor(table), size / elapsed(t1, t2));
+		printf("%ld %ld\n", table->metadata->lv3_balls, table->metadata->lv2_balls);
+	}
 	
-	high_resolution_clock::time_point t2 = high_resolution_clock::now();
-	printf("Inserts: %f /sec\n", N / elapsed(t1, t2));
 	printf("Percent of failed inserts: %f\n", ((double)ct) / N);
-	printf("Load factor: %f\n", iceberg_load_factor(table));
 	printf("Number level 1 inserts: %ld\n", table->metadata->total_balls - table->metadata->lv2_balls - table->metadata->lv3_balls);
 	printf("Number level 2 inserts: %ld\n", table->metadata->lv2_balls);
 	printf("Number level 3 inserts: %ld\n", table->metadata->lv3_balls);
@@ -118,10 +140,11 @@ int main (int argc, char** argv) {
 	ct = 0;
 
 	for(uint64_t i = 0; i < N / 2; i++)
-		if(!iceberg_remove(table, removed[i].first, removed[i].second)) ct++;
+		if(!iceberg_remove(table, removed[i].first)) { ct++; printf("%ld\n", i); if(!iceberg_get_value(table, removed[i].first, val)) ct += 1000; }
 	
 	t2 = high_resolution_clock::now();
 	printf("Removals: %f /sec\n", (N / 2) / elapsed(t1, t2));
+	printf("Number of failed removals: %ld\n", ct);
 	printf("Percent of failed removals: %f\n", ((double)ct) / (N / 2));
 	printf("Load factor: %f\n", iceberg_load_factor(table));
 

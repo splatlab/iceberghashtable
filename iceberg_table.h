@@ -44,7 +44,6 @@ extern "C" {
 
 	typedef struct iceberg_lv3_list {
 		iceberg_lv3_node * head;
-		iceberg_lv3_node * tail;
 	} iceberg_lv3_list;
 
 	typedef struct iceberg_metadata {
@@ -73,7 +72,7 @@ extern "C" {
 
 	bool iceberg_insert(iceberg_table * restrict table, KeyType key, ValueType value);
 
-	bool iceberg_remove(iceberg_table * restrict table, KeyType key, ValueType value);
+	bool iceberg_remove(iceberg_table * restrict table, KeyType key);
 
 	bool iceberg_get_value(iceberg_table * restrict table, KeyType key, ValueType& value);
 

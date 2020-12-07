@@ -10,7 +10,7 @@
 #include "iceberg_table.h"
 
 
-uint64_t seed[6] = { 12351327692179052ll, 23246347347385899ll, 35236262354132235ll, 13604702930934770ll, 57439820692984798ll, 23602879368919876ll };
+uint64_t seed[5] = { 12351327692179052ll, 23246347347385899ll, 35236262354132235ll, 13604702930934770ll, 57439820692984798ll };
 
 uint64_t nonzero_fprint(uint64_t hash) {
 	return hash & ((1 << FPRINT_BITS) - 1) ? hash : hash | 1;
@@ -22,10 +22,6 @@ uint64_t lv1_hash(KeyType key) {
 
 uint64_t lv2_hash(KeyType key, uint8_t i) {
 	return nonzero_fprint(MurmurHash64A(&key, 8, seed[i + 1]));
-}
-
-uint64_t lv3_hash(KeyType key) {
-	return nonzero_fprint(MurmurHash64A(&key, 8, seed[5]));
 }
 
 static inline uint64_t word_select(uint64_t val, int rank) {
@@ -106,19 +102,13 @@ bool iceberg_lv3_insert(iceberg_table * restrict table, KeyType key, ValueType v
 	iceberg_lv3_list * restrict lists = table->level3;
 	
 	uint64_t hash = lv1_hash(key);
-	uint64_t index = (hash >> FPRINT_BITS) & ((1 << metadata->block_bits) - 1);;
+	uint64_t index = (hash >> FPRINT_BITS) & ((1 << metadata->block_bits) - 1);
 
 	iceberg_lv3_node * new_node = (iceberg_lv3_node *)malloc(sizeof(iceberg_lv3_node));
 	new_node->key = key;
 	new_node->val = value;
-
-	if(metadata->lv3_sizes[index] == 0) {	
-		lists[index].head = new_node;
-		lists[index].tail = new_node;
-	} else {
-		lists[index].tail->next_node = new_node;
-		lists[index].tail = new_node;
-	}
+	new_node->next_node = lists[index].head;
+	lists[index].head = new_node;
 
 	metadata->lv3_sizes[index]++;
 	metadata->lv3_balls++;
@@ -155,7 +145,7 @@ bool iceberg_lv2_insert(iceberg_table * restrict table, KeyType key, ValueType v
 		}
 	}
 
-	if(most_spots) {
+	if(most_spots > 0) {
 
 		metadata->lv2_md[best_index].block_md[slot] = best_fprint;
 		blocks[best_index].keys[slot] = key;
@@ -193,13 +183,15 @@ bool iceberg_insert(iceberg_table * restrict table, KeyType key, ValueType value
 	return true;
 }
 
-bool iceberg_lv3_remove(iceberg_table * restrict table, KeyType key, ValueType value) {
+bool iceberg_lv3_remove(iceberg_table * restrict table, KeyType key) {
 
 	iceberg_metadata * restrict metadata = table->metadata;
 	iceberg_lv3_list * restrict lists = table->level3;
 
 	uint64_t hash = lv1_hash(key);
-	uint64_t index = (hash >> FPRINT_BITS) & ((1 << metadata->block_bits) - 1);;
+	uint64_t index = (hash >> FPRINT_BITS) & ((1 << metadata->block_bits) - 1);
+
+	if(metadata->lv3_sizes[index] == 0) return false;
 
 	if(lists[index].head->key == key) {
 
@@ -223,8 +215,6 @@ bool iceberg_lv3_remove(iceberg_table * restrict table, KeyType key, ValueType v
 			current_node->next_node = current_node->next_node->next_node;
 			free(old_node);
 
-			if(i == metadata->lv3_sizes[index] - 2) lists[index].tail = current_node;
-
 			metadata->lv3_sizes[index]--;
 			metadata->lv3_balls--;
 			metadata->total_balls--;
@@ -237,7 +227,7 @@ bool iceberg_lv3_remove(iceberg_table * restrict table, KeyType key, ValueType v
 	return false;
 }
 
-bool iceberg_lv2_remove(iceberg_table * restrict table, KeyType key, ValueType value) {
+bool iceberg_lv2_remove(iceberg_table * restrict table, KeyType key) {
 
 	iceberg_metadata * restrict metadata = table->metadata;
 	iceberg_lv2_block * restrict blocks = table->level2;
@@ -256,7 +246,7 @@ bool iceberg_lv2_remove(iceberg_table * restrict table, KeyType key, ValueType v
 
 			uint8_t slot = word_select(md_mask, i);
 
-			if(blocks[index].keys[slot] == key && blocks[index].vals[slot] == value) {
+			if(blocks[index].keys[slot] == key) {
 				metadata->lv2_md[index].block_md[slot] = 0;
 				metadata->lv2_balls--;
 				metadata->total_balls--;
@@ -266,10 +256,10 @@ bool iceberg_lv2_remove(iceberg_table * restrict table, KeyType key, ValueType v
 		}
 	}
 
-	return iceberg_lv3_remove(table, key, value);
+	return iceberg_lv3_remove(table, key);
 }
 
-bool iceberg_remove(iceberg_table * restrict table, KeyType key, ValueType value) {
+bool iceberg_remove(iceberg_table * restrict table, KeyType key) {
 
 	iceberg_metadata * restrict metadata = table->metadata;
 	iceberg_lv1_block * restrict blocks = table->level1;
@@ -286,7 +276,7 @@ bool iceberg_remove(iceberg_table * restrict table, KeyType key, ValueType value
 
 		uint8_t slot = word_select(md_mask, i);
 
-		if(blocks[index].keys[slot] == key && blocks[index].vals[slot] == value) {
+		if(blocks[index].keys[slot] == key) {
 			metadata->lv1_md[index].block_md[slot] = 0;
 			metadata->total_balls--;
 
@@ -294,7 +284,7 @@ bool iceberg_remove(iceberg_table * restrict table, KeyType key, ValueType value
 		}
 	}
 
-	return iceberg_lv2_remove(table, key, value);
+	return iceberg_lv2_remove(table, key);
 }
 
 bool iceberg_lv3_get_value(iceberg_table * restrict table, KeyType key, ValueType& value) {
@@ -303,7 +293,7 @@ bool iceberg_lv3_get_value(iceberg_table * restrict table, KeyType key, ValueTyp
 	iceberg_lv3_list * restrict lists = table->level3;
 
 	uint64_t hash = lv1_hash(key);
-	uint64_t index = (hash >> FPRINT_BITS) & ((1 << metadata->block_bits) - 1);;
+	uint64_t index = (hash >> FPRINT_BITS) & ((1 << metadata->block_bits) - 1);
 
 	iceberg_lv3_node * current_node = lists[index].head;
 
