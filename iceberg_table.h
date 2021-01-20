@@ -3,6 +3,7 @@
 
 #include <inttypes.h>
 #include <stdbool.h>
+#include "partitioned_counter.h"
 
 #ifdef __cplusplus
 #define restrict __restrict__
@@ -14,13 +15,18 @@ extern "C" {
 	#define D_CHOICES 2
 	#define MAX_LG_LG_N 4
 	#define C_LV2 6
+	#define INVALID_KEY UINT64_MAX
 
 	typedef uint64_t KeyType;
 	typedef uint64_t ValueType;
 
+	typedef struct __attribute__ ((__packed__)) kv_pair {
+		KeyType key;
+		ValueType val;
+	} kv_pair;
+
 	typedef struct __attribute__ ((__packed__)) iceberg_lv1_block {
-		uint64_t keys[1 << SLOT_BITS];
-		ValueType vals[1 << SLOT_BITS];
+		kv_pair slots[1 << SLOT_BITS];
 	} iceberg_lv1_block;
 
 	typedef struct __attribute__ ((__packed__)) iceberg_lv1_block_md {
@@ -28,8 +34,7 @@ extern "C" {
 	} iceberg_lv1_block_md;
 
 	typedef struct __attribute__ ((__packed__)) iceberg_lv2_block {
-		uint64_t keys[C_LV2 + MAX_LG_LG_N / D_CHOICES];
-		ValueType vals[C_LV2 + MAX_LG_LG_N / D_CHOICES];
+		kv_pair slots[C_LV2 + MAX_LG_LG_N / D_CHOICES];
 	} iceberg_lv2_block;
 
 	typedef struct __attribute__ ((__packed__)) iceberg_lv2_block_md {
@@ -51,12 +56,13 @@ extern "C" {
 		uint64_t nblocks;
 		uint64_t nslots;
 		uint64_t block_bits;
-		uint64_t total_balls;
-		uint64_t lv2_balls;
-		uint64_t lv3_balls;
+		pc_t * total_balls;
+		pc_t * lv2_balls;
+		pc_t * lv3_balls;
 		iceberg_lv1_block_md * lv1_md;
 		iceberg_lv2_block_md * lv2_md;
 		uint64_t * lv3_sizes;
+		uint8_t * lv3_locks;
 	} iceberg_metadata;
 
 	typedef struct iceberg_table {
@@ -66,6 +72,10 @@ extern "C" {
 		iceberg_lv3_list * level3;
 	} iceberg_table;
 
+	uint64_t tot_balls(iceberg_table * restrict table);
+	uint64_t lv2_balls(iceberg_table * restrict table);
+	uint64_t lv3_balls(iceberg_table * restrict table);
+	
 	iceberg_table * iceberg_init(uint64_t nslots);
 
 	double iceberg_load_factor(iceberg_table * restrict table);
