@@ -20,10 +20,10 @@ double elapsed(high_resolution_clock::time_point t1, high_resolution_clock::time
 	return (duration_cast<duration<double>>(t2 - t1)).count();
 }
 
-void do_inserts(std::vector<std::pair<uint64_t, uint64_t>>& v, uint64_t start, uint64_t n) {
+void do_inserts(uint8_t id, std::vector<std::pair<uint64_t, uint64_t>>& v, uint64_t start, uint64_t n) {
 	
 	for(uint64_t i = start; i < start + n; ++i)
-		if(!iceberg_insert(table, v[i].first, v[i].second)) {
+		if(!iceberg_insert(table, v[i].first, v[i].second, id)) {
 			printf("Failed insert\n");
 			exit(0);
 		}
@@ -41,10 +41,10 @@ void do_queries(std::vector<std::pair<uint64_t, uint64_t>>& v, uint64_t start, u
 		}
 }
 
-void do_removals(std::vector<std::pair<uint64_t, uint64_t>>& v, uint64_t start, uint64_t n) {
+void do_removals(uint8_t id, std::vector<std::pair<uint64_t, uint64_t>>& v, uint64_t start, uint64_t n) {
 	
 	for(uint64_t i = start; i < start + n; ++i)
-		if(!iceberg_remove(table, v[i].first)) {
+		if(!iceberg_remove(table, v[i].first, id)) {
 			printf("Failed removal\n");
 			exit(0);
 		}
@@ -115,7 +115,7 @@ int main (int argc, char** argv) {
 		t1 = high_resolution_clock::now();
 		
 		for(uint64_t j = 0; j < threads; j++)
-			thread_list.emplace_back(do_inserts, std::ref(in_table), (i * threads + j) * size, size);
+			thread_list.emplace_back(do_inserts, j, std::ref(in_table), (i * threads + j) * size, size);
 		for(uint64_t j = 0; j < threads; j++)
 			thread_list[j].join();
 
@@ -126,7 +126,7 @@ int main (int argc, char** argv) {
 	}
 	
 	printf("Percent of failed inserts: %f\n", ((double)ct) / N);
-	printf("Number level 1 inserts: %ld\n", tot_balls(table) - lv2_balls(table) - lv3_balls(table));
+	printf("Number level 1 inserts: %ld\n", lv1_balls(table));
 	printf("Number level 2 inserts: %ld\n", lv2_balls(table));
 	printf("Number level 3 inserts: %ld\n", lv3_balls(table));
 	printf("Total inserts: %ld\n", tot_balls(table));
@@ -197,7 +197,7 @@ int main (int argc, char** argv) {
 	ct = 0;
 
 	for(uint64_t i = 0; i < threads; ++i)
-		thread_list.emplace_back(do_removals, std::ref(removed), i * N / 2 / threads, N / 2 / threads);
+		thread_list.emplace_back(do_removals, i, std::ref(removed), i * N / 2 / threads, N / 2 / threads);
 	for(uint64_t i = 0; i < threads; ++i)
 		thread_list[i].join();
 	

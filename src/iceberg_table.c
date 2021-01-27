@@ -29,19 +29,23 @@ static inline uint8_t word_select(uint64_t val, int rank) {
 	return _tzcnt_u64(val);
 }
 
-uint64_t tot_balls(iceberg_table * restrict table) {
-	pc_sync(table->metadata->total_balls);
-	return *(table->metadata->total_balls->global_counter);
+uint64_t lv1_balls(iceberg_table * restrict table) {
+	//pc_sync(table->metadata->lv1_balls);
+	return *(table->metadata->lv1_balls->global_counter);
 }
 
 uint64_t lv2_balls(iceberg_table * restrict table) {
-	pc_sync(table->metadata->lv2_balls);
+	//pc_sync(table->metadata->lv2_balls);
 	return *(table->metadata->lv2_balls->global_counter);
 }
 
 uint64_t lv3_balls(iceberg_table * restrict table) {
-	pc_sync(table->metadata->lv3_balls);
+	//pc_sync(table->metadata->lv3_balls);
 	return *(table->metadata->lv3_balls->global_counter);
+}
+
+uint64_t tot_balls(iceberg_table * restrict table) {
+	return lv1_balls(table) + lv2_balls(table) + lv3_balls(table);
 }
 
 uint64_t total_capacity(iceberg_table * restrict table) {
@@ -87,20 +91,20 @@ iceberg_table * iceberg_init(uint64_t log_slots) {
 	table->metadata->nblocks = total_blocks;
 	table->metadata->block_bits = log_slots - SLOT_BITS;
 
-	table->metadata->total_balls = (pc_t *)malloc(sizeof(pc_t));
-	int64_t * tot_ctr = (int64_t *)malloc(sizeof(int64_t));
-	* tot_ctr = 0;
-	pc_init(table->metadata->total_balls, tot_ctr, 8, 1000000);
+	table->metadata->lv1_balls = (pc_t *)malloc(sizeof(pc_t));
+	int64_t * lv1_ctr = (int64_t *)malloc(sizeof(int64_t));
+	* lv1_ctr = 0;
+	pc_init(table->metadata->lv1_balls, lv1_ctr, 8, 1000);
 	
 	table->metadata->lv2_balls = (pc_t *)malloc(sizeof(pc_t));
 	int64_t * lv2_ctr = (int64_t *)malloc(sizeof(int64_t));
 	* lv2_ctr = 0;
-	pc_init(table->metadata->lv2_balls, lv2_ctr, 8, 1000000);
+	pc_init(table->metadata->lv2_balls, lv2_ctr, 8, 1000);
 
 	table->metadata->lv3_balls = (pc_t *)malloc(sizeof(pc_t));
 	int64_t * lv3_ctr = (int64_t *)malloc(sizeof(int64_t));
 	* lv3_ctr = 0;
-	pc_init(table->metadata->lv3_balls, lv3_ctr, 8, 1000000);
+	pc_init(table->metadata->lv3_balls, lv3_ctr, 8, 1000);
 
 	table->metadata->lv1_md = (iceberg_lv1_block_md *)malloc(sizeof(iceberg_lv1_block_md) * total_blocks);
 	table->metadata->lv2_md = (iceberg_lv2_block_md *)malloc(sizeof(iceberg_lv2_block_md) * total_blocks);
@@ -125,7 +129,7 @@ iceberg_table * iceberg_init(uint64_t log_slots) {
 	return table;
 }
 
-bool iceberg_lv3_insert(iceberg_table * restrict table, KeyType key, ValueType value, uint64_t lv3_index) {
+bool iceberg_lv3_insert(iceberg_table * restrict table, KeyType key, ValueType value, uint64_t lv3_index, uint8_t thread_id) {
 
 	iceberg_metadata * restrict metadata = table->metadata;
 	iceberg_lv3_list * restrict lists = table->level3;
@@ -139,19 +143,18 @@ bool iceberg_lv3_insert(iceberg_table * restrict table, KeyType key, ValueType v
 	lists[lv3_index].head = new_node;
 
 	metadata->lv3_sizes[lv3_index]++;
-	pc_add(metadata->lv3_balls, 1);
-	pc_add(metadata->total_balls, 1);
+	pc_add(metadata->lv3_balls, 1, thread_id);
 	metadata->lv3_locks[lv3_index] = 0;
 
 	return true;
 }
 
-bool iceberg_lv2_insert(iceberg_table * restrict table, KeyType key, ValueType value, uint64_t lv3_index) {
+bool iceberg_lv2_insert(iceberg_table * restrict table, KeyType key, ValueType value, uint64_t lv3_index, uint8_t thread_id) {
 
 	iceberg_metadata * restrict metadata = table->metadata;
 	iceberg_lv2_block * restrict blocks = table->level2;
 
-	if(lv2_balls(table) == C_LV2 * metadata->nblocks) return iceberg_lv3_insert(table, key, value, lv3_index);
+	if(*(table->metadata->lv2_balls->global_counter) == C_LV2 * metadata->nblocks) return iceberg_lv3_insert(table, key, value, lv3_index, thread_id);
 
 	uint8_t fprint1, fprint2;
 	uint64_t index1, index2;
@@ -178,8 +181,7 @@ bool iceberg_lv2_insert(iceberg_table * restrict table, KeyType key, ValueType v
 
 		if(__sync_bool_compare_and_swap(metadata->lv2_md[index1].block_md + slot, 0, 1)) {
 
-			pc_add(metadata->total_balls, 1);
-			pc_add(metadata->lv2_balls, 1);
+			pc_add(metadata->lv2_balls, 1, thread_id);
 			blocks[index1].slots[slot].key = key;
 			blocks[index1].slots[slot].val = value;
 
@@ -188,10 +190,10 @@ bool iceberg_lv2_insert(iceberg_table * restrict table, KeyType key, ValueType v
 		}
 	}
 
-	return iceberg_lv3_insert(table, key, value, lv3_index);
+	return iceberg_lv3_insert(table, key, value, lv3_index, thread_id);
 }
 
-bool iceberg_insert(iceberg_table * restrict table, KeyType key, ValueType value) {
+bool iceberg_insert(iceberg_table * restrict table, KeyType key, ValueType value, uint8_t thread_id) {
 
 	iceberg_metadata * restrict metadata = table->metadata;
 	iceberg_lv1_block * restrict blocks = table->level1;	
@@ -211,7 +213,7 @@ bool iceberg_insert(iceberg_table * restrict table, KeyType key, ValueType value
 
 		if(__sync_bool_compare_and_swap(metadata->lv1_md[index].block_md + slot, 0, 1)) {
 			
-			pc_add(metadata->total_balls, 1);
+			pc_add(metadata->lv1_balls, 1, thread_id);
 			blocks[index].slots[slot].key = key;
 			blocks[index].slots[slot].val = value;
 
@@ -220,10 +222,10 @@ bool iceberg_insert(iceberg_table * restrict table, KeyType key, ValueType value
 		}
 	}
 
-	return iceberg_lv2_insert(table, key, value, index);
+	return iceberg_lv2_insert(table, key, value, index, thread_id);
 }
 
-bool iceberg_lv3_remove(iceberg_table * restrict table, KeyType key, uint64_t lv3_index) {
+bool iceberg_lv3_remove(iceberg_table * restrict table, KeyType key, uint64_t lv3_index, uint8_t thread_id) {
 
 	iceberg_metadata * restrict metadata = table->metadata;
 	iceberg_lv3_list * restrict lists = table->level3;
@@ -239,8 +241,7 @@ bool iceberg_lv3_remove(iceberg_table * restrict table, KeyType key, uint64_t lv
 		free(old_head);
 
 		metadata->lv3_sizes[lv3_index]--;
-		pc_add(metadata->lv3_balls, -1);
-		pc_add(metadata->total_balls, -1);
+		pc_add(metadata->lv3_balls, -1, thread_id);
 		metadata->lv3_locks[lv3_index] = 0;
 
 		return true;
@@ -257,8 +258,7 @@ bool iceberg_lv3_remove(iceberg_table * restrict table, KeyType key, uint64_t lv
 			free(old_node);
 
 			metadata->lv3_sizes[lv3_index]--;
-			pc_add(metadata->lv3_balls, -1);
-			pc_add(metadata->total_balls, -1);
+			pc_add(metadata->lv3_balls, -1, thread_id);
 			metadata->lv3_locks[lv3_index] = 0;
 
 			return true;
@@ -271,7 +271,7 @@ bool iceberg_lv3_remove(iceberg_table * restrict table, KeyType key, uint64_t lv
 	return false;
 }
 
-bool iceberg_lv2_remove(iceberg_table * restrict table, KeyType key, uint64_t lv3_index) {
+bool iceberg_lv2_remove(iceberg_table * restrict table, KeyType key, uint64_t lv3_index, uint8_t thread_id) {
 
 	iceberg_metadata * restrict metadata = table->metadata;
 	iceberg_lv2_block * restrict blocks = table->level2;
@@ -294,8 +294,7 @@ bool iceberg_lv2_remove(iceberg_table * restrict table, KeyType key, uint64_t lv
 				
 				if(blocks[index].slots[slot].key == key) {
 					metadata->lv2_md[index].block_md[slot] = 0;
-					pc_add(metadata->lv2_balls, -1);
-					pc_add(metadata->total_balls, -1);
+					pc_add(metadata->lv2_balls, -1, thread_id);
 
 					return true;
 				} else
@@ -304,10 +303,10 @@ bool iceberg_lv2_remove(iceberg_table * restrict table, KeyType key, uint64_t lv
 		}
 	}
 
-	return iceberg_lv3_remove(table, key, lv3_index);
+	return iceberg_lv3_remove(table, key, lv3_index, thread_id);
 }
 
-bool iceberg_remove(iceberg_table * restrict table, KeyType key) {
+bool iceberg_remove(iceberg_table * restrict table, KeyType key, uint8_t thread_id) {
 
 	iceberg_metadata * restrict metadata = table->metadata;
 	iceberg_lv1_block * restrict blocks = table->level1;
@@ -328,7 +327,7 @@ bool iceberg_remove(iceberg_table * restrict table, KeyType key) {
 			
 			if(blocks[index].slots[slot].key == key) {
 				
-				pc_add(metadata->total_balls, -1);
+				pc_add(metadata->lv1_balls, -1, thread_id);
 				metadata->lv1_md[index].block_md[slot] = 0;
 				return true;
 			} else
@@ -336,7 +335,7 @@ bool iceberg_remove(iceberg_table * restrict table, KeyType key) {
 		}
 	}
 
-	return iceberg_lv2_remove(table, key, index);
+	return iceberg_lv2_remove(table, key, index, thread_id);
 }
 
 bool iceberg_lv3_get_value(iceberg_table * restrict table, KeyType key, ValueType& value, uint64_t lv3_index) {
