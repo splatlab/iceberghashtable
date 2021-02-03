@@ -290,15 +290,12 @@ bool iceberg_lv2_remove(iceberg_table * restrict table, KeyType key, uint64_t lv
 
 			uint8_t slot = word_select(md_mask, i);
 
-			if(__sync_bool_compare_and_swap(metadata->lv2_md[index].block_md + slot, fprint, 1)) {
+			if(blocks[index].slots[slot].key == key) {
 				
-				if(blocks[index].slots[slot].key == key) {
-					metadata->lv2_md[index].block_md[slot] = 0;
+				if(__sync_bool_compare_and_swap(metadata->lv2_md[index].block_md + slot, fprint, 0)) {
 					pc_add(metadata->lv2_balls, -1, thread_id);
-
 					return true;
-				} else
-					metadata->lv2_md[index].block_md[slot] = fprint;
+				}
 			}
 		}
 	}
@@ -322,16 +319,13 @@ bool iceberg_remove(iceberg_table * restrict table, KeyType key, uint8_t thread_
 	for(uint8_t i = 0; i < popct; ++i) {
 
 		uint8_t slot = word_select(md_mask, i);
+
+		if(blocks[index].slots[slot].key == key) {
 		
-		if(__sync_bool_compare_and_swap(metadata->lv1_md[index].block_md + slot, fprint, 1)) {
-			
-			if(blocks[index].slots[slot].key == key) {
-				
+			if(__sync_bool_compare_and_swap(metadata->lv1_md[index].block_md + slot, fprint, 0)) {
 				pc_add(metadata->lv1_balls, -1, thread_id);
-				metadata->lv1_md[index].block_md[slot] = 0;
 				return true;
-			} else
-				metadata->lv1_md[index].block_md[slot] = fprint;
+			}
 		}
 	}
 
