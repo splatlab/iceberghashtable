@@ -40,7 +40,7 @@ uint64_t lv2_balls(iceberg_table * restrict table) {
 }
 
 uint64_t lv3_balls(iceberg_table * restrict table) {
-	//pc_sync(table->metadata->lv3_balls);
+	pc_sync(table->metadata->lv3_balls);
 	return *(table->metadata->lv3_balls->global_counter);
 }
 
@@ -154,7 +154,7 @@ bool iceberg_lv2_insert(iceberg_table * restrict table, KeyType key, ValueType v
 	iceberg_metadata * restrict metadata = table->metadata;
 	iceberg_lv2_block * restrict blocks = table->level2;
 
-	if(*(table->metadata->lv2_balls->global_counter) == C_LV2 * metadata->nblocks) return iceberg_lv3_insert(table, key, value, lv3_index, thread_id);
+	if(*(table->metadata->lv2_balls->global_counter) == (int64_t)(C_LV2 * metadata->nblocks)) return iceberg_lv3_insert(table, key, value, lv3_index, thread_id);
 
 	uint8_t fprint1, fprint2;
 	uint64_t index1, index2;
@@ -290,11 +290,18 @@ bool iceberg_lv2_remove(iceberg_table * restrict table, KeyType key, uint64_t lv
 
 			uint8_t slot = word_select(md_mask, i);
 
-			if(blocks[index].slots[slot].key == key) {
-				
-				if(__sync_bool_compare_and_swap(metadata->lv2_md[index].block_md + slot, fprint, 0)) {
+			while(1) {
+
+				if(__sync_bool_compare_and_swap(&blocks[index].slots[slot].key, key, UINT64_MAX)) {
+
+					metadata->lv2_md[index].block_md[slot] = 0;
 					pc_add(metadata->lv2_balls, -1, thread_id);
+					blocks[index].slots[slot].key = key;
 					return true;
+				
+				} else {
+					KeyType slot_key = blocks[index].slots[slot].key;
+					if(slot_key != UINT64_MAX && slot_key != key) break; 
 				}
 			}
 		}
@@ -320,11 +327,18 @@ bool iceberg_remove(iceberg_table * restrict table, KeyType key, uint8_t thread_
 
 		uint8_t slot = word_select(md_mask, i);
 
-		if(blocks[index].slots[slot].key == key) {
-		
-			if(__sync_bool_compare_and_swap(metadata->lv1_md[index].block_md + slot, fprint, 0)) {
+		while(1) {
+
+			if(__sync_bool_compare_and_swap(&blocks[index].slots[slot].key, key, UINT64_MAX)) {
+
+				metadata->lv1_md[index].block_md[slot] = 0;
 				pc_add(metadata->lv1_balls, -1, thread_id);
+				blocks[index].slots[slot].key = key;
 				return true;
+
+			} else {
+				KeyType slot_key = blocks[index].slots[slot].key;
+				if(slot_key != UINT64_MAX && slot_key != key) break;
 			}
 		}
 	}
@@ -381,11 +395,19 @@ bool iceberg_lv2_get_value(iceberg_table * restrict table, KeyType key, ValueTyp
 		for(uint8_t i = 0; i < popct; ++i) {
 
 			uint8_t slot = word_select(md_mask, i);
-			kv_pair cur_pair = blocks[index].slots[slot];
 
-			if(cur_pair.key == key) {
-				value = cur_pair.val;
-				return true;
+			while(1) {
+
+				if(__sync_bool_compare_and_swap(&blocks[index].slots[slot].key, key, UINT64_MAX)) {
+
+					value = blocks[index].slots[slot].val;
+					blocks[index].slots[slot].key = key;
+					return true;
+
+				} else  {
+					KeyType slot_key = blocks[index].slots[slot].key;
+					if(slot_key != UINT64_MAX && slot_key != key) break;
+				}
 			}
 		}
 	}
@@ -410,11 +432,19 @@ bool iceberg_get_value(iceberg_table * restrict table, KeyType key, ValueType& v
 	for(uint8_t i = 0; i < popct; ++i) {
 
 		uint8_t slot = word_select(md_mask, i);
-		kv_pair cur_pair = blocks[index].slots[slot];
 
-		if(cur_pair.key == key) {
-			value = cur_pair.val;
-			return true;
+		while(1) {
+
+			if(__sync_bool_compare_and_swap(&blocks[index].slots[slot].key, key, UINT64_MAX)) {
+
+				value = blocks[index].slots[slot].val;
+				blocks[index].slots[slot].key = key;
+				return true;
+
+			} else {
+				KeyType slot_key = blocks[index].slots[slot].key;
+				if(slot_key != UINT64_MAX && slot_key != key) break;
+			}
 		}
 	}
 

@@ -43,11 +43,16 @@ void do_queries(std::vector<std::pair<uint64_t, uint64_t>>& v, uint64_t start, u
 
 void do_removals(uint8_t id, std::vector<std::pair<uint64_t, uint64_t>>& v, uint64_t start, uint64_t n) {
 	
+	//uint64_t x;
+
 	for(uint64_t i = start; i < start + n; ++i)
 		if(!iceberg_remove(table, v[i].first, id)) {
 			printf("Failed removal\n");
 			exit(0);
-		}
+		} /*else if(iceberg_get_value(table, v[i].first, x)) {
+			printf("Element still in table after removal\n");
+			exit(0);
+		}*/
 }
 
 int main (int argc, char** argv) {
@@ -66,7 +71,6 @@ int main (int argc, char** argv) {
 		fprintf(stderr, "Can't allocate iceberg table.\n");
 		exit(EXIT_FAILURE);
 	}
-
 
 	high_resolution_clock::time_point t2 = high_resolution_clock::now();
 	printf("Creation time: %f\n", elapsed(t1, t2));
@@ -98,14 +102,13 @@ int main (int argc, char** argv) {
 
 	uint64_t splits = 19;
 
-	N -= N % splits;
-	while(in_table.size() % (2 * splits * threads)) {
+	while(N % (2 * splits * threads)) {
 		in_table.pop_back();
 		not_in_table.pop_back();
+		N--;
 	}
 
 	uint64_t size = N / splits / threads;
-	uint64_t ct = 0;
 
 //	exit(0);
 
@@ -125,7 +128,7 @@ int main (int argc, char** argv) {
 		thread_list.clear();
 	}
 	
-	printf("Percent of failed inserts: %f\n", ((double)ct) / N);
+	printf("Load factor: %f\n", iceberg_load_factor(table));
 	printf("Number level 1 inserts: %ld\n", lv1_balls(table));
 	printf("Number level 2 inserts: %ld\n", lv2_balls(table));
 	printf("Number level 3 inserts: %ld\n", lv3_balls(table));
@@ -151,23 +154,18 @@ int main (int argc, char** argv) {
 
 	t1 = high_resolution_clock::now();
 
-	ct = 0;
-
 	for(uint64_t i = 0; i < threads; ++i)
 		thread_list.emplace_back(do_queries, std::ref(not_in_table), i * N / threads, N / threads, false);
 	for(uint64_t i = 0; i < threads; ++i)
 		thread_list[i].join();
 	
 	t2 = high_resolution_clock::now();
-	printf("Negative queries: %f /sec\n", N / elapsed(t1, t2));
-	printf("Error rate: %f\n", ((double)ct) / N);	
+	printf("Negative queries: %f /sec\n", N / elapsed(t1, t2));	
 	thread_list.clear();
 
 //	exit(0);
 
 	t1 = high_resolution_clock::now();
-		
-	ct = 0;
 
 	for(uint64_t i = 0; i < threads; ++i)
 		thread_list.emplace_back(do_queries, std::ref(in_table), i * N / threads, N / threads, true);
@@ -176,8 +174,6 @@ int main (int argc, char** argv) {
 
 	t2 = high_resolution_clock::now();
 	printf("Positive queries: %f /sec\n", N / elapsed(t1, t2));
-	printf("Error rate: %f\n", ((double)ct) / N);
-	printf("Load factor: %f\n", iceberg_load_factor(table));
 	thread_list.clear();
 
 //	exit(0);
@@ -193,8 +189,8 @@ int main (int argc, char** argv) {
 	shuffle(non_removed.begin(), non_removed.end(), g);
 
 	t1 = high_resolution_clock::now();
-	
-	ct = 0;
+
+	printf("%ld %d\n", (N / 2 / threads) * threads, (int)removed.size());
 
 	for(uint64_t i = 0; i < threads; ++i)
 		thread_list.emplace_back(do_removals, i, std::ref(removed), i * N / 2 / threads, N / 2 / threads);
@@ -203,16 +199,12 @@ int main (int argc, char** argv) {
 	
 	t2 = high_resolution_clock::now();
 	printf("Removals: %f /sec\n", (N / 2) / elapsed(t1, t2));
-	printf("Number of failed removals: %ld\n", ct);
-	printf("Percent of failed removals: %f\n", ((double)ct) / (N / 2));
 	printf("Load factor: %f\n", iceberg_load_factor(table));
 	thread_list.clear();
 
 	shuffle(removed.begin(), removed.end(), g);
 
 	t1 = high_resolution_clock::now();
-
-	ct = 0;
 
 	for(uint64_t i = 0; i < threads; ++i)
 		thread_list.emplace_back(do_queries, std::ref(removed), i * N / 2 / threads, N / 2 / threads, false);
@@ -221,12 +213,9 @@ int main (int argc, char** argv) {
 
 	t2 = high_resolution_clock::now();
 	printf("Negative queries after removals: %f /sec\n", N / elapsed(t1, t2));
-	printf("Error rate: %f\n", ((double)ct) / (N / 2));
 	thread_list.clear();
 
 	t1 = high_resolution_clock::now();
-		
-	ct = 0;
 
 	for(uint64_t i = 0; i < threads; ++i)
 		thread_list.emplace_back(do_queries, std::ref(non_removed), i * N / 2 / threads, N / 2 / threads, true);
@@ -235,7 +224,5 @@ int main (int argc, char** argv) {
 
 	t2 = high_resolution_clock::now();
 	printf("Positive queries after removals: %f /sec\n", N / elapsed(t1, t2));
-	printf("Error rate: %f\n", ct * 2 / (double)N);
-	printf("Load factor: %f\n", iceberg_load_factor(table));
 	thread_list.clear();
 }
