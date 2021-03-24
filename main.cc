@@ -43,16 +43,26 @@ void do_queries(std::vector<std::pair<uint64_t, uint64_t>>& v, uint64_t start, u
 
 void do_removals(uint8_t id, std::vector<std::pair<uint64_t, uint64_t>>& v, uint64_t start, uint64_t n) {
 	
-	//uint64_t x;
+	//uint64_t val;
 
 	for(uint64_t i = start; i < start + n; ++i)
 		if(!iceberg_remove(table, v[i].first, id)) {
 			printf("Failed removal\n");
 			exit(0);
-		} /*else if(iceberg_get_value(table, v[i].first, x)) {
+		} /*else if(iceberg_get_value(table, v[i].first, val)) {
 			printf("Element still in table after removal\n");
 			exit(0);
 		}*/
+}
+
+void do_mixed(uint8_t id, std::vector<std::pair<uint64_t, uint64_t>>& v, uint64_t start, uint64_t n) {
+	
+	uint64_t val;
+	for(uint64_t i = start; i < start + n; ++i)
+		if(iceberg_get_value(table, v[i].first, val)) {
+			
+			iceberg_remove(table, v[i].first, id);
+		} else iceberg_insert(table, v[i].first, v[i].second, id);
 }
 
 int main (int argc, char** argv) {
@@ -112,22 +122,27 @@ int main (int argc, char** argv) {
 
 //	exit(0);
 
+	t1 = high_resolution_clock::now();
+
 	std::vector<std::thread> thread_list;
 	for(uint64_t i = 0; i < splits; ++i) {
 		
-		t1 = high_resolution_clock::now();
+		//t1 = high_resolution_clock::now();
 		
 		for(uint64_t j = 0; j < threads; j++)
 			thread_list.emplace_back(do_inserts, j, std::ref(in_table), (i * threads + j) * size, size);
 		for(uint64_t j = 0; j < threads; j++)
 			thread_list[j].join();
 
-		t2 = high_resolution_clock::now();
+		//t2 = high_resolution_clock::now();
 
-		printf("%f\n", size * threads / elapsed(t1, t2));
+		//printf("%f\n", size * threads / elapsed(t1, t2));
 		thread_list.clear();
 	}
 	
+	t2 = high_resolution_clock::now();
+	printf("%f\n", N / elapsed(t1, t2));
+
 	printf("Load factor: %f\n", iceberg_load_factor(table));
 	printf("Number level 1 inserts: %ld\n", lv1_balls(table));
 	printf("Number level 2 inserts: %ld\n", lv2_balls(table));
@@ -225,4 +240,30 @@ int main (int argc, char** argv) {
 	t2 = high_resolution_clock::now();
 	printf("Positive queries after removals: %f /sec\n", N / elapsed(t1, t2));
 	thread_list.clear();
+/*
+	printf("\nMIXED WORKLOAD, HIGH LOAD FACTOR\n");
+	
+	for(uint64_t i = 0; i < N; ++i) in_table.push_back(not_in_table[i]);
+
+	shuffle(in_table.begin(), in_table.end(), g);
+
+	t1 = high_resolution_clock::now();
+
+	for(uint64_t i = 0; i < threads; ++i)
+		thread_list.emplace_back(do_mixed, i, std::ref(in_table), i * 2 * N / threads, 2 * N / threads);
+	for(uint64_t i = 0; i < threads; ++i)
+		thread_list[i].join();
+
+	t2 = high_resolution_clock::now();
+	printf("Mixed operations at high load factor: %f /sec\n", 4 * N / elapsed(t1, t2));
+	thread_list.clear();
+	
+	max_size = sum_sizes = 0;
+	for(uint64_t i = 0; i < table->metadata->nblocks; ++i) {
+		max_size = std::max(max_size, table->metadata->lv3_sizes[i]);
+		sum_sizes += table->metadata->lv3_sizes[i];
+	}
+
+	printf("Average list size: %f\n", sum_sizes / (double)table->metadata->nblocks);
+	printf("Max list size: %ld\n", max_size);*/
 }

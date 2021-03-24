@@ -15,7 +15,6 @@ extern "C" {
 	#define D_CHOICES 2
 	#define MAX_LG_LG_N 4
 	#define C_LV2 6
-	#define INVALID_KEY UINT64_MAX
 
 	typedef uint64_t KeyType;
 	typedef uint64_t ValueType;
