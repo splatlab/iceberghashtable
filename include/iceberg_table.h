@@ -6,7 +6,7 @@
 #include "partitioned_counter.h"
 
 #ifdef __cplusplus
-#define restrict __restrict__
+#define __restrict__
 extern "C" {
 #endif
 
@@ -43,7 +43,7 @@ extern "C" {
 	typedef struct iceberg_lv3_node {
 		KeyType key;
 		ValueType val;
-		iceberg_lv3_node * next_node;
+		struct iceberg_lv3_node * next_node;
 	} iceberg_lv3_node;
 
 	typedef struct iceberg_lv3_list {
@@ -71,20 +71,20 @@ extern "C" {
 		iceberg_lv3_list * level3;
 	} iceberg_table;
 
-	uint64_t lv1_balls(iceberg_table * restrict table);
-	uint64_t lv2_balls(iceberg_table * restrict table);
-	uint64_t lv3_balls(iceberg_table * restrict table);
-	uint64_t tot_balls(iceberg_table * restrict table);
+	uint64_t lv1_balls(iceberg_table * table);
+	uint64_t lv2_balls(iceberg_table * table);
+	uint64_t lv3_balls(iceberg_table * table);
+	uint64_t tot_balls(iceberg_table * table);
 
 	iceberg_table * iceberg_init(uint64_t nslots);
 
-	double iceberg_load_factor(iceberg_table * restrict table);
+	double iceberg_load_factor(iceberg_table * table);
 
-	bool iceberg_insert(iceberg_table * restrict table, KeyType key, ValueType value, uint8_t thread_id);
+	bool iceberg_insert(iceberg_table * table, KeyType key, ValueType value, uint8_t thread_id);
 
-	bool iceberg_remove(iceberg_table * restrict table, KeyType key, uint8_t thread_id);
+	bool iceberg_remove(iceberg_table * table, KeyType key, uint8_t thread_id);
 
-	bool iceberg_get_value(iceberg_table * restrict table, KeyType key, ValueType& value);
+	bool iceberg_get_value(iceberg_table * table, KeyType key, ValueType **value);
 
 #ifdef __cplusplus
 }
