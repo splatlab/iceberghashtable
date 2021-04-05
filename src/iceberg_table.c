@@ -71,7 +71,12 @@ uint32_t slot_mask_32(uint8_t * metadata, uint8_t fprint) {
 }
 
 uint64_t slot_mask_64(uint8_t * metadata, uint8_t fprint) {
-	return slot_mask_32(metadata, fprint) | (((uint64_t)slot_mask_32(metadata + 32, fprint)) << 32);
+	__m256i bcast = _mm256_set1_epi8(fprint);
+	__m256i block1 = _mm256_loadu_si256(reinterpret_cast<__m256i*>(metadata));
+	__m256i block2 = _mm256_loadu_si256(reinterpret_cast<__m256i*>(metadata + 32));
+	uint64_t result1 = _mm256_cmp_epi8_mask(bcast, block1, _MM_CMPINT_EQ);
+	uint64_t result2 = _mm256_cmp_epi8_mask(bcast, block2, _MM_CMPINT_EQ);
+	return result1 | (result2 << 32);
 }
 
 iceberg_table * iceberg_init(uint64_t log_slots) {
@@ -128,24 +133,8 @@ iceberg_table * iceberg_init(uint64_t log_slots) {
 	* lv3_ctr = 0;
 	pc_init(table->metadata->lv3_balls, lv3_ctr, 8, 1000);
 
-        size_t level1_md_size = sizeof(iceberg_lv1_block_md) * total_blocks + 32;
-        char level1_md_filename[FILENAME_LEN];
-        sprintf(level1_md_filename, "%s/level1_md", PMEM_PATH);
-        if ((table->metadata->lv1_md = (iceberg_lv1_block_md *)
-                 pmem_map_file(level1_md_filename, level1_md_size,
-                    PMEM_FILE_CREATE, 0666, &mapped_len, &is_pmem)) == NULL) {
-		perror("pmem_map_file");
-		exit(1);
-	}
-        size_t level2_md_size = sizeof(iceberg_lv2_block_md) * total_blocks + 32;
-        char level2_md_filename[FILENAME_LEN];
-        sprintf(level2_md_filename, "%s/level2_md", PMEM_PATH);
-        if ((table->metadata->lv2_md = (iceberg_lv2_block_md *)
-                 pmem_map_file(level2_md_filename, level2_md_size,
-                    PMEM_FILE_CREATE, 0666, &mapped_len, &is_pmem)) == NULL) {
-		perror("pmem_map_file");
-		exit(1);
-	}
+	table->metadata->lv1_md = (iceberg_lv1_block_md *)malloc(sizeof(iceberg_lv1_block_md) * total_blocks);
+	table->metadata->lv2_md = (iceberg_lv2_block_md *)malloc(sizeof(iceberg_lv2_block_md) * total_blocks);
 	table->metadata->lv3_sizes = (uint64_t *)malloc(sizeof(uint64_t) * total_blocks);
 	table->metadata->lv3_locks = (uint8_t *)malloc(sizeof(uint8_t) * total_blocks);
 
@@ -163,11 +152,6 @@ iceberg_table * iceberg_init(uint64_t log_slots) {
 
 		table->metadata->lv3_sizes[i] = table->metadata->lv3_locks[i] = 0;
 	}
-
-        pmem_persist(table->metadata->lv1_md, level1_md_size);
-        pmem_persist(table->level1, level1_size);
-        pmem_persist(table->metadata->lv2_md, level2_md_size);
-        pmem_persist(table->level2, level2_size);
 
 	return table;
 }
@@ -230,7 +214,6 @@ bool iceberg_lv2_insert(iceberg_table * restrict table, KeyType key, ValueType v
                         pmem_persist(&blocks[index1].slots[slot], sizeof(kv_pair));
 
 			metadata->lv2_md[index1].block_md[slot] = fprint1;
-                        pmem_persist(&metadata->lv2_md[index1].block_md[slot], sizeof(uint8_t));
 			return true;
 		}
 	}
@@ -248,7 +231,7 @@ bool iceberg_insert(iceberg_table * restrict table, KeyType key, ValueType value
 
 	split_hash(lv1_hash(key), fprint, index, metadata);
 
-	__mmask64 md_mask = slot_mask_64(metadata->lv1_md[index].block_md, 0);
+	__mmask64 md_mask = slot_mask_32(metadata->lv1_md[index].block_md, 0);
 
 	uint8_t popct = __builtin_popcountll(md_mask);
 
@@ -264,7 +247,6 @@ bool iceberg_insert(iceberg_table * restrict table, KeyType key, ValueType value
                         pmem_persist(&blocks[index].slots[slot], sizeof(kv_pair));
 
 			metadata->lv1_md[index].block_md[slot] = fprint;
-                        pmem_persist(&metadata->lv1_md[index].block_md[slot], sizeof(uint8_t));
 			return true;
 		}
 	}
@@ -337,21 +319,13 @@ bool iceberg_lv2_remove(iceberg_table * restrict table, KeyType key, uint64_t lv
 
 			uint8_t slot = word_select(md_mask, i);
 
-			while(1) {
+			if (blocks[index].slots[slot].key == key) {
 
-				if(__sync_bool_compare_and_swap(&blocks[index].slots[slot].key, key, UINT64_MAX)) {
-
-					metadata->lv2_md[index].block_md[slot] = 0;
-                                        pmem_persist(&metadata->lv2_md[index].block_md[slot], sizeof(metadata->lv2_md[index].block_md[slot]));
-					pc_add(metadata->lv2_balls, -1, thread_id);
-					blocks[index].slots[slot].key = key;
-					pmem_persist(&blocks[index].slots[slot].key, sizeof(blocks[index].slots[slot].key));
-					return true;
-				
-				} else {
-					KeyType slot_key = blocks[index].slots[slot].key;
-					if(slot_key != UINT64_MAX && slot_key != key) break;
-				}
+				metadata->lv2_md[index].block_md[slot] = 0;
+				pmem_persist(&metadata->lv2_md[index].block_md[slot], sizeof(metadata->lv2_md[index].block_md[slot]));
+				pc_add(metadata->lv2_balls, -1, thread_id);
+				blocks[index].slots[slot].key = key;
+				return true;
 			}
 		}
 	}
@@ -376,21 +350,13 @@ bool iceberg_remove(iceberg_table * restrict table, KeyType key, uint8_t thread_
 
 		uint8_t slot = word_select(md_mask, i);
 
-		while(1) {
+		if (blocks[index].slots[slot].key == key) {
 
-			if(__sync_bool_compare_and_swap(&blocks[index].slots[slot].key, key, UINT64_MAX)) {
-
-				metadata->lv1_md[index].block_md[slot] = 0;
-                                pmem_persist(&metadata->lv1_md[index].block_md[slot], sizeof(metadata->lv1_md[index].block_md[slot]));
-				pc_add(metadata->lv1_balls, -1, thread_id);
-				blocks[index].slots[slot].key = key;
-                                pmem_persist(&blocks[index].slots[slot].key, sizeof(blocks[index].slots[slot].key));
-				return true;
-
-			} else {
-				KeyType slot_key = blocks[index].slots[slot].key;
-				if(slot_key != UINT64_MAX && slot_key != key) break;
-			}
+			metadata->lv1_md[index].block_md[slot] = 0;
+			pc_add(metadata->lv1_balls, -1, thread_id);
+			blocks[index].slots[slot].key = key;
+			pmem_persist(&blocks[index].slots[slot].key, sizeof(blocks[index].slots[slot].key));
+			return true;
 		}
 	}
 
@@ -441,24 +407,16 @@ bool iceberg_lv2_get_value(iceberg_table * restrict table, KeyType key, ValueTyp
 		split_hash(lv2_hash(key, i), fprint, index, metadata);
 
 		__mmask32 md_mask = slot_mask_32(metadata->lv2_md[index].block_md, fprint) & ((1 << (C_LV2 + MAX_LG_LG_N / D_CHOICES)) - 1);
-		uint8_t popct = __builtin_popcount(md_mask);
+
+		uint8_t popct = __builtin_popcountll(md_mask);
 
 		for(uint8_t i = 0; i < popct; ++i) {
 
 			uint8_t slot = word_select(md_mask, i);
 
-			while(1) {
-
-				if(__sync_bool_compare_and_swap(&blocks[index].slots[slot].key, key, UINT64_MAX)) {
-
-					value = blocks[index].slots[slot].val;
-					blocks[index].slots[slot].key = key;
-					return true;
-
-				} else  {
-					KeyType slot_key = blocks[index].slots[slot].key;
-					if(slot_key != UINT64_MAX && slot_key != key) break;
-				}
+			if (blocks[index].slots[slot].key == key) {
+				value = blocks[index].slots[slot].val;
+				return true;
 			}
 		}
 	}
@@ -481,24 +439,15 @@ bool iceberg_get_value(iceberg_table * restrict table, KeyType key, ValueType& v
 	uint8_t popct = __builtin_popcountll(md_mask);
 
 	for(uint8_t i = 0; i < popct; ++i) {
+		//uint8_t slot = word_select(md_mask, 0);
 
-		uint8_t slot = word_select(md_mask, i);
-
-		while(1) {
-
-			if(__sync_bool_compare_and_swap(&blocks[index].slots[slot].key, key, UINT64_MAX)) {
-
-				value = blocks[index].slots[slot].val;
-				blocks[index].slots[slot].key = key;
-				return true;
-
-			} else {
-				KeyType slot_key = blocks[index].slots[slot].key;
-				if(slot_key != UINT64_MAX && slot_key != key) break;
-			}
+		if (blocks[index].slots[slot].key == key) {
+			value = blocks[index].slots[slot].val;
+			return true;
 		}
 	}
 
+	return false;
 	return iceberg_lv2_get_value(table, key, value, index);
 }
 
