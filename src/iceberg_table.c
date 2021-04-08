@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <immintrin.h>
 #include <tmmintrin.h>
+#include <sys/mman.h>
 
 #include "hashutil.h"
 #include "iceberg_precompute.h"
@@ -90,14 +91,17 @@ iceberg_table * iceberg_init(uint64_t log_slots) {
 	table = (iceberg_table *)malloc(sizeof(iceberg_table));
 	assert(table);
 
+	int mmap_flags = MAP_SHARED | MAP_ANONYMOUS | MAP_POPULATE | MAP_HUGETLB;
         size_t level1_size = sizeof(iceberg_lv1_block) * total_blocks;
-        table->level1 = (iceberg_lv1_block *)malloc(level1_size);
+        //table->level1 = (iceberg_lv1_block *)malloc(level1_size);
+	table->level1 = (iceberg_lv1_block *)mmap(NULL, level1_size, PROT_READ | PROT_WRITE, mmap_flags, 0, 0);
 	if (!table->level1) {
 		perror("level1 malloc failed");
 		exit(1);
 	}
         size_t level2_size = sizeof(iceberg_lv2_block) * total_blocks;
-        table->level2 = (iceberg_lv2_block *)malloc(level2_size);
+        //table->level2 = (iceberg_lv2_block *)malloc(level2_size);
+	table->level2 = (iceberg_lv2_block *)mmap(NULL, level2_size, PROT_READ | PROT_WRITE, mmap_flags, 0, 0);
 	if (!table->level2) {
 		perror("level2 malloc failed");
 		exit(1);
@@ -125,8 +129,10 @@ iceberg_table * iceberg_init(uint64_t log_slots) {
 	* lv3_ctr = 0;
 	pc_init(table->metadata->lv3_balls, lv3_ctr, 64, 1000);
 
-	table->metadata->lv1_md = (iceberg_lv1_block_md *)malloc(sizeof(iceberg_lv1_block_md) * total_blocks);
-	table->metadata->lv2_md = (iceberg_lv2_block_md *)malloc(sizeof(iceberg_lv2_block_md) * total_blocks);
+	//table->metadata->lv1_md = (iceberg_lv1_block_md *)malloc(sizeof(iceberg_lv1_block_md) * total_blocks);
+	table->metadata->lv1_md = (iceberg_lv1_block_md *)mmap(NULL, sizeof(iceberg_lv1_block_md) * total_blocks, PROT_READ | PROT_WRITE, mmap_flags, 0, 0);
+	//table->metadata->lv2_md = (iceberg_lv2_block_md *)malloc(sizeof(iceberg_lv2_block_md) * total_blocks);
+	table->metadata->lv2_md = (iceberg_lv2_block_md *)mmap(NULL, sizeof(iceberg_lv2_block_md) * total_blocks, PROT_READ | PROT_WRITE, mmap_flags, 0, 0);
 	table->metadata->lv3_sizes = (uint64_t *)malloc(sizeof(uint64_t) * total_blocks);
 	table->metadata->lv3_locks = (uint8_t *)malloc(sizeof(uint8_t) * total_blocks);
 
@@ -394,7 +400,7 @@ bool iceberg_lv2_get_value(iceberg_table * restrict table, KeyType key, ValueTyp
 
 		split_hash(lv2_hash_inline(key, i), fprint, index, metadata);
 
-		uint32_t md_mask = slot_mask_32(metadata->lv2_md[index].block_md, fprint) & ((1 << (C_LV2 + MAX_LG_LG_N / D_CHOICES)) - 1);
+		__mmask32 md_mask = slot_mask_32(metadata->lv2_md[index].block_md, fprint) & ((1 << (C_LV2 + MAX_LG_LG_N / D_CHOICES)) - 1);
 
 		while (md_mask != 0) {
 			int slot = __builtin_ctz(md_mask);
@@ -420,7 +426,7 @@ bool iceberg_get_value(iceberg_table * restrict table, KeyType key, ValueType& v
 
 	split_hash(lv1_hash_inline(key), fprint, index, metadata);
 
-	uint64_t md_mask = slot_mask_64(metadata->lv1_md[index].block_md, fprint);
+	__mmask64 md_mask = slot_mask_64(metadata->lv1_md[index].block_md, fprint);
 	
 	while (md_mask != 0) {
 		int slot = __builtin_ctzll(md_mask);
