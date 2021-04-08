@@ -10,7 +10,7 @@
 #include "iceberg_precompute.h"
 #include "iceberg_table.h"
 
-#define PMEM_PATH "/mnt/pmem"
+#define PMEM_PATH "/mnt/pmem0"
 #define FILENAME_LEN 1024
 
 uint64_t seed[5] = { 12351327692179052ll, 23246347347385899ll, 35236262354132235ll, 13604702930934770ll, 57439820692984798ll };
@@ -23,8 +23,16 @@ uint64_t lv1_hash(KeyType key) {
 	return nonzero_fprint(MurmurHash64A(&key, FPRINT_BITS, seed[0]));
 }
 
+uint64_t lv1_hash_inline(KeyType key) {
+	return nonzero_fprint(MurmurHash64A_inline(&key, FPRINT_BITS, seed[0]));
+}
+
 uint64_t lv2_hash(KeyType key, uint8_t i) {
 	return nonzero_fprint(MurmurHash64A(&key, FPRINT_BITS, seed[i + 1]));
+}
+
+uint64_t lv2_hash_inline(KeyType key, uint8_t i) {
+	return nonzero_fprint(MurmurHash64A_inline(&key, FPRINT_BITS, seed[i + 1]));
 }
 
 static inline uint8_t word_select(uint64_t val, int rank) {
@@ -71,12 +79,9 @@ uint32_t slot_mask_32(uint8_t * metadata, uint8_t fprint) {
 }
 
 uint64_t slot_mask_64(uint8_t * metadata, uint8_t fprint) {
-	__m256i bcast = _mm256_set1_epi8(fprint);
-	__m256i block1 = _mm256_loadu_si256(reinterpret_cast<__m256i*>(metadata));
-	__m256i block2 = _mm256_loadu_si256(reinterpret_cast<__m256i*>(metadata + 32));
-	uint64_t result1 = _mm256_cmp_epi8_mask(bcast, block1, _MM_CMPINT_EQ);
-	uint64_t result2 = _mm256_cmp_epi8_mask(bcast, block2, _MM_CMPINT_EQ);
-	return result1 | (result2 << 32);
+	__m512i bcast = _mm512_set1_epi8(fprint);
+	__m512i block = _mm512_loadu_si512(reinterpret_cast<__m512i*>(metadata));
+	return _mm512_cmp_epi8_mask(bcast, block, _MM_CMPINT_EQ);
 }
 
 iceberg_table * iceberg_init(uint64_t log_slots) {
@@ -101,6 +106,7 @@ iceberg_table * iceberg_init(uint64_t log_slots) {
 		perror("pmem_map_file");
 		exit(1);
 	}
+	assert(is_pmem);
         size_t level2_size = sizeof(iceberg_lv2_block) * total_blocks;
         char level2_filename[FILENAME_LEN];
         sprintf(level2_filename, "%s/level2", PMEM_PATH);
@@ -121,17 +127,17 @@ iceberg_table * iceberg_init(uint64_t log_slots) {
 	table->metadata->lv1_balls = (pc_t *)malloc(sizeof(pc_t));
 	int64_t * lv1_ctr = (int64_t *)malloc(sizeof(int64_t));
 	* lv1_ctr = 0;
-	pc_init(table->metadata->lv1_balls, lv1_ctr, 8, 1000);
+	pc_init(table->metadata->lv1_balls, lv1_ctr, 64, 1000);
 	
 	table->metadata->lv2_balls = (pc_t *)malloc(sizeof(pc_t));
 	int64_t * lv2_ctr = (int64_t *)malloc(sizeof(int64_t));
 	* lv2_ctr = 0;
-	pc_init(table->metadata->lv2_balls, lv2_ctr, 8, 1000);
+	pc_init(table->metadata->lv2_balls, lv2_ctr, 64, 1000);
 
 	table->metadata->lv3_balls = (pc_t *)malloc(sizeof(pc_t));
 	int64_t * lv3_ctr = (int64_t *)malloc(sizeof(int64_t));
 	* lv3_ctr = 0;
-	pc_init(table->metadata->lv3_balls, lv3_ctr, 8, 1000);
+	pc_init(table->metadata->lv3_balls, lv3_ctr, 64, 1000);
 
 	table->metadata->lv1_md = (iceberg_lv1_block_md *)malloc(sizeof(iceberg_lv1_block_md) * total_blocks);
 	table->metadata->lv2_md = (iceberg_lv2_block_md *)malloc(sizeof(iceberg_lv2_block_md) * total_blocks);
@@ -231,7 +237,7 @@ bool iceberg_insert(iceberg_table * restrict table, KeyType key, ValueType value
 
 	split_hash(lv1_hash(key), fprint, index, metadata);
 
-	__mmask64 md_mask = slot_mask_32(metadata->lv1_md[index].block_md, 0);
+	__mmask64 md_mask = slot_mask_64(metadata->lv1_md[index].block_md, 0);
 
 	uint8_t popct = __builtin_popcountll(md_mask);
 
@@ -404,15 +410,13 @@ bool iceberg_lv2_get_value(iceberg_table * restrict table, KeyType key, ValueTyp
 		uint8_t fprint;
 		uint64_t index;
 
-		split_hash(lv2_hash(key, i), fprint, index, metadata);
+		split_hash(lv2_hash_inline(key, i), fprint, index, metadata);
 
-		__mmask32 md_mask = slot_mask_32(metadata->lv2_md[index].block_md, fprint) & ((1 << (C_LV2 + MAX_LG_LG_N / D_CHOICES)) - 1);
+		uint32_t md_mask = slot_mask_32(metadata->lv2_md[index].block_md, fprint) & ((1 << (C_LV2 + MAX_LG_LG_N / D_CHOICES)) - 1);
 
-		uint8_t popct = __builtin_popcountll(md_mask);
-
-		for(uint8_t i = 0; i < popct; ++i) {
-
-			uint8_t slot = word_select(md_mask, i);
+		while (md_mask != 0) {
+			int slot = __builtin_ctz(md_mask);
+			md_mask = md_mask & ~(1U << slot);
 
 			if (blocks[index].slots[slot].key == key) {
 				value = blocks[index].slots[slot].val;
@@ -432,14 +436,13 @@ bool iceberg_get_value(iceberg_table * restrict table, KeyType key, ValueType& v
 	uint8_t fprint;
 	uint64_t index;
 
-	split_hash(lv1_hash(key), fprint, index, metadata);
+	split_hash(lv1_hash_inline(key), fprint, index, metadata);
 
-	__mmask64 md_mask = slot_mask_64(metadata->lv1_md[index].block_md, fprint);
-
-	uint8_t popct = __builtin_popcountll(md_mask);
-
-	for(uint8_t i = 0; i < popct; ++i) {
-		//uint8_t slot = word_select(md_mask, 0);
+	uint64_t md_mask = slot_mask_64(metadata->lv1_md[index].block_md, fprint);
+	
+	while (md_mask != 0) {
+		int slot = __builtin_ctzll(md_mask);
+		md_mask = md_mask & ~(1ULL << slot);
 
 		if (blocks[index].slots[slot].key == key) {
 			value = blocks[index].slots[slot].val;
@@ -447,7 +450,6 @@ bool iceberg_get_value(iceberg_table * restrict table, KeyType key, ValueType& v
 		}
 	}
 
-	return false;
 	return iceberg_lv2_get_value(table, key, value, index);
 }
 
