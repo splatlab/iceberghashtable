@@ -192,8 +192,23 @@ int main (int argc, char** argv) {
 		printf("Average list size: %f\n", sum_sizes / (double)table->metadata->nblocks);
 		printf("Max list size: %ld\n", max_size);
 
+		printf("RECOVERY\n");
+	}
+
+	iceberg_dismount(table);
+
+	t1 = high_resolution_clock::now();
+	table = iceberg_mount(tbits);
+	t2 = high_resolution_clock::now();
+
+	double recovery_throughput = N / elapsed(t1, t2);
+	if (!is_benchmark) {
+		printf("Recovery: %f /sec\n", recovery_throughput);
+
 		printf("\nQUERIES\n");
 	}
+
+//	exit(0);
 
 	std::mt19937 g(__builtin_ia32_rdtsc());
 	std::shuffle(&in_keys[0], &in_keys[N], g);
