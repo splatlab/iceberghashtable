@@ -42,12 +42,12 @@ void do_queries(uint64_t *keys, uint64_t start, uint64_t n, bool positive) {
 		}
 }
 
-void do_removals(uint8_t id, std::vector<std::pair<uint64_t, uint64_t>>& v, uint64_t start, uint64_t n) {
+void do_removals(uint8_t id, uint64_t *keys, uint64_t start, uint64_t n) {
 	
 	//uint64_t val;
 
 	for(uint64_t i = start; i < start + n; ++i)
-		if(!iceberg_remove(table, v[i].first, id)) {
+		if(!iceberg_remove(table, keys[i], id)) {
 			printf("Failed removal\n");
 			exit(0);
 		} /*else if(iceberg_get_value(table, v[i].first, val)) {
@@ -200,54 +200,50 @@ int main (int argc, char** argv) {
 	thread_list.clear();
 
 //	exit(0);
-//
-//	printf("\nREMOVALS\n");
-//
-//	std::vector<std::pair<uint64_t, uint64_t>> removed, non_removed;
-//
-//	for(uint64_t i = 0; i < N / 2; ++i) removed.push_back(in_table[i]);
-//	for(uint64_t i = N / 2; i < N; ++i) non_removed.push_back(in_table[i]);
-//
-//	shuffle(removed.begin(), removed.end(), g);
-//	shuffle(non_removed.begin(), non_removed.end(), g);
-//
-//	t1 = high_resolution_clock::now();
-//
-//	printf("%ld %d\n", (N / 2 / threads) * threads, (int)removed.size());
-//
-//	for(uint64_t i = 0; i < threads; ++i)
-//		thread_list.emplace_back(do_removals, i, std::ref(removed), i * N / 2 / threads, N / 2 / threads);
-//	for(uint64_t i = 0; i < threads; ++i)
-//		thread_list[i].join();
-//	
-//	t2 = high_resolution_clock::now();
-//	printf("Removals: %f /sec\n", (N / 2) / elapsed(t1, t2));
-//	printf("Load factor: %f\n", iceberg_load_factor(table));
-//	thread_list.clear();
-//
-//	shuffle(removed.begin(), removed.end(), g);
-//
-//	t1 = high_resolution_clock::now();
-//
-//	for(uint64_t i = 0; i < threads; ++i)
-//		thread_list.emplace_back(do_queries, std::ref(removed), i * N / 2 / threads, N / 2 / threads, false);
-//	for(uint64_t i = 0; i < threads; ++i)
-//		thread_list[i].join();
-//
-//	t2 = high_resolution_clock::now();
-//	printf("Negative queries after removals: %f /sec\n", N / elapsed(t1, t2));
-//	thread_list.clear();
-//
-//	t1 = high_resolution_clock::now();
-//
-//	for(uint64_t i = 0; i < threads; ++i)
-//		thread_list.emplace_back(do_queries, std::ref(non_removed), i * N / 2 / threads, N / 2 / threads, true);
-//	for(uint64_t i = 0; i < threads; ++i)
-//		thread_list[i].join();
-//
-//	t2 = high_resolution_clock::now();
-//	printf("Positive queries after removals: %f /sec\n", N / elapsed(t1, t2));
-//	thread_list.clear();
+
+	printf("\nREMOVALS\n");
+
+	uint64_t *removed = in_keys;
+	uint64_t *non_removed = in_keys + N / 2;
+
+	shuffle(&removed[0], &removed[N/2], g);
+	shuffle(&non_removed[0], &non_removed[N/2], g);
+
+	t1 = high_resolution_clock::now();
+
+	for(uint64_t i = 0; i < threads; ++i)
+		thread_list.emplace_back(do_removals, i, removed, i * N / 2 / threads, N / 2 / threads);
+	for(uint64_t i = 0; i < threads; ++i)
+		thread_list[i].join();
+
+	t2 = high_resolution_clock::now();
+	printf("Removals: %f /sec\n", (N / 2) / elapsed(t1, t2));
+	printf("Load factor: %f\n", iceberg_load_factor(table));
+	thread_list.clear();
+
+	shuffle(&removed[0], &removed[N/2], g);
+
+	t1 = high_resolution_clock::now();
+
+	for(uint64_t i = 0; i < threads; ++i)
+		thread_list.emplace_back(do_queries, removed, i * N / 2 / threads, N / 2 / threads, false);
+	for(uint64_t i = 0; i < threads; ++i)
+		thread_list[i].join();
+
+	t2 = high_resolution_clock::now();
+	printf("Negative queries after removals: %f /sec\n", N / elapsed(t1, t2));
+	thread_list.clear();
+
+	t1 = high_resolution_clock::now();
+
+	for(uint64_t i = 0; i < threads; ++i)
+		thread_list.emplace_back(do_queries, non_removed, i * N / 2 / threads, N / 2 / threads, true);
+	for(uint64_t i = 0; i < threads; ++i)
+		thread_list[i].join();
+
+	t2 = high_resolution_clock::now();
+	printf("Positive queries after removals: %f /sec\n", N / elapsed(t1, t2));
+	thread_list.clear();
 /*
 	printf("\nMIXED WORKLOAD, HIGH LOAD FACTOR\n");
 	
