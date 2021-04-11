@@ -81,6 +81,15 @@ uint64_t slot_mask_64(uint8_t * metadata, uint8_t fprint) {
 	return _mm512_cmp_epi8_mask(bcast, block, _MM_CMPINT_EQ);
 }
 
+size_t round_up(size_t n, size_t k) {
+	size_t rem = n % k;
+	if (rem == 0) {
+		return n;
+	}
+	n += k - rem;
+	return n;
+}
+
 iceberg_table * iceberg_init(uint64_t log_slots) {
 
 	iceberg_table * table;
@@ -129,10 +138,12 @@ iceberg_table * iceberg_init(uint64_t log_slots) {
 	* lv3_ctr = 0;
 	pc_init(table->metadata->lv3_balls, lv3_ctr, 64, 1000);
 
+	size_t lv1_md_size = sizeof(iceberg_lv1_block_md) * total_blocks + 64;
 	//table->metadata->lv1_md = (iceberg_lv1_block_md *)malloc(sizeof(iceberg_lv1_block_md) * total_blocks);
-	table->metadata->lv1_md = (iceberg_lv1_block_md *)mmap(NULL, sizeof(iceberg_lv1_block_md) * total_blocks, PROT_READ | PROT_WRITE, mmap_flags, 0, 0);
+	table->metadata->lv1_md = (iceberg_lv1_block_md *)mmap(NULL, lv1_md_size, PROT_READ | PROT_WRITE, mmap_flags, 0, 0);
 	//table->metadata->lv2_md = (iceberg_lv2_block_md *)malloc(sizeof(iceberg_lv2_block_md) * total_blocks);
-	table->metadata->lv2_md = (iceberg_lv2_block_md *)mmap(NULL, sizeof(iceberg_lv2_block_md) * total_blocks, PROT_READ | PROT_WRITE, mmap_flags, 0, 0);
+	size_t lv2_md_size = sizeof(iceberg_lv2_block_md) * total_blocks + 32;
+	table->metadata->lv2_md = (iceberg_lv2_block_md *)mmap(NULL, lv2_md_size, PROT_READ | PROT_WRITE, mmap_flags, 0, 0);
 	table->metadata->lv3_sizes = (uint64_t *)malloc(sizeof(uint64_t) * total_blocks);
 	table->metadata->lv3_locks = (uint8_t *)malloc(sizeof(uint8_t) * total_blocks);
 
