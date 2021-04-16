@@ -1,6 +1,6 @@
 CC = clang
 CPP = clang++
-CFLAGS = -g -flto -O3 -Wall -march=native -pthread
+CFLAGS = -g -flto -O3 -Wall -march=native -pthread -DHUGE_TLB
 #CFLAGS = -g -march=native -pthread
 INCLUDE = -I ./include
 SOURCES = src/iceberg_table.c src/hashutil.c src/partitioned_counter.c
