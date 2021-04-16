@@ -42,7 +42,7 @@ uint64_t MurmurHash64A_inline ( const void * key, int len, unsigned int seed )
 		case 3: h ^= (uint64_t)data2[2] << 16;
 		case 2: h ^= (uint64_t)data2[1] << 8;
 		case 1: h ^= (uint64_t)data2[0];
-						h *= m;
+		h *= m;
 	};
 
 	h ^= h >> r;

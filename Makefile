@@ -1,11 +1,26 @@
-CC = clang++
-CFLAGS = -flto -O3 -m64 -mavx -mavx2 -Wall -march=native -pthread
+CC = clang
+CPP = clang++
+CFLAGS = -g -flto -O3 -Wall -march=native -pthread
 #CFLAGS = -g -march=native -pthread
 INCLUDE = -I ./include
 SOURCES = src/iceberg_table.c src/hashutil.c src/partitioned_counter.c
+OBJECTS = $(subst src/,obj/,$(subst .c,.o,$(SOURCES)))
 LIBS = -lssl -lcrypto -lpmem
 
-all: src/iceberg_table.c main.cc
-	$(CC) $(CFLAGS) $(INCLUDE) $(SOURCES) main.cc -o main $(LIBS)
+all: main directories
+
+obj/%.o: src/%.c
+	@ mkdir -p obj
+	$(CC) $(CFLAGS) $(INCLUDE) -c $< -o $@
+
+obj/main.o: main.cc
+	@ mkdir -p obj
+	$(CPP) $(CFLAGS) $(INCLUDE) -c $< -o $@
+
+main: $(OBJECTS) obj/main.o
+	$(CPP) $(CFLAGS) $(INCLUDE) $^ -o $@ $(LIBS)
+
+.PHONY: clean directories
+
 clean:
-	rm main
+	rm -f main $(OBJECTS) obj/main.o
