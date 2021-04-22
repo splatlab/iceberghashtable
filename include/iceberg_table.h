@@ -14,7 +14,7 @@ extern "C" {
 	#define FPRINT_BITS 8
 	#define D_CHOICES 2
 	#define MAX_LG_LG_N 4
-	#define C_LV2 6
+	#define C_LV2 62
 
 	typedef uint64_t KeyType;
 	typedef uint64_t ValueType;

@@ -24,11 +24,12 @@ double elapsed(high_resolution_clock::time_point t1, high_resolution_clock::time
 
 void do_inserts(uint8_t id, uint64_t *keys, uint64_t *values, uint64_t start, uint64_t n) {
 	
-	for(uint64_t i = start; i < start + n; ++i)
+	for(uint64_t i = start; i < start + n; ++i) {
 		if(!iceberg_insert(table, keys[i], values[i], id)) {
 			printf("Failed insert\n");
 			exit(0);
 		}
+	}
 }
 
 void do_queries(uint64_t *keys, uint64_t start, uint64_t n, bool positive) {
@@ -87,7 +88,7 @@ int main (int argc, char** argv) {
 
 	uint64_t tbits = atoi(argv[1]);
 	uint64_t threads = atoi(argv[2]);
-	uint64_t N = (1ULL << tbits) * 1.07;
+	uint64_t N = (1ULL << tbits) * 0.95;
 	
 	high_resolution_clock::time_point t1 = high_resolution_clock::now();
 

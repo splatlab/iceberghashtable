@@ -177,6 +177,9 @@ bool iceberg_lv3_insert(iceberg_table * table, KeyType key, ValueType value, uin
 	iceberg_metadata * metadata = table->metadata;
 	iceberg_lv3_list * lists = table->level3;
 
+	uint8_t fprint;
+	split_hash(lv1_hash(key), &fprint, &lv3_index, metadata);
+
 	while(__sync_lock_test_and_set(metadata->lv3_locks + lv3_index, 1));
 
 	iceberg_lv3_node * new_node = (iceberg_lv3_node *)malloc(sizeof(iceberg_lv3_node));
@@ -197,7 +200,7 @@ bool iceberg_lv2_insert(iceberg_table * table, KeyType key, ValueType value, uin
 	iceberg_metadata * metadata = table->metadata;
 	iceberg_lv2_block * blocks = table->level2;
 
-	if(*(table->metadata->lv2_balls->global_counter) == (int64_t)(C_LV2 * metadata->nblocks)) return iceberg_lv3_insert(table, key, value, lv3_index, thread_id);
+	//if(*(table->metadata->lv2_balls->global_counter) == (int64_t)(C_LV2 * metadata->nblocks)) return iceberg_lv3_insert(table, key, value, lv3_index, thread_id);
 
 	uint8_t fprint1, fprint2;
 	uint64_t index1, index2;
@@ -205,8 +208,8 @@ bool iceberg_lv2_insert(iceberg_table * table, KeyType key, ValueType value, uin
 	split_hash(lv2_hash(key, 0), &fprint1, &index1, metadata);
 	split_hash(lv2_hash(key, 1), &fprint2, &index2, metadata);
 
-	__mmask32 md_mask1 = slot_mask_32(metadata->lv2_md[index1].block_md, 0) & ((1 << (C_LV2 + MAX_LG_LG_N / D_CHOICES)) - 1);
-	__mmask32 md_mask2 = slot_mask_32(metadata->lv2_md[index2].block_md, 0) & ((1 << (C_LV2 + MAX_LG_LG_N / D_CHOICES)) - 1);
+	__mmask64 md_mask1 = slot_mask_64(metadata->lv2_md[index1].block_md, 0);
+	__mmask64 md_mask2 = slot_mask_64(metadata->lv2_md[index2].block_md, 0);
 
 	uint8_t popct1 = __builtin_popcountll(md_mask1);
 	uint8_t popct2 = __builtin_popcountll(md_mask2);
@@ -237,6 +240,8 @@ bool iceberg_lv2_insert(iceberg_table * table, KeyType key, ValueType value, uin
 }
 
 bool iceberg_insert(iceberg_table * table, KeyType key, ValueType value, uint8_t thread_id) {
+
+	return iceberg_lv2_insert(table, key, value, 0, thread_id);
 
 	iceberg_metadata * metadata = table->metadata;
 	iceberg_lv1_block * blocks = table->level1;	
@@ -326,8 +331,9 @@ bool iceberg_lv2_remove(iceberg_table * table, KeyType key, uint64_t lv3_index, 
 
 		split_hash(lv2_hash(key, i), &fprint, &index, metadata);
 
-		__mmask32 md_mask = slot_mask_32(metadata->lv2_md[index].block_md, fprint) & ((1 << (C_LV2 + MAX_LG_LG_N / D_CHOICES)) - 1);
-		uint8_t popct = __builtin_popcount(md_mask);
+		__mmask64 md_mask = slot_mask_64(metadata->lv2_md[index].block_md, fprint);
+
+		uint8_t popct = __builtin_popcountll(md_mask);
 
 		for(uint8_t i = 0; i < popct; ++i) {
 
@@ -347,6 +353,8 @@ bool iceberg_lv2_remove(iceberg_table * table, KeyType key, uint64_t lv3_index, 
 }
 
 bool iceberg_remove(iceberg_table * table, KeyType key, uint8_t thread_id) {
+
+	return iceberg_lv2_remove(table, key, 0, thread_id);
 
 	iceberg_metadata * metadata = table->metadata;
 	iceberg_lv1_block * blocks = table->level1;
@@ -379,6 +387,9 @@ bool iceberg_lv3_get_value(iceberg_table * table, KeyType key, ValueType **value
 
 	iceberg_metadata * metadata = table->metadata;
 	iceberg_lv3_list * lists = table->level3;
+
+	uint8_t fprint;
+	split_hash(lv1_hash(key), &fprint, &lv3_index, metadata);
 
 	while(__sync_lock_test_and_set(metadata->lv3_locks + lv3_index, 1));
 
@@ -418,11 +429,11 @@ bool iceberg_lv2_get_value(iceberg_table * table, KeyType key, ValueType **value
 
 		split_hash(lv2_hash_inline(key, i), &fprint, &index, metadata);
 
-		__mmask32 md_mask = slot_mask_32(metadata->lv2_md[index].block_md, fprint) & ((1 << (C_LV2 + MAX_LG_LG_N / D_CHOICES)) - 1);
+		__mmask64 md_mask = slot_mask_64(metadata->lv2_md[index].block_md, fprint);
 
 		while (md_mask != 0) {
-			int slot = __builtin_ctz(md_mask);
-			md_mask = md_mask & ~(1U << slot);
+			int slot = __builtin_ctzll(md_mask);
+			md_mask = md_mask & ~(1ULL << slot);
 
 			if (blocks[index].slots[slot].key == key) {
 				*value = &blocks[index].slots[slot].val;
@@ -435,6 +446,8 @@ bool iceberg_lv2_get_value(iceberg_table * table, KeyType key, ValueType **value
 }
 
 bool iceberg_get_value(iceberg_table * table, KeyType key, ValueType **value) {
+
+	return iceberg_lv2_get_value(table, key, value, 0);
 
 	iceberg_metadata * metadata = table->metadata;
 	iceberg_lv1_block * blocks = table->level1;
