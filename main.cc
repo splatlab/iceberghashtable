@@ -73,7 +73,7 @@ int main (int argc, char** argv) {
 
 	uint64_t tbits = atoi(argv[1]);
 	uint64_t threads = atoi(argv[2]);
-	uint64_t N = (1ULL << tbits) * 1.07;
+	uint64_t N = (1ULL << tbits) * 0.95;
 	
 	high_resolution_clock::time_point t1 = high_resolution_clock::now();
 
