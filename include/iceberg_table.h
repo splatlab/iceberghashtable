@@ -10,11 +10,11 @@
 extern "C" {
 #endif
 
-	#define SLOT_BITS 6
-	#define FPRINT_BITS 8
+	#define SLOT_BITS 5
+	#define FPRINT_BITS 16
 	#define D_CHOICES 2
 	#define MAX_LG_LG_N 4
-	#define C_LV2 62
+	#define C_LV2 30
 
 	typedef uint64_t KeyType;
 	typedef uint64_t ValueType;
@@ -29,7 +29,7 @@ extern "C" {
 	} iceberg_lv1_block;
 
 	typedef struct __attribute__ ((__packed__)) iceberg_lv1_block_md {
-		uint8_t block_md[1 << SLOT_BITS];
+		uint16_t block_md[1 << SLOT_BITS];
 	} iceberg_lv1_block_md;
 
 	typedef struct __attribute__ ((__packed__)) iceberg_lv2_block {
@@ -37,7 +37,7 @@ extern "C" {
 	} iceberg_lv2_block;
 
 	typedef struct __attribute__ ((__packed__)) iceberg_lv2_block_md {
-		uint8_t block_md[C_LV2 + MAX_LG_LG_N / D_CHOICES];
+		uint16_t block_md[C_LV2 + MAX_LG_LG_N / D_CHOICES];
 	} iceberg_lv2_block_md;
 
 	typedef struct iceberg_lv3_node {
