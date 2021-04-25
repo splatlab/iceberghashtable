@@ -74,15 +74,15 @@ void split_hash(uint64_t hash, uint16_t *fprint, uint64_t *index, iceberg_metada
 }
 
 uint32_t slot_mask_32(uint16_t * metadata, uint16_t fprint) {
-	__m256i bcast = _mm256_set1_epi8(fprint);
+	__m256i bcast = _mm256_set1_epi16(fprint);
 	__m256i block = _mm256_loadu_si256((const __m256i *)(metadata));
-	return _mm256_cmp_epi8_mask(bcast, block, _MM_CMPINT_EQ);
+	return _mm256_cmp_epi16_mask(bcast, block, _MM_CMPINT_EQ);
 }
 
 uint64_t slot_mask_64(uint16_t * metadata, uint16_t fprint) {
-	__m512i bcast = _mm512_set1_epi8(fprint);
+	__m512i bcast = _mm512_set1_epi16(fprint);
 	__m512i block = _mm512_loadu_si512((const __m512i *)(metadata));
-	return _mm512_cmp_epi8_mask(bcast, block, _MM_CMPINT_EQ);
+	return _mm512_cmp_epi16_mask(bcast, block, _MM_CMPINT_EQ);
 }
 
 size_t round_up(size_t n, size_t k) {
@@ -209,8 +209,8 @@ bool iceberg_lv2_insert(iceberg_table * table, KeyType key, ValueType value, uin
 	split_hash(lv2_hash(key, 0), &fprint1, &index1, metadata);
 	split_hash(lv2_hash(key, 1), &fprint2, &index2, metadata);
 
-	__mmask32 md_mask1 = slot_mask_32(metadata->lv2_md[index1].block_md, 0);
-	__mmask32 md_mask2 = slot_mask_32(metadata->lv2_md[index2].block_md, 0);
+	__mmask32 md_mask1 = slot_mask_64(metadata->lv2_md[index1].block_md, 0);
+	__mmask32 md_mask2 = slot_mask_64(metadata->lv2_md[index2].block_md, 0);
 
 	uint8_t popct1 = __builtin_popcount(md_mask1);
 	uint8_t popct2 = __builtin_popcount(md_mask2);
@@ -340,7 +340,7 @@ bool iceberg_lv2_remove(iceberg_table * table, KeyType key, uint64_t lv3_index, 
 		//__mmask32 md_mask = slot_mask_32(metadata->lv2_md[index].block_md, fprint) & ((1 << (C_LV2 + MAX_LG_LG_N / D_CHOICES)) - 1);
 		//uint8_t popct = __builtin_popcount(md_mask);
 
-		__mmask32 md_mask = slot_mask_32(metadata->lv2_md[index].block_md, fprint);
+		__mmask32 md_mask = slot_mask_64(metadata->lv2_md[index].block_md, fprint);
 
 		uint8_t popct = __builtin_popcount(md_mask);
 
@@ -440,7 +440,7 @@ bool iceberg_lv2_get_value(iceberg_table * table, KeyType key, ValueType **value
 
 		split_hash(lv2_hash_inline(key, i), &fprint, &index, metadata);
 
-		__mmask32 md_mask = slot_mask_32(metadata->lv2_md[index].block_md, fprint);
+		__mmask32 md_mask = slot_mask_64(metadata->lv2_md[index].block_md, fprint);
 
 		while (md_mask != 0) {
 			int slot = __builtin_ctzll(md_mask);
