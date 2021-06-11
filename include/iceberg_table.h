@@ -55,6 +55,9 @@ extern "C" {
 		uint64_t nblocks;
 		uint64_t nslots;
 		uint64_t block_bits;
+    int64_t lv1_ctr;
+    int64_t lv2_ctr;
+    int64_t lv3_ctr;
 		pc_t lv1_balls;
 		pc_t lv2_balls;
 		pc_t lv3_balls;
@@ -66,7 +69,7 @@ extern "C" {
 	} iceberg_metadata;
 
 	typedef struct iceberg_table {
-		iceberg_metadata * metadata;
+		iceberg_metadata metadata;
 		iceberg_lv1_block * level1;
 		iceberg_lv2_block * level2;
 		iceberg_lv3_list * level3;
@@ -77,7 +80,7 @@ extern "C" {
 	uint64_t lv3_balls(iceberg_table * table);
 	uint64_t tot_balls(iceberg_table * table);
 
-	iceberg_table * iceberg_init(uint64_t nslots);
+	int iceberg_init(iceberg_table *table, uint64_t nslots);
 
 	double iceberg_load_factor(iceberg_table * table);
 

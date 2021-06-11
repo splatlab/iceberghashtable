@@ -74,6 +74,8 @@ void do_mixed(uint8_t id, std::vector<std::pair<uint64_t, uint64_t>>& v, uint64_
 }
 
 int main (int argc, char** argv) {
+  iceberg_table table;
+  
 	if (argc != 3 && argc != 4) {
 		fprintf(stderr, "Specify the log of the number of slots in the table and the number of threads to use.\n");
 		exit(1);
@@ -91,7 +93,7 @@ int main (int argc, char** argv) {
 	
 	high_resolution_clock::time_point t1 = high_resolution_clock::now();
 
-	if ((table = iceberg_init(tbits)) == NULL) {
+	if (iceberg_init(&table, tbits)) {
 		fprintf(stderr, "Can't allocate iceberg table.\n");
 		exit(EXIT_FAILURE);
 	}
@@ -173,23 +175,23 @@ int main (int argc, char** argv) {
 	if (!is_benchmark) {
 		printf("%f\n", N / elapsed(t1, t2));
 
-		printf("Load factor: %f\n", iceberg_load_factor(table));
-		printf("Number level 1 inserts: %ld\n", lv1_balls(table));
-		printf("Number level 2 inserts: %ld\n", lv2_balls(table));
-		printf("Number level 3 inserts: %ld\n", lv3_balls(table));
-		printf("Total inserts: %ld\n", tot_balls(table));
+		printf("Load factor: %f\n", iceberg_load_factor(&table));
+		printf("Number level 1 inserts: %ld\n", lv1_balls(&table));
+		printf("Number level 2 inserts: %ld\n", lv2_balls(&table));
+		printf("Number level 3 inserts: %ld\n", lv3_balls(&table));
+		printf("Total inserts: %ld\n", tot_balls(&table));
 	}
 
 //	exit(0);
 
 	uint64_t max_size = 0, sum_sizes = 0;
-	for(uint64_t i = 0; i < table->metadata->nblocks; ++i) {
-		max_size = std::max(max_size, table->metadata->lv3_sizes[i]);
-		sum_sizes += table->metadata->lv3_sizes[i];
+	for(uint64_t i = 0; i < table.metadata.nblocks; ++i) {
+		max_size = std::max(max_size, table.metadata.lv3_sizes[i]);
+		sum_sizes += table.metadata.lv3_sizes[i];
 	}
 
 	if (!is_benchmark) {
-		printf("Average list size: %f\n", sum_sizes / (double)table->metadata->nblocks);
+		printf("Average list size: %f\n", sum_sizes / (double)table.metadata.nblocks);
 		printf("Max list size: %ld\n", max_size);
 
 		printf("\nQUERIES\n");
@@ -254,7 +256,7 @@ int main (int argc, char** argv) {
 	double removal_throughput = num_removed / elapsed(t1, t2);
 	if (!is_benchmark) {
 		printf("Removals: %f /sec\n", num_removed / elapsed(t1, t2));
-		printf("Load factor: %f\n", iceberg_load_factor(table));
+		printf("Load factor: %f\n", iceberg_load_factor(&table));
 	}
 	thread_list.clear();
 
@@ -305,11 +307,11 @@ int main (int argc, char** argv) {
 	thread_list.clear();
 	
 	max_size = sum_sizes = 0;
-	for(uint64_t i = 0; i < table->metadata->nblocks; ++i) {
-		max_size = std::max(max_size, table->metadata->lv3_sizes[i]);
-		sum_sizes += table->metadata->lv3_sizes[i];
+	for(uint64_t i = 0; i < table.metadata.nblocks; ++i) {
+		max_size = std::max(max_size, table.metadata.lv3_sizes[i]);
+		sum_sizes += table.metadata.lv3_sizes[i];
 	}
 
-	printf("Average list size: %f\n", sum_sizes / (double)table->metadata->nblocks);
+	printf("Average list size: %f\n", sum_sizes / (double)table.metadata.nblocks);
 	printf("Max list size: %ld\n", max_size);*/
 }
