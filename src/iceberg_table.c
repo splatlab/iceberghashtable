@@ -268,6 +268,7 @@ bool iceberg_insert(iceberg_table * table, KeyType key, ValueType value, uint8_t
 			blocks[index].slots[slot].val = value;
 
 			metadata->lv1_md[index].block_md[slot] = fprint;
+      read_unlock(table->metadata->rw_lock, thread_id);
 			return true;
 		}
 	}
@@ -379,6 +380,7 @@ bool iceberg_remove(iceberg_table * table, KeyType key, uint8_t thread_id) {
 
 			metadata->lv1_md[index].block_md[slot] = 0;
 			pc_add(metadata->lv1_balls, -1, thread_id);
+      read_unlock(table->metadata->rw_lock, thread_id);
 			return true;
 		}
 	}
@@ -469,6 +471,7 @@ bool iceberg_get_value(iceberg_table * table, KeyType key, ValueType **value, ui
 
 		if (blocks[index].slots[slot].key == key) {
 			*value = &blocks[index].slots[slot].val;
+      read_unlock(table->metadata->rw_lock, thread_id);
 			return true;
 		}
 	}
