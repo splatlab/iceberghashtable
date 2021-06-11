@@ -1,7 +1,18 @@
+ifdef D
+   OPT=
+else
+   OPT= -flto -O3
+endif
+
+ifdef H
+   HUGE= -DHUGE_TLB
+else
+   HUGE=
+endif
+
 CC = clang
 CPP = clang++
-CFLAGS = -g -flto -O3 -Wall -march=native -pthread -DHUGE_TLB
-#CFLAGS = -g -march=native -pthread
+CFLAGS = -g $(OPT) -Wall -march=native -pthread $(HUGE)
 INCLUDE = -I ./include
 SOURCES = src/iceberg_table.c src/hashutil.c src/partitioned_counter.c
 OBJECTS = $(subst src/,obj/,$(subst .c,.o,$(SOURCES)))

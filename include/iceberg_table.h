@@ -4,7 +4,6 @@
 #include <inttypes.h>
 #include <stdbool.h>
 #include "lock.h"
-#include "partitioned_counter.h"
 
 #ifdef __cplusplus
 #define __restrict__
