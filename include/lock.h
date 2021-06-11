@@ -40,11 +40,11 @@ extern "C" {
 
 void rw_lock_init(ReaderWriterLock *rwlock);
 
-bool read_lock(ReaderWriterLock *rwlock, uint8_t thread_id);
+bool read_lock(ReaderWriterLock *rwlock, uint8_t flag, uint8_t thread_id);
 
 void read_unlock(ReaderWriterLock *rwlock, uint8_t thread_id);
 
-bool write_lock(ReaderWriterLock *rwlock);
+bool write_lock(ReaderWriterLock *rwlock, uint8_t flag);
 
 void write_unlock(ReaderWriterLock *rwlock);
 
