@@ -20,8 +20,6 @@ void rw_lock_init(ReaderWriterLock *rwlock) {
   pc_init(rwlock->pc_counter, &rwlock->readers, 8, 8);
 }
 
-
-
 /**
  * Try to acquire a lock and spin until the lock is available.
  */
