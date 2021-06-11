@@ -45,7 +45,7 @@ bool read_lock(ReaderWriterLock *rwlock, uint8_t flag, uint8_t thread_id) {
 }
 
 void read_unlock(ReaderWriterLock *rwlock, uint8_t thread_id) {
-  pc_add(rwlock->pc_counter, -1, thread_id);
+  __atomic_add_fetch(&rwlock->pc_counter->local_counters[thread_id].counter, -1, __ATOMIC_SEQ_CST);
   return;
 }
 
