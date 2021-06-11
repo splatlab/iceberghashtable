@@ -155,8 +155,7 @@ iceberg_table * iceberg_init(uint64_t log_slots) {
 	table->metadata->lv3_sizes = (uint64_t *)malloc(sizeof(uint64_t) * total_blocks);
 	table->metadata->lv3_locks = (uint8_t *)malloc(sizeof(uint8_t) * total_blocks);
 
-  table->metadata->rw_lock = (ReaderWriterLock *)malloc(sizeof(ReaderWriterLock));
-  rw_lock_init(table->metadata->rw_lock);
+  rw_lock_init(&table->metadata->rw_lock);
 
 	for (uint64_t i = 0; i < total_blocks; ++i) {
 
@@ -242,7 +241,7 @@ bool iceberg_lv2_insert(iceberg_table * table, KeyType key, ValueType value, uin
 
 bool iceberg_insert(iceberg_table * table, KeyType key, ValueType value, uint8_t thread_id) {
 
-  if (unlikely(!read_lock(table->metadata->rw_lock, WAIT_FOR_LOCK, thread_id)))
+  if (unlikely(!read_lock(&table->metadata->rw_lock, WAIT_FOR_LOCK, thread_id)))
     return false;
 
 	iceberg_metadata * metadata = table->metadata;
@@ -268,14 +267,14 @@ bool iceberg_insert(iceberg_table * table, KeyType key, ValueType value, uint8_t
 			blocks[index].slots[slot].val = value;
 
 			metadata->lv1_md[index].block_md[slot] = fprint;
-      read_unlock(table->metadata->rw_lock, thread_id);
+      read_unlock(&table->metadata->rw_lock, thread_id);
 			return true;
 		}
 	}
 
 	bool ret = iceberg_lv2_insert(table, key, value, index, thread_id);
   
-  read_unlock(table->metadata->rw_lock, thread_id);
+  read_unlock(&table->metadata->rw_lock, thread_id);
   return ret;
 }
 
@@ -358,7 +357,7 @@ bool iceberg_lv2_remove(iceberg_table * table, KeyType key, uint64_t lv3_index, 
 
 bool iceberg_remove(iceberg_table * table, KeyType key, uint8_t thread_id) {
 
-  if (unlikely(!read_lock(table->metadata->rw_lock, WAIT_FOR_LOCK, thread_id)))
+  if (unlikely(!read_lock(&table->metadata->rw_lock, WAIT_FOR_LOCK, thread_id)))
     return false;
 
 	iceberg_metadata * metadata = table->metadata;
@@ -380,14 +379,14 @@ bool iceberg_remove(iceberg_table * table, KeyType key, uint8_t thread_id) {
 
 			metadata->lv1_md[index].block_md[slot] = 0;
 			pc_add(metadata->lv1_balls, -1, thread_id);
-      read_unlock(table->metadata->rw_lock, thread_id);
+      read_unlock(&table->metadata->rw_lock, thread_id);
 			return true;
 		}
 	}
 
 	bool ret = iceberg_lv2_remove(table, key, index, thread_id);
 
-  read_unlock(table->metadata->rw_lock, thread_id);
+  read_unlock(&table->metadata->rw_lock, thread_id);
   return ret;
 }
 
@@ -452,7 +451,7 @@ bool iceberg_lv2_get_value(iceberg_table * table, KeyType key, ValueType **value
 
 bool iceberg_get_value(iceberg_table * table, KeyType key, ValueType **value, uint8_t thread_id) {
 
-  if (unlikely(!read_lock(table->metadata->rw_lock, WAIT_FOR_LOCK, thread_id)))
+  if (unlikely(!read_lock(&table->metadata->rw_lock, WAIT_FOR_LOCK, thread_id)))
     return false;
 
 	iceberg_metadata * metadata = table->metadata;
@@ -471,14 +470,14 @@ bool iceberg_get_value(iceberg_table * table, KeyType key, ValueType **value, ui
 
 		if (blocks[index].slots[slot].key == key) {
 			*value = &blocks[index].slots[slot].val;
-      read_unlock(table->metadata->rw_lock, thread_id);
+      read_unlock(&table->metadata->rw_lock, thread_id);
 			return true;
 		}
 	}
 
 	bool ret = iceberg_lv2_get_value(table, key, value, index);
 
-  read_unlock(table->metadata->rw_lock, thread_id);
+  read_unlock(&table->metadata->rw_lock, thread_id);
   return ret;
 }
 

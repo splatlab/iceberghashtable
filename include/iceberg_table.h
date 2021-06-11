@@ -55,14 +55,14 @@ extern "C" {
 		uint64_t nblocks;
 		uint64_t nslots;
 		uint64_t block_bits;
-		pc_t * lv1_balls;
-		pc_t * lv2_balls;
-		pc_t * lv3_balls;
+		pc_t lv1_balls;
+		pc_t lv2_balls;
+		pc_t lv3_balls;
 		iceberg_lv1_block_md * lv1_md;
 		iceberg_lv2_block_md * lv2_md;
 		uint64_t * lv3_sizes;
 		uint8_t * lv3_locks;
-    ReaderWriterLock *rw_lock;
+    ReaderWriterLock rw_lock;
 	} iceberg_metadata;
 
 	typedef struct iceberg_table {
