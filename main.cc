@@ -31,11 +31,11 @@ void do_inserts(uint8_t id, uint64_t *keys, uint64_t *values, uint64_t start, ui
 		}
 }
 
-void do_queries(uint64_t *keys, uint64_t start, uint64_t n, bool positive) {
+void do_queries(uint8_t id, uint64_t *keys, uint64_t start, uint64_t n, bool positive) {
 	
 	uint64_t *val;
 	for(uint64_t i = start; i < start + n; ++i)
-		if (iceberg_get_value(table, keys[i], &val) != positive) {
+		if (iceberg_get_value(table, keys[i], &val, id) != positive) {
 			
 			if(positive) printf("False negative query\n");
 			else printf("False positive query\n");
@@ -67,7 +67,7 @@ void do_mixed(uint8_t id, std::vector<std::pair<uint64_t, uint64_t>>& v, uint64_
 	
 	uint64_t *val;
 	for(uint64_t i = start; i < start + n; ++i)
-		if(iceberg_get_value(table, v[i].first, &val)) {
+		if(iceberg_get_value(table, v[i].first, &val, id)) {
 			
 			iceberg_remove(table, v[i].first, id);
 		} else iceberg_insert(table, v[i].first, v[i].second, id);

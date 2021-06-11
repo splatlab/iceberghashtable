@@ -3,6 +3,7 @@
 
 #include <inttypes.h>
 #include <stdbool.h>
+#include "lock.h"
 #include "partitioned_counter.h"
 
 #ifdef __cplusplus
@@ -62,6 +63,7 @@ extern "C" {
 		iceberg_lv2_block_md * lv2_md;
 		uint64_t * lv3_sizes;
 		uint8_t * lv3_locks;
+    ReaderWriterLock *rw_lock;
 	} iceberg_metadata;
 
 	typedef struct iceberg_table {
@@ -84,7 +86,7 @@ extern "C" {
 
 	bool iceberg_remove(iceberg_table * table, KeyType key, uint8_t thread_id);
 
-	bool iceberg_get_value(iceberg_table * table, KeyType key, ValueType **value);
+	bool iceberg_get_value(iceberg_table * table, KeyType key, ValueType **value, uint8_t thread_id);
 
 #ifdef __cplusplus
 }
