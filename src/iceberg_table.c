@@ -242,7 +242,7 @@ bool iceberg_lv2_insert(iceberg_table * table, KeyType key, ValueType value, uin
 
 bool iceberg_insert(iceberg_table * table, KeyType key, ValueType value, uint8_t thread_id) {
 
-  if (!read_lock(table->metadata->rw_lock, WAIT_FOR_LOCK, thread_id))
+  if (unlikely(!read_lock(table->metadata->rw_lock, WAIT_FOR_LOCK, thread_id)))
     return false;
 
 	iceberg_metadata * metadata = table->metadata;
@@ -357,7 +357,7 @@ bool iceberg_lv2_remove(iceberg_table * table, KeyType key, uint64_t lv3_index, 
 
 bool iceberg_remove(iceberg_table * table, KeyType key, uint8_t thread_id) {
 
-  if (!read_lock(table->metadata->rw_lock, WAIT_FOR_LOCK, thread_id))
+  if (unlikely(!read_lock(table->metadata->rw_lock, WAIT_FOR_LOCK, thread_id)))
     return false;
 
 	iceberg_metadata * metadata = table->metadata;
@@ -450,7 +450,7 @@ bool iceberg_lv2_get_value(iceberg_table * table, KeyType key, ValueType **value
 
 bool iceberg_get_value(iceberg_table * table, KeyType key, ValueType **value, uint8_t thread_id) {
 
-  if (!read_lock(table->metadata->rw_lock, WAIT_FOR_LOCK, thread_id))
+  if (unlikely(!read_lock(table->metadata->rw_lock, WAIT_FOR_LOCK, thread_id)))
     return false;
 
 	iceberg_metadata * metadata = table->metadata;
