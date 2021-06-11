@@ -3,7 +3,7 @@ CPP = clang++
 CFLAGS = -g -flto -O3 -Wall -march=native -pthread -DHUGE_TLB
 #CFLAGS = -g -march=native -pthread
 INCLUDE = -I ./include
-SOURCES = src/iceberg_table.c src/hashutil.c src/partitioned_counter.c
+SOURCES = src/iceberg_table.c src/hashutil.c src/partitioned_counter.c src/lock.c
 OBJECTS = $(subst src/,obj/,$(subst .c,.o,$(SOURCES)))
 LIBS = -lssl -lcrypto -lpmem
 
