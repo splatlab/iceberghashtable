@@ -16,23 +16,23 @@
 
 uint64_t seed[5] = { 12351327692179052ll, 23246347347385899ll, 35236262354132235ll, 13604702930934770ll, 57439820692984798ll };
 
-uint64_t nonzero_fprint(uint64_t hash) {
+static inline uint64_t nonzero_fprint(uint64_t hash) {
 	return hash & ((1 << FPRINT_BITS) - 2) ? hash : hash | 2;
 }
 
-uint64_t lv1_hash(KeyType key) {
+static inline uint64_t lv1_hash(KeyType key) {
 	return nonzero_fprint(MurmurHash64A(&key, FPRINT_BITS, seed[0]));
 }
 
-uint64_t lv1_hash_inline(KeyType key) {
+static inline uint64_t lv1_hash_inline(KeyType key) {
 	return nonzero_fprint(MurmurHash64A_inline(&key, FPRINT_BITS, seed[0]));
 }
 
-uint64_t lv2_hash(KeyType key, uint8_t i) {
+static inline uint64_t lv2_hash(KeyType key, uint8_t i) {
 	return nonzero_fprint(MurmurHash64A(&key, FPRINT_BITS, seed[i + 1]));
 }
 
-uint64_t lv2_hash_inline(KeyType key, uint8_t i) {
+static inline uint64_t lv2_hash_inline(KeyType key, uint8_t i) {
 	return nonzero_fprint(MurmurHash64A_inline(&key, FPRINT_BITS, seed[i + 1]));
 }
 
@@ -60,7 +60,7 @@ uint64_t tot_balls(iceberg_table * table) {
 	return lv1_balls(table) + lv2_balls(table) + lv3_balls(table);
 }
 
-uint64_t total_capacity(iceberg_table * table) {
+static inline uint64_t total_capacity(iceberg_table * table) {
 	return lv3_balls(table) + table->metadata.nblocks * ((1 << SLOT_BITS) + C_LV2 + MAX_LG_LG_N / D_CHOICES);
 }
 
@@ -68,24 +68,24 @@ double iceberg_load_factor(iceberg_table * table) {
 	return (double)tot_balls(table) / (double)total_capacity(table);
 }
 
-void split_hash(uint64_t hash, uint8_t *fprint, uint64_t *index, iceberg_metadata * metadata) {	
+static inline void split_hash(uint64_t hash, uint8_t *fprint, uint64_t *index, iceberg_metadata * metadata) {	
 	*fprint = hash & ((1 << FPRINT_BITS) - 1);
 	*index = (hash >> FPRINT_BITS) & ((1 << metadata->block_bits) - 1);
 }
 
-uint32_t slot_mask_32(uint8_t * metadata, uint8_t fprint) {
+static inline uint32_t slot_mask_32(uint8_t * metadata, uint8_t fprint) {
 	__m256i bcast = _mm256_set1_epi8(fprint);
 	__m256i block = _mm256_loadu_si256((const __m256i *)(metadata));
 	return _mm256_cmp_epi8_mask(bcast, block, _MM_CMPINT_EQ);
 }
 
-uint64_t slot_mask_64(uint8_t * metadata, uint8_t fprint) {
+static inline uint64_t slot_mask_64(uint8_t * metadata, uint8_t fprint) {
 	__m512i bcast = _mm512_set1_epi8(fprint);
 	__m512i block = _mm512_loadu_si512((const __m512i *)(metadata));
 	return _mm512_cmp_epi8_mask(bcast, block, _MM_CMPINT_EQ);
 }
 
-size_t round_up(size_t n, size_t k) {
+static inline size_t round_up(size_t n, size_t k) {
 	size_t rem = n % k;
 	if (rem == 0) {
 		return n;
@@ -161,7 +161,7 @@ int iceberg_init(iceberg_table *table, uint64_t log_slots) {
 	return 0;
 }
 
-bool iceberg_lv3_insert(iceberg_table * table, KeyType key, ValueType value, uint64_t lv3_index, uint8_t thread_id) {
+static inline bool iceberg_lv3_insert(iceberg_table * table, KeyType key, ValueType value, uint64_t lv3_index, uint8_t thread_id) {
 
 	iceberg_metadata * metadata = &table->metadata;
 	iceberg_lv3_list * lists = table->level3;
@@ -181,7 +181,7 @@ bool iceberg_lv3_insert(iceberg_table * table, KeyType key, ValueType value, uin
 	return true;
 }
 
-bool iceberg_lv2_insert(iceberg_table * table, KeyType key, ValueType value, uint64_t lv3_index, uint8_t thread_id) {
+static inline bool iceberg_lv2_insert(iceberg_table * table, KeyType key, ValueType value, uint64_t lv3_index, uint8_t thread_id) {
 
 	iceberg_metadata * metadata = &table->metadata;
 	iceberg_lv2_block * blocks = table->level2;
@@ -265,7 +265,7 @@ bool iceberg_insert(iceberg_table * table, KeyType key, ValueType value, uint8_t
   return ret;
 }
 
-bool iceberg_lv3_remove(iceberg_table * table, KeyType key, uint64_t lv3_index, uint8_t thread_id) {
+static inline bool iceberg_lv3_remove(iceberg_table * table, KeyType key, uint64_t lv3_index, uint8_t thread_id) {
 
 	iceberg_metadata * metadata = &table->metadata;
 	iceberg_lv3_list * lists = table->level3;
@@ -311,7 +311,7 @@ bool iceberg_lv3_remove(iceberg_table * table, KeyType key, uint64_t lv3_index, 
 	return false;
 }
 
-bool iceberg_lv2_remove(iceberg_table * table, KeyType key, uint64_t lv3_index, uint8_t thread_id) {
+static inline bool iceberg_lv2_remove(iceberg_table * table, KeyType key, uint64_t lv3_index, uint8_t thread_id) {
 
 	iceberg_metadata * metadata = &table->metadata;
 	iceberg_lv2_block * blocks = table->level2;
@@ -377,7 +377,7 @@ bool iceberg_remove(iceberg_table * table, KeyType key, uint8_t thread_id) {
   return ret;
 }
 
-bool iceberg_lv3_get_value(iceberg_table * table, KeyType key, ValueType **value, uint64_t lv3_index) {
+static inline bool iceberg_lv3_get_value(iceberg_table * table, KeyType key, ValueType **value, uint64_t lv3_index) {
 
 	iceberg_metadata * metadata = &table->metadata;
 	iceberg_lv3_list * lists = table->level3;
@@ -408,7 +408,7 @@ bool iceberg_lv3_get_value(iceberg_table * table, KeyType key, ValueType **value
 }
 
 
-bool iceberg_lv2_get_value(iceberg_table * table, KeyType key, ValueType **value, uint64_t lv3_index) {
+static inline bool iceberg_lv2_get_value(iceberg_table * table, KeyType key, ValueType **value, uint64_t lv3_index) {
 
 	iceberg_metadata * metadata = &table->metadata;
 	iceberg_lv2_block * blocks = table->level2;
@@ -468,7 +468,7 @@ bool iceberg_get_value(iceberg_table * table, KeyType key, ValueType **value, ui
   return ret;
 }
 
-void iceberg_resize(iceberg_table * table, uint8_t thread_id) {
+static inline void iceberg_resize(iceberg_table * table, uint8_t thread_id) {
   // compute new sizes
   uint64_t total_blocks = table->metadata.nblocks * 2;
   uint64_t total_size_in_bytes = (sizeof(iceberg_lv1_block) + sizeof(iceberg_lv2_block) + sizeof(iceberg_lv1_block_md) + sizeof(iceberg_lv2_block_md)) * total_blocks;
