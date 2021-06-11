@@ -24,18 +24,24 @@ void rw_lock_init(ReaderWriterLock *rwlock) {
  * Try to acquire a lock and spin until the lock is available.
  */
 bool read_lock(ReaderWriterLock *rwlock, uint8_t flag, uint8_t thread_id) {
+  pc_add(rwlock->pc_counter, 1, thread_id);
+
   if (GET_WAIT_FOR_LOCK(flag) != WAIT_FOR_LOCK) {
-    if (rwlock->writer == 0) {
-      pc_add(rwlock->pc_counter, 1, thread_id);
-      return true;
+    if (rwlock->writer) {
+      pc_add(rwlock->pc_counter, -1, thread_id);
+      return false;
     }
-  } else {
-    while (rwlock->writer != 0);
-    pc_add(rwlock->pc_counter, 1, thread_id);
     return true;
   }
 
-  return false;
+  while (rwlock->writer) {
+    pc_add(rwlock->pc_counter, -1, thread_id);
+    while (rwlock->writer)
+      ;
+    pc_add(rwlock->pc_counter, 1, thread_id);
+  }
+
+  return true;
 }
 
 void read_unlock(ReaderWriterLock *rwlock, uint8_t thread_id) {
@@ -54,12 +60,13 @@ bool write_lock(ReaderWriterLock *rwlock, uint8_t flag) {
       return false;
   } else {
     while (__sync_lock_test_and_set(&rwlock->writer, 1))
-      while (rwlock->writer != 0);
+      while (rwlock->writer != 0)
+        ;
   }
   // wait for readers to finish
-  do {
-    pc_sync(rwlock->pc_counter);
-  } while(rwlock->readers);
+  for (int i = 0; i < 8; i++)
+    while (rwlock->pc_counter->local_counters[i].counter)
+      ;
 
   return true;
 }
