@@ -14,7 +14,7 @@ CC = clang
 CPP = clang++
 CFLAGS = -g $(OPT) -Wall -march=native -pthread $(HUGE)
 INCLUDE = -I ./include
-SOURCES = src/iceberg_table.c src/hashutil.c src/partitioned_counter.c
+SOURCES = src/iceberg_table.c src/hashutil.c src/partitioned_counter.c src/lock.c
 OBJECTS = $(subst src/,obj/,$(subst .c,.o,$(SOURCES)))
 LIBS = -lssl -lcrypto -lpmem
 
