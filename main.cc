@@ -16,7 +16,7 @@ using namespace std::chrono;
 //vectors of key/value pairs in the table and not in the table
 std::vector<std::pair<uint64_t, uint64_t>> in_table, not_in_table;
 
-iceberg_table * table;
+iceberg_table table;
 
 double elapsed(high_resolution_clock::time_point t1, high_resolution_clock::time_point t2) {
 	return (duration_cast<duration<double>>(t2 - t1)).count();
@@ -25,7 +25,7 @@ double elapsed(high_resolution_clock::time_point t1, high_resolution_clock::time
 void do_inserts(uint8_t id, uint64_t *keys, uint64_t *values, uint64_t start, uint64_t n) {
 	
 	for(uint64_t i = start; i < start + n; ++i)
-		if(!iceberg_insert(table, keys[i], values[i], id)) {
+		if(!iceberg_insert(&table, keys[i], values[i], id)) {
 			printf("Failed insert\n");
 			exit(0);
 		}
@@ -35,7 +35,7 @@ void do_queries(uint8_t id, uint64_t *keys, uint64_t start, uint64_t n, bool pos
 	
 	uint64_t *val;
 	for(uint64_t i = start; i < start + n; ++i)
-		if (iceberg_get_value(table, keys[i], &val, id) != positive) {
+		if (iceberg_get_value(&table, keys[i], &val, id) != positive) {
 			
 			if(positive) printf("False negative query\n");
 			else printf("False positive query\n");
@@ -48,7 +48,7 @@ void do_removals(uint8_t id, uint64_t *keys, uint64_t start, uint64_t n) {
 	//uint64_t val;
 
 	for(uint64_t i = start; i < start + n; ++i)
-		if(!iceberg_remove(table, keys[i], id)) {
+		if(!iceberg_remove(&table, keys[i], id)) {
 			printf("Failed removal\n");
 			exit(0);
 		}
@@ -67,14 +67,13 @@ void do_mixed(uint8_t id, std::vector<std::pair<uint64_t, uint64_t>>& v, uint64_
 	
 	uint64_t *val;
 	for(uint64_t i = start; i < start + n; ++i)
-		if(iceberg_get_value(table, v[i].first, &val, id)) {
+		if(iceberg_get_value(&table, v[i].first, &val, id)) {
 			
-			iceberg_remove(table, v[i].first, id);
-		} else iceberg_insert(table, v[i].first, v[i].second, id);
+			iceberg_remove(&table, v[i].first, id);
+		} else iceberg_insert(&table, v[i].first, v[i].second, id);
 }
 
 int main (int argc, char** argv) {
-  iceberg_table table;
   
 	if (argc != 3 && argc != 4) {
 		fprintf(stderr, "Specify the log of the number of slots in the table and the number of threads to use.\n");
