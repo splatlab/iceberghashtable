@@ -38,15 +38,15 @@ extern "C" {
   } ReaderWriterLock;
 
 
-void rw_lock_init(ReaderWriterLock *rwlock);
+  void rw_lock_init(ReaderWriterLock *rwlock);
 
-bool read_lock(ReaderWriterLock *rwlock, uint8_t flag, uint8_t thread_id);
+  bool read_lock(ReaderWriterLock *rwlock, uint8_t flag, uint8_t thread_id);
 
-void read_unlock(ReaderWriterLock *rwlock, uint8_t thread_id);
+  void read_unlock(ReaderWriterLock *rwlock, uint8_t thread_id);
 
-bool write_lock(ReaderWriterLock *rwlock, uint8_t flag);
+  bool write_lock(ReaderWriterLock *rwlock, uint8_t flag);
 
-void write_unlock(ReaderWriterLock *rwlock);
+  void write_unlock(ReaderWriterLock *rwlock);
 
 #ifdef __cplusplus
 }
