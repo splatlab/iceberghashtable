@@ -16,36 +16,35 @@
 void rw_lock_init(ReaderWriterLock *rwlock) {
   rwlock->readers = 0;
   rwlock->writer = 0;
-  rwlock->pc_counter = (pc_t *)malloc(sizeof(pc_t));
-  pc_init(rwlock->pc_counter, &rwlock->readers, 8, 8);
+  pc_init(&rwlock->pc_counter, &rwlock->readers, 8, 8);
 }
 
 /**
  * Try to acquire a lock and spin until the lock is available.
  */
 bool read_lock(ReaderWriterLock *rwlock, uint8_t flag, uint8_t thread_id) {
-  __atomic_add_fetch(&rwlock->pc_counter->local_counters[thread_id].counter, 1, __ATOMIC_SEQ_CST);
+  __atomic_add_fetch(&rwlock->pc_counter.local_counters[thread_id].counter, 1, __ATOMIC_SEQ_CST);
 
   if (GET_WAIT_FOR_LOCK(flag) != WAIT_FOR_LOCK) {
     if (rwlock->writer) {
-      __atomic_add_fetch(&rwlock->pc_counter->local_counters[thread_id].counter, -1, __ATOMIC_SEQ_CST);
+      __atomic_add_fetch(&rwlock->pc_counter.local_counters[thread_id].counter, -1, __ATOMIC_SEQ_CST);
       return false;
     }
     return true;
   }
 
   while (rwlock->writer) {
-    __atomic_add_fetch(&rwlock->pc_counter->local_counters[thread_id].counter, -1, __ATOMIC_SEQ_CST);
+    __atomic_add_fetch(&rwlock->pc_counter.local_counters[thread_id].counter, -1, __ATOMIC_SEQ_CST);
     while (rwlock->writer)
       ;
-    __atomic_add_fetch(&rwlock->pc_counter->local_counters[thread_id].counter, 1, __ATOMIC_SEQ_CST);
+    __atomic_add_fetch(&rwlock->pc_counter.local_counters[thread_id].counter, 1, __ATOMIC_SEQ_CST);
   }
 
   return true;
 }
 
 void read_unlock(ReaderWriterLock *rwlock, uint8_t thread_id) {
-  __atomic_add_fetch(&rwlock->pc_counter->local_counters[thread_id].counter, -1, __ATOMIC_SEQ_CST);
+  __atomic_add_fetch(&rwlock->pc_counter.local_counters[thread_id].counter, -1, __ATOMIC_SEQ_CST);
   return;
 }
 
@@ -65,7 +64,7 @@ bool write_lock(ReaderWriterLock *rwlock, uint8_t flag) {
   }
   // wait for readers to finish
   for (int i = 0; i < 8; i++)
-    while (rwlock->pc_counter->local_counters[i].counter)
+    while (rwlock->pc_counter.local_counters[i].counter)
       ;
 
   return true;

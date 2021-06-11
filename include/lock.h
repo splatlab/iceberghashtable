@@ -34,7 +34,7 @@ extern "C" {
   typedef struct ReaderWriterLock {
     int64_t readers;
     volatile int writer;
-    pc_t * pc_counter;
+    pc_t pc_counter;
   } ReaderWriterLock;
 
 
