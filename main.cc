@@ -203,7 +203,7 @@ int main (int argc, char** argv) {
 	t1 = high_resolution_clock::now();
 
 	for(uint64_t i = 0; i < threads; ++i)
-		thread_list.emplace_back(do_queries, out_keys, i * (N / threads), N / threads, false);
+		thread_list.emplace_back(do_queries, i, out_keys, i * (N / threads), N / threads, false);
 	for(uint64_t i = 0; i < threads; ++i)
 		thread_list[i].join();
 	
@@ -219,7 +219,7 @@ int main (int argc, char** argv) {
 	t1 = high_resolution_clock::now();
 
 	for(uint64_t i = 0; i < threads; ++i)
-		thread_list.emplace_back(do_queries, in_keys, i * (N / threads), N / threads, true);
+		thread_list.emplace_back(do_queries, i, in_keys, i * (N / threads), N / threads, true);
 	for(uint64_t i = 0; i < threads; ++i)
 		thread_list[i].join();
 
@@ -268,7 +268,7 @@ int main (int argc, char** argv) {
 	}
 
 	for(uint64_t i = 0; i < threads; ++i)
-		thread_list.emplace_back(do_queries, removed, i * (N / 2 / threads), N / 2 / threads, false);
+		thread_list.emplace_back(do_queries, i, removed, i * (N / 2 / threads), N / 2 / threads, false);
 	for(uint64_t i = 0; i < threads; ++i)
 		thread_list[i].join();
 
@@ -279,7 +279,7 @@ int main (int argc, char** argv) {
 	t1 = high_resolution_clock::now();
 
 	for(uint64_t i = 0; i < threads; ++i)
-		thread_list.emplace_back(do_queries, non_removed, i * (N / 2 / threads), N / 2 / threads, true);
+		thread_list.emplace_back(do_queries, i, non_removed, i * (N / 2 / threads), N / 2 / threads, true);
 	for(uint64_t i = 0; i < threads; ++i)
 		thread_list[i].join();
 
