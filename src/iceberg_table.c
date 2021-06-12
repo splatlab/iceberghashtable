@@ -134,6 +134,10 @@ int iceberg_init(iceberg_table *table, uint64_t log_slots) {
     exit(1);
   }
   table->level3 = (iceberg_lv3_list *)malloc(sizeof(iceberg_lv3_list) * total_blocks);
+  if (!table->level3) {
+    perror("level3 malloc failed");
+    exit(1);
+  }
 
   table->metadata.total_size_in_bytes = total_size_in_bytes;
   table->metadata.nslots = 1 << log_slots;
@@ -189,7 +193,7 @@ static bool iceberg_setup_resize(iceberg_table * table, uint8_t ctr) {
     return true;
 
   // grab write lock
-  if (write_lock(&table->metadata.rw_lock, TRY_ONCE_LOCK))
+  if (!write_lock(&table->metadata.rw_lock, TRY_ONCE_LOCK))
     return false;
 
   // incr resize ctr
@@ -204,11 +208,12 @@ static bool iceberg_setup_resize(iceberg_table * table, uint8_t ctr) {
 
   // remap level1
   size_t level1_size = sizeof(iceberg_lv1_block) * total_blocks;
-  table->level1 = (iceberg_lv1_block *)mremap(table->level1, level1_size/2, level1_size, MREMAP_MAYMOVE);
-  if (!table->level1) {
+  void * temp = mremap(table->level1, level1_size/2, level1_size, MREMAP_MAYMOVE);
+  if (temp == (void *)-1) {
     perror("level1 remap failed");
     exit(1);
   }
+  table->level1 = (iceberg_lv1_block *)temp;
 
   // remap level2
   size_t level2_size = sizeof(iceberg_lv2_block) * total_blocks;
@@ -221,6 +226,10 @@ static bool iceberg_setup_resize(iceberg_table * table, uint8_t ctr) {
   // remap level3
   size_t level3_size = sizeof(iceberg_lv3_list) * total_blocks;
   table->level3 = (iceberg_lv3_list *)mremap(table->level3, level3_size/2, level3_size, MREMAP_MAYMOVE);
+  if (!table->level3) {
+    perror("level3 remap failed");
+    exit(1);
+  }
 
   // update metadata
   table->metadata.total_size_in_bytes = total_size_in_bytes;
