@@ -115,9 +115,9 @@ int iceberg_init(iceberg_table *table, uint64_t log_slots) {
   assert(table);
 
 #if defined(HUGE_TLB)
-  int mmap_flags = MAP_SHARED | MAP_ANONYMOUS | MAP_POPULATE | MAP_HUGETLB;
+  int mmap_flags = MAP_PRIVATE | MAP_ANONYMOUS | MAP_POPULATE | MAP_HUGETLB;
 #else
-  int mmap_flags = MAP_SHARED | MAP_ANONYMOUS | MAP_POPULATE;
+  int mmap_flags = MAP_PRIVATE | MAP_ANONYMOUS | MAP_POPULATE;
 #endif
   size_t level1_size = sizeof(iceberg_lv1_block) * total_blocks;
   //table->level1 = (iceberg_lv1_block *)malloc(level1_size);
