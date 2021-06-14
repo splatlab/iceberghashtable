@@ -165,8 +165,16 @@ int iceberg_init(iceberg_table *table, uint64_t log_slots) {
     perror("lv2_md malloc failed");
     exit(1);
   }
-  table->metadata.lv3_sizes = (uint64_t *)malloc(sizeof(uint64_t) * total_blocks);
-  table->metadata.lv3_locks = (uint8_t *)malloc(sizeof(uint8_t) * total_blocks);
+  table->metadata.lv3_sizes = (uint64_t *)mmap(NULL, sizeof(uint64_t) * total_blocks, PROT_READ | PROT_WRITE, mmap_flags, 0, 0);
+  if (!table->metadata.lv3_sizes) {
+    perror("lv3_sizes malloc failed");
+    exit(1);
+  }
+  table->metadata.lv3_locks = (uint8_t *)mmap(NULL, sizeof(uint8_t) * total_blocks, PROT_READ | PROT_WRITE, mmap_flags, 0, 0);
+  if (!table->metadata.lv3_locks) {
+    perror("lv3_locks malloc failed");
+    exit(1);
+  }
 
   rw_lock_init(&table->metadata.rw_lock);
 
@@ -261,12 +269,22 @@ static bool iceberg_setup_resize(iceberg_table * table, uint8_t ctr) {
   table->metadata.lv2_md = lm2temp;
 
   // re alloc level3 metadata (sizes, locks)
-  uint64_t * l3stemp = (uint64_t *)malloc(sizeof(uint64_t) * total_blocks);
-  memcpy(l3stemp, table->metadata.lv3_sizes, sizeof(uint64_t) * total_blocks / 2);
-  free(table->metadata.lv3_sizes);
-  table->metadata.lv3_sizes = l3stemp;
-  free(table->metadata.lv3_locks);  
-  table->metadata.lv3_locks = (uint8_t *)malloc(sizeof(uint8_t) * total_blocks);
+  size_t lv3_sizes_size = sizeof(uint64_t) * total_blocks;
+  void * lv3stemp = mremap(table->metadata.lv3_sizes, lv3_sizes_size/2, lv3_sizes_size, MREMAP_MAYMOVE);
+  if (lv3stemp == (void *)-1) {
+    perror("lv3_sizes remap failed");
+    exit(1);
+  }
+  table->metadata.lv3_sizes = lv3stemp;
+
+
+  size_t lv3_locks_size = sizeof(uint8_t) * total_blocks;
+  void * lv3ltemp = mremap(table->metadata.lv3_locks, lv3_locks_size/2, lv3_locks_size, MREMAP_MAYMOVE);
+  if (lv3ltemp == (void *)-1) {
+    perror("lv3_locks remap failed");
+    exit(1);
+  }
+  table->metadata.lv3_locks = lv3ltemp;
 
   write_unlock(&table->metadata.rw_lock);
   return true;
