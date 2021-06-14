@@ -191,7 +191,8 @@ int iceberg_init(iceberg_table *table, uint64_t log_slots) {
       table->metadata.lv2_md[i].block_md[j] = 0;
       table->level2[i].slots[j].key = table->level2[i].slots[j].val = 0;
     }
-
+    
+    table->level3->head = NULL;
     table->metadata.lv3_sizes[i] = table->metadata.lv3_locks[i] = 0;
   }
 
@@ -733,8 +734,8 @@ static bool iceberg_lv3_move_block(iceberg_table * table, uint8_t thread_id) {
   // relocate items in level3
   if(unlikely(table->metadata.lv3_sizes[bnum])) {
     iceberg_lv3_node * current_node = table->level3[bnum].head;
-
-    for(uint8_t j = 0; j < table->metadata.lv3_sizes[bnum]; ++j) {
+    
+    while (current_node != NULL) {
       KeyType key = current_node->key;
       ValueType value = current_node->val;
 
