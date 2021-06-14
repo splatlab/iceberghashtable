@@ -665,8 +665,14 @@ static bool iceberg_resize_block(iceberg_table * table, uint8_t thread_id) {
     split_hash(lv1_hash(key), &fprint, &index, &table->metadata);
     // move to new location
     if (index != bnum) {
-      iceberg_insert(table, key, value, thread_id);
-      iceberg_remove_resize(table, key, thread_id);
+      if (!iceberg_insert(table, key, value, thread_id)) {
+        printf("Failed insert during resize\n");
+        exit(0);
+      }
+      if (!iceberg_remove_resize(table, key, thread_id)) {
+        printf("Failed remove during resize\n");
+        exit(0);
+      }
     }
   }
 
@@ -681,8 +687,14 @@ static bool iceberg_resize_block(iceberg_table * table, uint8_t thread_id) {
     split_hash(lv1_hash(key), &fprint, &index, &table->metadata);
     // move to new location
     if (index != bnum) {
-      iceberg_insert(table, key, value, thread_id);
-      iceberg_lv2_remove(table, key, bnum, thread_id, mask);
+      if (!iceberg_insert(table, key, value, thread_id)) {
+        printf("Failed insert during resize\n");
+        exit(0);
+      }
+      if (!iceberg_lv2_remove(table, key, bnum, thread_id, mask)) {
+        printf("Failed remove during resize\n");
+        exit(0);
+      }
     }
   }
 
@@ -699,8 +711,14 @@ static bool iceberg_resize_block(iceberg_table * table, uint8_t thread_id) {
       split_hash(lv1_hash(key), &fprint, &index, &table->metadata);
       // move to new location
       if (index != bnum) {
-        iceberg_insert(table, key, value, thread_id);
-        iceberg_lv3_remove(table, key, bnum, thread_id);
+        if (!iceberg_insert(table, key, value, thread_id)) {
+          printf("Failed insert during resize\n");
+          exit(0);
+        }
+        if (!iceberg_lv3_remove(table, key, bnum, thread_id)) {
+          printf("Failed remove during resize\n");
+          exit(0);
+        }
       }
       current_node = current_node->next_node;
     }
