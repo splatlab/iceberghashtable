@@ -197,7 +197,7 @@ int iceberg_init(iceberg_table *table, uint64_t log_slots) {
 }
 
 static bool iceberg_setup_resize(iceberg_table * table, uint8_t ctr) {
-   printf("Setting up resize\n");
+  printf("Setting up resize\n");
   // resize happened b/w releasing read lock and now
   if (ctr != table->metadata.resize_ctr)
     return true;
@@ -674,24 +674,34 @@ static bool iceberg_resize_block(iceberg_table * table, uint8_t thread_id) {
         printf("Failed remove during resize lv1\n");
         exit(0);
       }
+      ValueType *val;
+      if (!iceberg_get_value(table, key, &val, thread_id)) {
+        printf("Key not found during resize lv1\n");
+        exit(0);
+      }
     }
   }
 
   // relocate items in level2
   uint64_t mask = ~(1ULL << (table->metadata.block_bits + FPRINT_BITS - 1));
   for (uint64_t j = 0; j < C_LV2 + MAX_LG_LG_N / D_CHOICES; ++j) {
-     KeyType key = table->level2[bnum].slots[j].key;
-     ValueType value = table->level2[bnum].slots[j].val;
+    KeyType key = table->level2[bnum].slots[j].key;
+    ValueType value = table->level2[bnum].slots[j].val;
 
-     // move to new location
-     if (!iceberg_insert(table, key, value, thread_id)) {
-        printf("Failed insert during resize lv2\n");
-        exit(0);
-     }
-     if (!iceberg_lv2_remove(table, key, bnum, thread_id, mask)) {
-        printf("Failed remove during resize lv2\n");
-        exit(0);
-     }
+    // move to new location
+    if (!iceberg_insert(table, key, value, thread_id)) {
+      printf("Failed insert during resize lv2\n");
+      exit(0);
+    }
+    if (!iceberg_lv2_remove(table, key, bnum, thread_id, mask)) {
+      printf("Failed remove during resize lv2\n");
+      exit(0);
+    }
+    ValueType *val;
+    if (!iceberg_get_value(table, key, &val, thread_id)) {
+      printf("Key not found during resize lv1\n");
+      exit(0);
+    }
   }
 
   // relocate items in level3
@@ -699,19 +709,24 @@ static bool iceberg_resize_block(iceberg_table * table, uint8_t thread_id) {
     iceberg_lv3_node * current_node = table->level3[bnum].head;
 
     for(uint8_t j = 0; j < table->metadata.lv3_sizes[bnum]; ++j) {
-       KeyType key = current_node->key;
-       ValueType value = current_node->val;
+      KeyType key = current_node->key;
+      ValueType value = current_node->val;
 
-       // move to new location
-       if (!iceberg_insert(table, key, value, thread_id)) {
-          printf("Failed insert during resize lv3\n");
-          exit(0);
-       }
-       if (!iceberg_lv3_remove(table, key, bnum, thread_id)) {
-          printf("Failed remove during resize lv3\n");
-          exit(0);
-       }
-       current_node = current_node->next_node;
+      // move to new location
+      if (!iceberg_insert(table, key, value, thread_id)) {
+        printf("Failed insert during resize lv3\n");
+        exit(0);
+      }
+      if (!iceberg_lv3_remove(table, key, bnum, thread_id)) {
+        printf("Failed remove during resize lv3\n");
+        exit(0);
+      }
+      ValueType *val;
+      if (!iceberg_get_value(table, key, &val, thread_id)) {
+        printf("Key not found during resize lv1\n");
+        exit(0);
+      }
+      current_node = current_node->next_node;
     }
   }
 
@@ -720,6 +735,6 @@ static bool iceberg_resize_block(iceberg_table * table, uint8_t thread_id) {
 
 static void iceberg_resize(iceberg_table * table, uint8_t thread_id) {
   while (!iceberg_resize_block(table, thread_id))
-     ;
+    ;
 }
 
