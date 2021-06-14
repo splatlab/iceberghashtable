@@ -482,6 +482,7 @@ static inline bool iceberg_lv2_remove(iceberg_table * table, KeyType key, uint64
       if (blocks[index].slots[slot].key == key) {
 
         metadata->lv2_md[index].block_md[slot] = 0;
+        blocks[index].slots[slot].key = blocks[index].slots[slot].val = 0;
         pc_add(&metadata->lv2_balls, -1, thread_id);
         return true;
       }
@@ -515,6 +516,7 @@ bool iceberg_remove(iceberg_table * table, KeyType key, uint8_t thread_id) {
     if (blocks[index].slots[slot].key == key) {
 
       metadata->lv1_md[index].block_md[slot] = 0;
+      blocks[index].slots[slot].key = blocks[index].slots[slot].val = 0;
       pc_add(&metadata->lv1_balls, -1, thread_id);
       read_unlock(&table->metadata.rw_lock, thread_id);
       return true;
@@ -661,6 +663,8 @@ static bool iceberg_lv1_move_block(iceberg_table * table, uint8_t thread_id) {
   // relocate items in level1
   for (uint64_t j = 0; j < (1 << SLOT_BITS); ++j) {
     KeyType key = table->level1[bnum].slots[j].key;
+    if (key == 0)
+      continue;
     ValueType value = table->level1[bnum].slots[j].val;
     uint8_t fprint;
     uint64_t index;
@@ -697,6 +701,8 @@ static bool iceberg_lv2_move_block(iceberg_table * table, uint8_t thread_id) {
   uint64_t mask = ~(1ULL << (table->metadata.block_bits + FPRINT_BITS - 1));
   for (uint64_t j = 0; j < C_LV2 + MAX_LG_LG_N / D_CHOICES; ++j) {
     KeyType key = table->level2[bnum].slots[j].key;
+    if (key == 0)
+      continue;
     ValueType value = table->level2[bnum].slots[j].val;
 
     // move to new location
