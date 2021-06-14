@@ -528,7 +528,7 @@ bool iceberg_remove_resize(iceberg_table * table, KeyType key, uint8_t thread_id
 
   iceberg_metadata * metadata = &table->metadata;
   iceberg_lv1_block * blocks = table->level1;
-  uint64_t mask = ~(1ULL << (metadata->block_bits - 1));
+  uint64_t mask = ~(1ULL << (metadata->block_bits + FPRINT_BITS - 1));
 
   uint8_t fprint;
   uint64_t index;
