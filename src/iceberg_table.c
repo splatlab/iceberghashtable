@@ -206,33 +206,32 @@ static bool iceberg_setup_resize(iceberg_table * table, uint8_t ctr) {
   uint64_t total_blocks = table->metadata.nblocks * 2;
   uint64_t total_size_in_bytes = (sizeof(iceberg_lv1_block) + sizeof(iceberg_lv2_block) + sizeof(iceberg_lv1_block_md) + sizeof(iceberg_lv2_block_md)) * total_blocks;
 
-  void * temp;
   // remap level1
   size_t level1_size = sizeof(iceberg_lv1_block) * total_blocks;
-  temp = mremap(table->level1, level1_size/2, level1_size, MREMAP_MAYMOVE);
-  if (temp == (void *)-1) {
+  void * l1temp = mremap(table->level1, level1_size/2, level1_size, MREMAP_MAYMOVE);
+  if (l1temp == (void *)-1) {
     perror("level1 remap failed");
     exit(1);
   }
-  table->level1 = temp;
+  table->level1 = l1temp;
 
   // remap level2
   size_t level2_size = sizeof(iceberg_lv2_block) * total_blocks;
-  temp = (iceberg_lv2_block *)mremap(table->level2, level2_size/2, level2_size, MREMAP_MAYMOVE);
-  if (temp == (void *)-1) {
+  void * l2temp = mremap(table->level2, level2_size/2, level2_size, MREMAP_MAYMOVE);
+  if (l2temp == (void *)-1) {
     perror("level2 remap failed");
     exit(1);
   }
-  table->level2 = temp;
+  table->level2 = l2temp;
 
   // remap level3
   size_t level3_size = sizeof(iceberg_lv3_list) * total_blocks;
-  temp = mremap(table->level3, level3_size/2, level3_size, MREMAP_MAYMOVE);
-  if (temp == (void *)-1) {
+  void * l3temp = mremap(table->level3, level3_size/2, level3_size, MREMAP_MAYMOVE);
+  if (l3temp == (void *)-1) {
     perror("level3 remap failed");
     exit(1);
   }
-  table->level3 = temp;
+  table->level3 = l3temp;
 
   // update metadata
   table->metadata.total_size_in_bytes = total_size_in_bytes;
@@ -243,27 +242,29 @@ static bool iceberg_setup_resize(iceberg_table * table, uint8_t ctr) {
   // remap level1 metadata
   size_t lv1_md_size = sizeof(iceberg_lv1_block_md) * total_blocks + 64;
   size_t old_lv1_md_size = sizeof(iceberg_lv1_block_md) * total_blocks/2 + 64;
-  temp = mremap(table->metadata.lv1_md, old_lv1_md_size, lv1_md_size, MREMAP_MAYMOVE);
-  if (temp == (void *)-1) {
+  void * lm1temp = mremap(table->metadata.lv1_md, old_lv1_md_size, lv1_md_size, MREMAP_MAYMOVE);
+  if (lm1temp == (void *)-1) {
     perror("lv1_md remap failed");
     exit(1);
   }
-  table->metadata.lv1_md = temp;
+  table->metadata.lv1_md = lm1temp;
 
   // remap level2 metadata
   size_t lv2_md_size = sizeof(iceberg_lv2_block_md) * total_blocks + 32;
   size_t old_lv2_md_size = sizeof(iceberg_lv2_block_md) * total_blocks/2 + 32;
-  temp = mremap(table->metadata.lv2_md, old_lv2_md_size, lv2_md_size, MREMAP_MAYMOVE);
-  if (temp == (void *)-1) {
+  void * lm2temp = mremap(table->metadata.lv2_md, old_lv2_md_size, lv2_md_size, MREMAP_MAYMOVE);
+  if (lm2temp == (void *)-1) {
     perror("lv2_md remap failed");
     exit(1);
   }
-  table->metadata.lv2_md = temp;
+  table->metadata.lv2_md = lm2temp;
 
   // re alloc level3 metadata (sizes, locks)
-  free(table->metadata.lv3_sizes);  
+  uint64_t * l3stemp = (uint64_t *)malloc(sizeof(uint64_t) * total_blocks);
+  memcpy(l3stemp, table->metadata.lv3_sizes, sizeof(uint64_t) * total_blocks / 2);
+  free(table->metadata.lv3_sizes);
+  table->metadata.lv3_sizes = l3stemp;
   free(table->metadata.lv3_locks);  
-  table->metadata.lv3_sizes = (uint64_t *)malloc(sizeof(uint64_t) * total_blocks);
   table->metadata.lv3_locks = (uint8_t *)malloc(sizeof(uint8_t) * total_blocks);
 
   write_unlock(&table->metadata.rw_lock);
