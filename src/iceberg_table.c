@@ -676,7 +676,7 @@ static bool iceberg_resize_block(iceberg_table * table, uint8_t thread_id) {
       }
       ValueType *val;
       if (!iceberg_get_value(table, key, &val, thread_id)) {
-        printf("Key not found during resize lv1\n");
+        printf("Key not found during resize lv1: %ld\n", lv1_hash(key));
         exit(0);
       }
     }
