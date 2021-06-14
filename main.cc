@@ -37,7 +37,7 @@ void do_queries(uint8_t id, uint64_t *keys, uint64_t start, uint64_t n, bool pos
   for(uint64_t i = start; i < start + n; ++i)
     if (iceberg_get_value(&table, keys[i], &val, id) != positive) {
 
-      if(positive) printf("False negative query\n");
+      if(positive) printf("False negative query key: " "%" PRIu64 "\n", keys[i]);
       else printf("False positive query\n");
       exit(0);
     }
@@ -202,7 +202,7 @@ int main (int argc, char** argv) {
   }
 
   std::mt19937 g(__builtin_ia32_rdtsc());
-  std::shuffle(&in_keys[0], &in_keys[N], g);
+  // std::shuffle(&in_keys[0], &in_keys[N], g);
 
   //	exit(0);
 
