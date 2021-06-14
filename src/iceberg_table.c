@@ -133,7 +133,8 @@ int iceberg_init(iceberg_table *table, uint64_t log_slots) {
     perror("level2 malloc failed");
     exit(1);
   }
-  table->level3 = (iceberg_lv3_list *)malloc(sizeof(iceberg_lv3_list) * total_blocks);
+  size_t level3_size = sizeof(iceberg_lv3_list) * total_blocks;
+  table->level3 = (iceberg_lv3_list *)mmap(NULL, level3_size, PROT_READ | PROT_WRITE, mmap_flags, 0, 0);
   if (!table->level3) {
     perror("level3 malloc failed");
     exit(1);
