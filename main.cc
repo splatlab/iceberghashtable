@@ -57,7 +57,7 @@ void do_removals(uint8_t id, uint64_t *keys, uint64_t start, uint64_t n) {
 void safe_rand_bytes(unsigned char *v, size_t n) {
   while (n > 0) {
     size_t round_size = n >= INT_MAX ? INT_MAX - 1 : n;
-    RAND_bytes(v, round_size);
+    RAND_pseudo_bytes(v, round_size);
     v += round_size;
     n -= round_size;
   }
@@ -122,6 +122,8 @@ int main (int argc, char** argv) {
     printf("Malloc in_keys failed\n");
     exit(0);
   }
+  unsigned int seed = 0x00beef00;
+  RAND_seed(&seed, sizeof(seed));
   safe_rand_bytes((unsigned char *)in_keys, sizeof(*in_keys) * N);
 
   uint64_t *in_values = (uint64_t *)malloc(N * sizeof(uint64_t));
