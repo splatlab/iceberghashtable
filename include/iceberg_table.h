@@ -67,7 +67,9 @@ extern "C" {
     uint8_t * lv3_locks;
     ReaderWriterLock rw_lock;
     uint8_t resize_ctr;
-    uint64_t resize_block_ctr;
+    uint64_t lv1_resize_block_ctr;
+    uint64_t lv2_resize_block_ctr;
+    uint64_t lv3_resize_block_ctr;
   } iceberg_metadata;
 
   typedef struct iceberg_table {

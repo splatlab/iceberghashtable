@@ -145,7 +145,9 @@ int iceberg_init(iceberg_table *table, uint64_t log_slots) {
   table->metadata.nblocks = total_blocks;
   table->metadata.block_bits = log_slots - SLOT_BITS;
   table->metadata.resize_ctr = 0;
-  table->metadata.resize_block_ctr = total_blocks;
+  table->metadata.lv1_resize_block_ctr = total_blocks;
+  table->metadata.lv2_resize_block_ctr = total_blocks;
+  table->metadata.lv3_resize_block_ctr = total_blocks;
 
   pc_init(&table->metadata.lv1_balls, &table->metadata.lv1_ctr, 64, 1000);
   pc_init(&table->metadata.lv2_balls, &table->metadata.lv2_ctr, 64, 1000);
@@ -210,7 +212,9 @@ static bool iceberg_setup_resize(iceberg_table * table, uint8_t ctr) {
   table->metadata.resize_ctr += 1;
 
   // reset the block ctr 
-  table->metadata.resize_block_ctr = 0;
+  table->metadata.lv1_resize_block_ctr = 0;
+  table->metadata.lv2_resize_block_ctr = 0;
+  table->metadata.lv3_resize_block_ctr = 0;
 
   // compute new sizes
   uint64_t total_blocks = table->metadata.nblocks * 2;
@@ -523,7 +527,7 @@ bool iceberg_remove(iceberg_table * table, KeyType key, uint8_t thread_id) {
   return ret;
 }
 
-bool iceberg_remove_resize(iceberg_table * table, KeyType key, uint8_t thread_id) {
+bool iceberg_remove_lv1_resize(iceberg_table * table, KeyType key, uint8_t thread_id) {
 
   if (unlikely(!read_lock(&table->metadata.rw_lock, WAIT_FOR_LOCK, thread_id)))
     return false;
@@ -553,10 +557,8 @@ bool iceberg_remove_resize(iceberg_table * table, KeyType key, uint8_t thread_id
     }
   }
 
-  bool ret = iceberg_lv2_remove(table, key, index, thread_id, mask);
-
   read_unlock(&table->metadata.rw_lock, thread_id);
-  return ret;
+  return false;
 }
 
 static inline bool iceberg_lv3_get_value(iceberg_table * table, KeyType key, ValueType **value, uint64_t lv3_index) {
@@ -650,9 +652,9 @@ bool iceberg_get_value(iceberg_table * table, KeyType key, ValueType **value, ui
   return ret;
 }
 
-static bool iceberg_resize_block(iceberg_table * table, uint8_t thread_id) {
+static bool iceberg_lv1_move_block(iceberg_table * table, uint8_t thread_id) {
   // grab a block 
-  uint64_t bnum = __atomic_fetch_add(&table->metadata.resize_block_ctr, 1, __ATOMIC_SEQ_CST);
+  uint64_t bnum = __atomic_fetch_add(&table->metadata.lv1_resize_block_ctr, 1, __ATOMIC_SEQ_CST);
   if (bnum >= (table->metadata.nblocks >> 1))
     return true;
 
@@ -670,7 +672,7 @@ static bool iceberg_resize_block(iceberg_table * table, uint8_t thread_id) {
         printf("Failed insert during resize lv1\n");
         exit(0);
       }
-      if (!iceberg_remove_resize(table, key, thread_id)) {
+      if (!iceberg_remove_lv1_resize(table, key, thread_id)) {
         printf("Failed remove during resize lv1\n");
         exit(0);
       }
@@ -681,6 +683,15 @@ static bool iceberg_resize_block(iceberg_table * table, uint8_t thread_id) {
       }
     }
   }
+
+  return false;
+}
+
+static bool iceberg_lv2_move_block(iceberg_table * table, uint8_t thread_id) {
+  // grab a block 
+  uint64_t bnum = __atomic_fetch_add(&table->metadata.lv2_resize_block_ctr, 1, __ATOMIC_SEQ_CST);
+  if (bnum >= (table->metadata.nblocks >> 1))
+    return true;
 
   // relocate items in level2
   uint64_t mask = ~(1ULL << (table->metadata.block_bits + FPRINT_BITS - 1));
@@ -703,6 +714,15 @@ static bool iceberg_resize_block(iceberg_table * table, uint8_t thread_id) {
       exit(0);
     }
   }
+
+  return false;
+}
+
+static bool iceberg_lv3_move_block(iceberg_table * table, uint8_t thread_id) {
+  // grab a block 
+  uint64_t bnum = __atomic_fetch_add(&table->metadata.lv3_resize_block_ctr, 1, __ATOMIC_SEQ_CST);
+  if (bnum >= (table->metadata.nblocks >> 1))
+    return true;
 
   // relocate items in level3
   if(unlikely(table->metadata.lv3_sizes[bnum])) {
@@ -734,7 +754,11 @@ static bool iceberg_resize_block(iceberg_table * table, uint8_t thread_id) {
 }
 
 static void iceberg_resize(iceberg_table * table, uint8_t thread_id) {
-  while (!iceberg_resize_block(table, thread_id))
+  while (!iceberg_lv1_move_block(table, thread_id))
+    ;
+  while (!iceberg_lv2_move_block(table, thread_id))
+    ;
+  while (!iceberg_lv3_move_block(table, thread_id))
     ;
 }
 
