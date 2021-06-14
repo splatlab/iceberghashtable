@@ -618,6 +618,7 @@ static bool iceberg_resize_block(iceberg_table * table, uint8_t thread_id) {
     return true;
 
   uint64_t total_blocks = table->metadata.nblocks;
+  uint64_t mask = ~(1ULL << table->metadata.block_bits);
   // relocate items in level1
   for (uint64_t j = 0; j < (1 << SLOT_BITS); ++j) {
     KeyType key = table->level1[bnum].slots[j].key;
@@ -629,6 +630,7 @@ static bool iceberg_resize_block(iceberg_table * table, uint8_t thread_id) {
     // move to new location
     if (index != bnum) {
       iceberg_insert(table, key, value, thread_id);
+      key = key & mask;
       iceberg_remove(table, key, thread_id);
     }
   }
@@ -644,6 +646,7 @@ static bool iceberg_resize_block(iceberg_table * table, uint8_t thread_id) {
     // move to new location
     if (index != bnum) {
       iceberg_insert(table, key, value, thread_id);
+      key = key & mask;
       iceberg_lv2_remove(table, key, bnum, thread_id);
     }
   }
@@ -662,6 +665,7 @@ static bool iceberg_resize_block(iceberg_table * table, uint8_t thread_id) {
       // move to new location
       if (index != bnum) {
         iceberg_insert(table, key, value, thread_id);
+        key = key & mask;
         iceberg_lv3_remove(table, key, bnum, thread_id);
       }
       current_node = current_node->next_node;
