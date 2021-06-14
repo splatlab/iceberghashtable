@@ -673,7 +673,7 @@ static bool iceberg_lv1_move_block(iceberg_table * table, uint8_t thread_id) {
         exit(0);
       }
       if (!iceberg_remove_lv1_resize(table, key, thread_id)) {
-        printf("Failed remove during resize lv1\n");
+        printf("Failed remove during resize lv1. key: %ld, block: %ld\n", key, bnum);
         exit(0);
       }
       ValueType *val;
