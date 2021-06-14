@@ -613,7 +613,9 @@ bool iceberg_get_value(iceberg_table * table, KeyType key, ValueType **value, ui
 
 static bool iceberg_resize_block(iceberg_table * table, uint8_t thread_id) {
   // grab a block 
-  uint64_t bnum = __atomic_add_fetch(&table->metadata.resize_block_ctr, 1, __ATOMIC_SEQ_CST);
+  uint64_t bnum = __atomic_fetch_add(&table->metadata.resize_block_ctr, 1, __ATOMIC_SEQ_CST);
+  if (bnum >= (table->metadata.nblocks << 2))
+    return true;
 
   uint64_t total_blocks = table->metadata.nblocks;
   // relocate items in level1
@@ -666,8 +668,6 @@ static bool iceberg_resize_block(iceberg_table * table, uint8_t thread_id) {
     }
   }
 
-  if (bnum == (table->metadata.nblocks << 2))
-    return true;
   return false;
 }
 
