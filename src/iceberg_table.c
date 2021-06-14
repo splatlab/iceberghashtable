@@ -454,7 +454,7 @@ static inline bool iceberg_lv3_remove(iceberg_table * table, KeyType key, uint64
   return false;
 }
 
-static inline bool iceberg_lv2_remove(iceberg_table * table, KeyType key, uint64_t lv3_index, uint8_t thread_id) {
+static inline bool iceberg_lv2_remove(iceberg_table * table, KeyType key, uint64_t lv3_index, uint8_t thread_id, KeyType mask) {
 
   iceberg_metadata * metadata = &table->metadata;
   iceberg_lv2_block * blocks = table->level2;
@@ -464,7 +464,7 @@ static inline bool iceberg_lv2_remove(iceberg_table * table, KeyType key, uint64
     uint8_t fprint;
     uint64_t index;
 
-    split_hash(lv2_hash(key, i), &fprint, &index, metadata);
+    split_hash(lv2_hash(key, i) & mask, &fprint, &index, metadata);
 
     __mmask32 md_mask = slot_mask_32(metadata->lv2_md[index].block_md, fprint) & ((1 << (C_LV2 + MAX_LG_LG_N / D_CHOICES)) - 1);
     uint8_t popct = __builtin_popcount(md_mask);
@@ -492,6 +492,7 @@ bool iceberg_remove(iceberg_table * table, KeyType key, uint8_t thread_id) {
 
   iceberg_metadata * metadata = &table->metadata;
   iceberg_lv1_block * blocks = table->level1;
+  uint64_t mask = UINT64_MAX;
 
   uint8_t fprint;
   uint64_t index;
@@ -514,7 +515,43 @@ bool iceberg_remove(iceberg_table * table, KeyType key, uint8_t thread_id) {
     }
   }
 
-  bool ret = iceberg_lv2_remove(table, key, index, thread_id);
+  bool ret = iceberg_lv2_remove(table, key, index, thread_id, mask);
+
+  read_unlock(&table->metadata.rw_lock, thread_id);
+  return ret;
+}
+
+bool iceberg_remove_resize(iceberg_table * table, KeyType key, uint8_t thread_id) {
+
+  if (unlikely(!read_lock(&table->metadata.rw_lock, WAIT_FOR_LOCK, thread_id)))
+    return false;
+
+  iceberg_metadata * metadata = &table->metadata;
+  iceberg_lv1_block * blocks = table->level1;
+  uint64_t mask = ~(1ULL << (metadata->block_bits - 1));
+
+  uint8_t fprint;
+  uint64_t index;
+
+  split_hash(lv1_hash(key) & mask, &fprint, &index, metadata);
+
+  __mmask64 md_mask = slot_mask_64(metadata->lv1_md[index].block_md, fprint);
+  uint8_t popct = __builtin_popcountll(md_mask);
+
+  for(uint8_t i = 0; i < popct; ++i) {
+
+    uint8_t slot = word_select(md_mask, i);
+
+    if (blocks[index].slots[slot].key == key) {
+
+      metadata->lv1_md[index].block_md[slot] = 0;
+      pc_add(&metadata->lv1_balls, -1, thread_id);
+      read_unlock(&table->metadata.rw_lock, thread_id);
+      return true;
+    }
+  }
+
+  bool ret = iceberg_lv2_remove(table, key, index, thread_id, mask);
 
   read_unlock(&table->metadata.rw_lock, thread_id);
   return ret;
@@ -618,7 +655,6 @@ static bool iceberg_resize_block(iceberg_table * table, uint8_t thread_id) {
     return true;
 
   uint64_t total_blocks = table->metadata.nblocks;
-  uint64_t mask = ~(1ULL << table->metadata.block_bits);
   // relocate items in level1
   for (uint64_t j = 0; j < (1 << SLOT_BITS); ++j) {
     KeyType key = table->level1[bnum].slots[j].key;
@@ -630,12 +666,12 @@ static bool iceberg_resize_block(iceberg_table * table, uint8_t thread_id) {
     // move to new location
     if (index != bnum) {
       iceberg_insert(table, key, value, thread_id);
-      key = key & mask;
-      iceberg_remove(table, key, thread_id);
+      iceberg_remove_resize(table, key, thread_id);
     }
   }
 
   // relocate items in level2
+  uint64_t mask = ~(1ULL << (table->metadata.block_bits - 1));
   for (uint64_t j = 0; j < C_LV2 + MAX_LG_LG_N / D_CHOICES; ++j) {
     KeyType key = table->level2[bnum].slots[j].key;
     ValueType value = table->level2[bnum].slots[j].val;
@@ -646,8 +682,7 @@ static bool iceberg_resize_block(iceberg_table * table, uint8_t thread_id) {
     // move to new location
     if (index != bnum) {
       iceberg_insert(table, key, value, thread_id);
-      key = key & mask;
-      iceberg_lv2_remove(table, key, bnum, thread_id);
+      iceberg_lv2_remove(table, key, bnum, thread_id, mask);
     }
   }
 
@@ -665,7 +700,6 @@ static bool iceberg_resize_block(iceberg_table * table, uint8_t thread_id) {
       // move to new location
       if (index != bnum) {
         iceberg_insert(table, key, value, thread_id);
-        key = key & mask;
         iceberg_lv3_remove(table, key, bnum, thread_id);
       }
       current_node = current_node->next_node;
