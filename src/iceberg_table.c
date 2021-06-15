@@ -799,7 +799,7 @@ void * iceberg_move(void * arg) {
       break;
   }
 
-  return NULL;
+  pthread_exit(NULL);
 }
 
 static void * iceberg_resize(void * t) {
@@ -825,6 +825,6 @@ static void * iceberg_resize(void * t) {
     }
   }
 
-  return NULL;
+  pthread_exit(NULL);
 }
 
