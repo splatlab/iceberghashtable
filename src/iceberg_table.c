@@ -685,6 +685,7 @@ static bool iceberg_lv1_move_block(iceberg_table * table, uint8_t thread_id) {
   if (bnum >= (table->metadata.nblocks >> 1))
     return true;
 
+  printf("Moving block %ld\n", bnum);
   // relocate items in level1
   for (uint64_t j = 0; j < (1 << SLOT_BITS); ++j) {
     KeyType key = table->level1[bnum].slots[j].key;
