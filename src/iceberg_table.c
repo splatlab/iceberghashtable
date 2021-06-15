@@ -391,13 +391,11 @@ bool iceberg_insert(iceberg_table * table, KeyType key, ValueType value, uint8_t
   uint8_t ctr = table->metadata.resize_ctr;
   if (unlikely(need_resize(table))) {
     read_unlock(&table->metadata.rw_lock, thread_id);
-    if (!iceberg_setup_resize(table, ctr))
-      return false;
-
-    pthread_mutex_lock(&resize_mutex);
-    pthread_cond_signal(&resize_cond);
-    pthread_mutex_unlock(&resize_mutex);
-
+    if (iceberg_setup_resize(table, ctr)) {
+      pthread_mutex_lock(&resize_mutex);
+      pthread_cond_signal(&resize_cond);
+      pthread_mutex_unlock(&resize_mutex);
+    }
     /*iceberg_resize(table, thread_id);*/
     /*printf("Resize done\n");*/
 
