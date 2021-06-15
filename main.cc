@@ -186,6 +186,7 @@ int main (int argc, char** argv) {
     printf("Total inserts: %ld\n", tot_balls(&table));
   }
 
+  iceberg_end(&table);
   //	exit(0);
 
   uint64_t max_size = 0, sum_sizes = 0;
@@ -293,7 +294,6 @@ int main (int argc, char** argv) {
   printf("Positive queries after removals: %f /sec\n", num_removed / elapsed(t1, t2));
   thread_list.clear();
 
-  iceberg_end(&table);
   /*
      printf("\nMIXED WORKLOAD, HIGH LOAD FACTOR\n");
 
