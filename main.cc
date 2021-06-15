@@ -55,15 +55,15 @@ void do_removals(uint8_t id, uint64_t *keys, uint64_t start, uint64_t n) {
 }
 
 void safe_rand_bytes(unsigned char *v, size_t n) {
-  while (n > 0) {
-    size_t round_size = n >= INT_MAX ? INT_MAX - 1 : n;
-    RAND_bytes(v, round_size);
-    v += round_size;
-    n -= round_size;
-  }
-  //for (uint64_t i = 0; i < n; ++i) {
-  //v[i] = rand();
+  //while (n > 0) {
+  //size_t round_size = n >= INT_MAX ? INT_MAX - 1 : n;
+  //RAND_bytes(v, round_size);
+  //v += round_size;
+  //n -= round_size;
   //}
+  for (uint64_t i = 0; i < n; ++i) {
+    v[i] = rand();
+  }
 }
 
 void do_mixed(uint8_t id, std::vector<std::pair<uint64_t, uint64_t>>& v, uint64_t start, uint64_t n) {
@@ -202,7 +202,7 @@ int main (int argc, char** argv) {
   }
 
   std::mt19937 g(__builtin_ia32_rdtsc());
-  std::shuffle(&in_keys[0], &in_keys[N], g);
+  //std::shuffle(&in_keys[0], &in_keys[N], g);
 
   //	exit(0);
 
