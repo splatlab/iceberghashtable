@@ -106,8 +106,8 @@ int main (int argc, char** argv) {
     printf("Creation time: %f\n", elapsed(t1, t2));
   }
 
-  srand(time(NULL));
-  //srand(0);
+  //srand(time(NULL));
+  srand(0);
 
   //Generating vectors of size N for data contained and not contained in the tablea
   //
