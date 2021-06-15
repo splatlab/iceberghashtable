@@ -70,6 +70,7 @@ extern "C" {
     uint64_t lv1_resize_block_ctr;
     uint64_t lv2_resize_block_ctr;
     uint64_t lv3_resize_block_ctr;
+    bool end_flag;
   } iceberg_metadata;
 
   typedef struct iceberg_table {
@@ -93,6 +94,8 @@ extern "C" {
   bool iceberg_remove(iceberg_table * table, KeyType key, uint8_t thread_id);
 
   bool iceberg_get_value(iceberg_table * table, KeyType key, ValueType **value, uint8_t thread_id);
+
+  void iceberg_end(iceberg_table * table);
 
 #ifdef __cplusplus
 }

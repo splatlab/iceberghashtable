@@ -292,6 +292,8 @@ int main (int argc, char** argv) {
   t2 = high_resolution_clock::now();
   printf("Positive queries after removals: %f /sec\n", num_removed / elapsed(t1, t2));
   thread_list.clear();
+
+  iceberg_end(&table);
   /*
      printf("\nMIXED WORKLOAD, HIGH LOAD FACTOR\n");
 

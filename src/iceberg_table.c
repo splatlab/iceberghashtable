@@ -192,6 +192,7 @@ int iceberg_init(iceberg_table *table, uint64_t log_slots) {
     perror("Error creating resize thread\n");
     exit(1);
   }
+  table->metadata.end_flag = false;
 
   for (uint64_t i = 0; i < total_blocks; ++i) {
 
@@ -210,6 +211,13 @@ int iceberg_init(iceberg_table *table, uint64_t log_slots) {
   }
 
   return 0;
+}
+
+void iceberg_end(iceberg_table * table) {
+  table->metadata.end_flag = true;
+  pthread_mutex_lock(&resize_mutex);
+  pthread_cond_signal(&resize_cond);
+  pthread_mutex_unlock(&resize_mutex);
 }
 
 static bool iceberg_setup_resize(iceberg_table * table, uint8_t ctr) {
@@ -386,8 +394,9 @@ bool iceberg_insert(iceberg_table * table, KeyType key, ValueType value, uint8_t
     if (!iceberg_setup_resize(table, ctr))
       return false;
 
-    pthread_mutex_unlock(&resize_mutex);
+    pthread_mutex_lock(&resize_mutex);
     pthread_cond_signal(&resize_cond);
+    pthread_mutex_unlock(&resize_mutex);
 
     /*iceberg_resize(table, thread_id);*/
     /*printf("Resize done\n");*/
@@ -806,10 +815,12 @@ static void * iceberg_resize(void * t) {
   iceberg_table * table = (iceberg_table *)t;
   pthread_t thr_list[RESIZE_THREADS];
 
-  while (true) {
+  while (!table->metadata.end_flag) {
     pthread_mutex_lock(&resize_mutex);
-    pthread_cond_wait(&resize_cond, &resize_mutex);
-    pthread_mutex_unlock(&resize_mutex);
+    while (true)
+      pthread_cond_wait(&resize_cond, &resize_mutex);
+    if (table->metadata.end_flag)
+      break;
     // move levels
     for (uint64_t i = 1; i <= 3; ++i) {
       for (uint64_t j = 0; j < RESIZE_THREADS; ++j) {
@@ -823,6 +834,7 @@ static void * iceberg_resize(void * t) {
         pthread_join(thr_list[i], NULL);
       }
     }
+    pthread_mutex_unlock(&resize_mutex);
   }
 
   pthread_exit(NULL);
