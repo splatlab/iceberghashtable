@@ -817,10 +817,12 @@ static void * iceberg_resize(void * t) {
 
   while (!table->metadata.end_flag) {
     pthread_mutex_lock(&resize_mutex);
-    while (true)
+    while (!table->metadata.end_flag)
       pthread_cond_wait(&resize_cond, &resize_mutex);
-    if (table->metadata.end_flag)
+    if (table->metadata.end_flag) {
+      pthread_mutex_unlock(&resize_mutex);
       break;
+    }
     // move levels
     for (uint64_t i = 1; i <= 3; ++i) {
       for (uint64_t j = 0; j < RESIZE_THREADS; ++j) {
