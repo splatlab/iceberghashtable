@@ -3,6 +3,7 @@
 #include <string.h>
 #include <assert.h>
 #include <stdlib.h>
+#include <pthread.h>
 #include <immintrin.h>
 #include <tmmintrin.h>
 #include <sys/mman.h>
@@ -15,6 +16,7 @@
 #define unlikely(x) __builtin_expect((x),0)
 
 #define LOAD_CHECK 100000
+#define RESIZE_THREADS 4
 
 uint64_t seed[5] = { 12351327692179052ll, 23246347347385899ll, 35236262354132235ll, 13604702930934770ll, 57439820692984798ll };
 
@@ -293,6 +295,7 @@ static bool iceberg_setup_resize(iceberg_table * table, uint8_t ctr) {
   table->metadata.lv3_locks = lv3ltemp;
 
   write_unlock(&table->metadata.rw_lock);
+  printf("Setting up finished\n");
   return true;
 }
 
@@ -361,7 +364,7 @@ static inline bool iceberg_lv2_insert(iceberg_table * table, KeyType key, ValueT
   return iceberg_lv3_insert(table, key, value, lv3_index, thread_id);
 }
 
-static void iceberg_resize(iceberg_table * table, uint8_t thread_id);
+static void * iceberg_resize(void * t);
 
 bool iceberg_insert(iceberg_table * table, KeyType key, ValueType value, uint8_t thread_id) {
 
@@ -374,8 +377,14 @@ bool iceberg_insert(iceberg_table * table, KeyType key, ValueType value, uint8_t
     if (!iceberg_setup_resize(table, ctr))
       return false;
 
-    iceberg_resize(table, thread_id);
-    printf("Resize done\n");
+    pthread_t resize_thr;
+    if (pthread_create(&resize_thr, NULL, iceberg_resize, table) != 0) {
+      perror("Error creating resize thread\n");
+      exit(1);
+    }
+    
+    /*iceberg_resize(table, thread_id);*/
+    /*printf("Resize done\n");*/
 
     if (unlikely(!read_lock(&table->metadata.rw_lock, WAIT_FOR_LOCK, thread_id)))
       return false;
@@ -760,12 +769,51 @@ static bool iceberg_lv3_move_block(iceberg_table * table, uint8_t thread_id) {
   return false;
 }
 
-static void iceberg_resize(iceberg_table * table, uint8_t thread_id) {
-  while (!iceberg_lv1_move_block(table, thread_id))
-    ;
-  while (!iceberg_lv2_move_block(table, thread_id))
-    ;
-  while (!iceberg_lv3_move_block(table, thread_id))
-    ;
+typedef struct resize_str {
+  iceberg_table * table;
+  uint8_t level;
+  uint8_t thread_id;
+} resize_str;
+
+void * iceberg_move(void * arg) {
+  resize_str * str = (resize_str *)arg;
+
+  switch (str->level) {
+    case 1:
+      while (!iceberg_lv1_move_block(str->table, str->thread_id))
+        ;
+      break;
+    case 2:
+      while (!iceberg_lv2_move_block(str->table, str->thread_id))
+        ;
+      break;
+    case 3:
+      while (!iceberg_lv3_move_block(str->table, str->thread_id))
+        ;
+      break;
+  }
+
+  return NULL;
+}
+
+static void * iceberg_resize(void * t) {
+  iceberg_table * table = (iceberg_table *)t;
+  pthread_t thr_list[RESIZE_THREADS];
+
+  // move levels
+  for (uint64_t i = 1; i <= 3; ++i) {
+    for (uint64_t j = 0; j < RESIZE_THREADS; ++j) {
+      resize_str str = {table, i, j};
+      if (pthread_create(&thr_list[j], NULL, iceberg_move, &str) != 0) {
+        perror("Error creating resize thread\n");
+        exit(1);
+      }
+    }
+    for (uint64_t i = 0; i < RESIZE_THREADS; ++i) {
+      pthread_join(thr_list[i], NULL);
+    }
+  }
+
+  return NULL;
 }
 
