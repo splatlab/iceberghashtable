@@ -817,8 +817,7 @@ static void * iceberg_resize(void * t) {
 
   while (!table->metadata.end_flag) {
     pthread_mutex_lock(&resize_mutex);
-    while (!table->metadata.end_flag)
-      pthread_cond_wait(&resize_cond, &resize_mutex);
+    pthread_cond_wait(&resize_cond, &resize_mutex);
     if (table->metadata.end_flag) {
       pthread_mutex_unlock(&resize_mutex);
       break;
