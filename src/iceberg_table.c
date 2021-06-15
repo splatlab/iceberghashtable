@@ -382,6 +382,8 @@ bool iceberg_insert(iceberg_table * table, KeyType key, ValueType value, uint8_t
       perror("Error creating resize thread\n");
       exit(1);
     }
+
+    pthread_join(resize_thr, NULL);
     
     /*iceberg_resize(table, thread_id);*/
     /*printf("Resize done\n");*/
