@@ -385,12 +385,8 @@ static inline bool iceberg_lv2_insert(iceberg_table * table, KeyType key, ValueT
 
 bool iceberg_insert(iceberg_table * table, KeyType key, ValueType value, uint8_t thread_id) {
 
-  if (unlikely(!read_lock(&table->metadata.rw_lock, WAIT_FOR_LOCK, thread_id)))
-    return false;
-
   uint8_t ctr = table->metadata.resize_ctr;
   if (unlikely(need_resize(table))) {
-    read_unlock(&table->metadata.rw_lock, thread_id);
     if (iceberg_setup_resize(table, ctr)) {
       pthread_mutex_lock(&resize_mutex);
       pthread_cond_signal(&resize_cond);
@@ -398,10 +394,10 @@ bool iceberg_insert(iceberg_table * table, KeyType key, ValueType value, uint8_t
     }
     /*iceberg_resize(table, thread_id);*/
     /*printf("Resize done\n");*/
-
-    if (unlikely(!read_lock(&table->metadata.rw_lock, WAIT_FOR_LOCK, thread_id)))
-      return false;
   }
+
+  if (unlikely(!read_lock(&table->metadata.rw_lock, WAIT_FOR_LOCK, thread_id)))
+    return false;
 
   iceberg_metadata * metadata = &table->metadata;
   iceberg_lv1_block * blocks = table->level1;	
