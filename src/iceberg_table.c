@@ -221,17 +221,11 @@ void iceberg_end(iceberg_table * table) {
 }
 
 static bool iceberg_setup_resize(iceberg_table * table, uint8_t ctr) {
-  // resize happened b/w releasing read lock and now
-  if (ctr != table->metadata.resize_ctr)
-    return true;
-
   // grab write lock
   if (!write_lock(&table->metadata.rw_lock, TRY_ONCE_LOCK))
     return false;
 
   printf("Setting up resize\n");
-  // incr resize ctr
-  table->metadata.resize_ctr += 1;
 
   // reset the block ctr 
   table->metadata.lv1_resize_block_ctr = 0;
