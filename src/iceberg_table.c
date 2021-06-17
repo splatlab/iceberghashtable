@@ -15,7 +15,6 @@
 #define likely(x)   __builtin_expect((x),1)
 #define unlikely(x) __builtin_expect((x),0)
 
-#define LOAD_CHECK 100000
 #define RESIZE_THREADS 1
 
 uint64_t seed[5] = { 12351327692179052ll, 23246347347385899ll, 35236262354132235ll, 13604702930934770ll, 57439820692984798ll };
@@ -77,7 +76,7 @@ inline double iceberg_load_factor(iceberg_table * table) {
 
 bool need_resize(iceberg_table * table) {
   uint64_t total_items = tot_balls(table);
-  if (unlikely(total_items && total_items % LOAD_CHECK == 0)) {
+  if (unlikely(total_items && total_items % table->metadata.load_check == 0)) {
     double lf = iceberg_load_factor(table);
     if (lf >= 0.9)
       return true;
@@ -155,6 +154,7 @@ int iceberg_init(iceberg_table *table, uint64_t log_slots) {
   table->metadata.lv1_resize_block_ctr = total_blocks;
   table->metadata.lv2_resize_block_ctr = total_blocks;
   table->metadata.lv3_resize_block_ctr = total_blocks;
+  table->metadata.load_check = 0.05 * table->metadata.nslots;
 
   pc_init(&table->metadata.lv1_balls, &table->metadata.lv1_ctr, 64, 1000);
   pc_init(&table->metadata.lv2_balls, &table->metadata.lv2_ctr, 64, 1000);

@@ -71,6 +71,7 @@ extern "C" {
     uint64_t lv2_resize_block_ctr;
     uint64_t lv3_resize_block_ctr;
     bool end_flag;
+    uint64_t load_check;
   } iceberg_metadata;
 
   typedef struct iceberg_table {
