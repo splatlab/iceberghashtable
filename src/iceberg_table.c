@@ -15,7 +15,7 @@
 #define likely(x)   __builtin_expect((x),1)
 #define unlikely(x) __builtin_expect((x),0)
 
-#define LOAD_CHECK 100000
+#define LOAD_CHECK 1000
 #define RESIZE_THREADS 1
 
 uint64_t seed[5] = { 12351327692179052ll, 23246347347385899ll, 35236262354132235ll, 13604702930934770ll, 57439820692984798ll };
