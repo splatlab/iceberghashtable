@@ -111,7 +111,7 @@ int main (int argc, char** argv) {
 
   //Generating vectors of size N for data contained and not contained in the tablea
   //
-  uint64_t splits = 19;
+  uint64_t splits = 1;
 
   uint64_t size = N / splits / threads;
 
