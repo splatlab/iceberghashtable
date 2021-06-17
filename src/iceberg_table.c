@@ -221,7 +221,6 @@ void iceberg_end(iceberg_table * table) {
 }
 
 static bool iceberg_setup_resize(iceberg_table * table, uint8_t ctr) {
-  printf("Setting up resize\n");
   // resize happened b/w releasing read lock and now
   if (ctr != table->metadata.resize_ctr)
     return true;
@@ -230,6 +229,7 @@ static bool iceberg_setup_resize(iceberg_table * table, uint8_t ctr) {
   if (!write_lock(&table->metadata.rw_lock, TRY_ONCE_LOCK))
     return false;
 
+  printf("Setting up resize\n");
   // incr resize ctr
   table->metadata.resize_ctr += 1;
 
@@ -313,8 +313,8 @@ static bool iceberg_setup_resize(iceberg_table * table, uint8_t ctr) {
   }
   table->metadata.lv3_locks = lv3ltemp;
 
-  write_unlock(&table->metadata.rw_lock);
   printf("Setting up finished\n");
+  write_unlock(&table->metadata.rw_lock);
   return true;
 }
 
