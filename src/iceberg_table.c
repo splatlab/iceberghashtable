@@ -720,8 +720,8 @@ static bool iceberg_lv1_move_block(iceberg_table * table, uint8_t thread_id) {
       }
       ValueType *val;
       //if (!iceberg_get_value(table, key, &val, thread_id)) {
-       // printf("Key not found during resize lv1: %ld\n", key);
-        //exit(0);
+      // printf("Key not found during resize lv1: %ld\n", key);
+      //exit(0);
       //}
     }
   }
@@ -754,10 +754,10 @@ static bool iceberg_lv2_move_block(iceberg_table * table, uint8_t thread_id) {
         printf("Failed insert during resize lv2\n");
         exit(0);
       }
-     // if (!iceberg_get_value(table, key, &val, thread_id)) {
-       // printf("Key not found during resize lv2: %ld\n", key);
-       // exit(0);
-     // }
+      // if (!iceberg_get_value(table, key, &val, thread_id)) {
+      // printf("Key not found during resize lv2: %ld\n", key);
+      // exit(0);
+      // }
     }
   }
 
@@ -795,8 +795,8 @@ static bool iceberg_lv3_move_block(iceberg_table * table, uint8_t thread_id) {
           exit(0);
         }
         //if (!iceberg_get_value(table, key, &val, thread_id)) {
-         // printf("Key not found during resize lv3: %ld\n", key);
-          //exit(0);
+        // printf("Key not found during resize lv3: %ld\n", key);
+        //exit(0);
         //}
       }
       else
@@ -859,7 +859,7 @@ static void * iceberg_resize(void * t) {
       }
     }
     pthread_mutex_unlock(&resize_mutex);
-      printf("Resize is done\n");
+    printf("Resize is done\n");
   }
 
   pthread_exit(NULL);
