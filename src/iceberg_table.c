@@ -862,6 +862,7 @@ static void * iceberg_resize(void * t) {
     printf("Resize is done\n");
   }
 
+  printf("Resize thread finished\n");
   pthread_exit(NULL);
 }
 
