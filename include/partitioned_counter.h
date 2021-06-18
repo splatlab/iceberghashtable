@@ -18,7 +18,7 @@ extern "C" {
 #endif
 
   typedef struct local_counter {
-    int64_t counter;
+    volatile int64_t counter;
     int64_t padding[7];
   } local_counter;
 
