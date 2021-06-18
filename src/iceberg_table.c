@@ -82,11 +82,11 @@ uint64_t tot_balls_aprox(iceberg_table * table) {
   return lv1_balls_aprox(table) + lv2_balls_aprox(table) + lv3_balls_aprox(table);
 }
 
-inline uint64_t total_capacity(iceberg_table * table) {
+static inline uint64_t total_capacity(iceberg_table * table) {
   return lv3_balls(table) + table->metadata.nblocks * ((1 << SLOT_BITS) + C_LV2 + MAX_LG_LG_N / D_CHOICES);
 }
 
-inline uint64_t total_capacity_aprox(iceberg_table * table) {
+static inline uint64_t total_capacity_aprox(iceberg_table * table) {
   return lv3_balls_aprox(table) + table->metadata.nblocks * ((1 << SLOT_BITS) + C_LV2 + MAX_LG_LG_N / D_CHOICES);
 }
 
@@ -94,8 +94,8 @@ inline double iceberg_load_factor(iceberg_table * table) {
   return (double)tot_balls(table) / (double)total_capacity(table);
 }
 
-inline double iceberg_load_factor_aprox(iceberg_table * table) {
-  return tot_balls_aprox(table) / (double)total_capacity_aprox(table);
+static inline double iceberg_load_factor_aprox(iceberg_table * table) {
+  return (double)tot_balls_aprox(table) / (double)total_capacity_aprox(table);
 }
 
 bool need_resize(iceberg_table * table) {
