@@ -7,6 +7,7 @@
 #include <immintrin.h>
 #include <tmmintrin.h>
 #include <sys/mman.h>
+#include <sys/sysinfo.h>
 
 #include "hashutil.h"
 #include "iceberg_precompute.h"
@@ -179,9 +180,10 @@ int iceberg_init(iceberg_table *table, uint64_t log_slots) {
   table->metadata.lv3_resize_block_ctr = total_blocks;
   table->metadata.load_check = 0.05 * table->metadata.nslots;
 
-  pc_init(&table->metadata.lv1_balls, &table->metadata.lv1_ctr, 64, 1000);
-  pc_init(&table->metadata.lv2_balls, &table->metadata.lv2_ctr, 64, 1000);
-  pc_init(&table->metadata.lv3_balls, &table->metadata.lv3_ctr, 64, 1000);
+  uint32_t procs = get_nprocs();
+  pc_init(&table->metadata.lv1_balls, &table->metadata.lv1_ctr, procs, 1000);
+  pc_init(&table->metadata.lv2_balls, &table->metadata.lv2_ctr, procs, 1000);
+  pc_init(&table->metadata.lv3_balls, &table->metadata.lv3_ctr, procs, 1000);
 
   size_t lv1_md_size = sizeof(iceberg_lv1_block_md) * total_blocks + 64;
   //table->metadata.lv1_md = (iceberg_lv1_block_md *)malloc(sizeof(iceberg_lv1_block_md) * total_blocks);
