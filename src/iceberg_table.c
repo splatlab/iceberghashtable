@@ -241,12 +241,26 @@ void iceberg_end(iceberg_table * table) {
   pthread_mutex_unlock(&resize_mutex);
 }
 
+static bool is_resize_active(iceberg_table * table) {
+  uint64_t half_mark = table->metadata.nblocks >> 1;
+  uint64_t lv1_ctr = __atomic_load_n(&table->metadata.lv1_resize_block_ctr, __ATOMIC_SEQ_CST);
+  uint64_t lv2_ctr = __atomic_load_n(&table->metadata.lv2_resize_block_ctr, __ATOMIC_SEQ_CST);
+  uint64_t lv3_ctr = __atomic_load_n(&table->metadata.lv3_resize_block_ctr, __ATOMIC_SEQ_CST);
+  if (lv1_ctr < half_mark || lv2_ctr < half_mark || lv3_ctr < half_mark)
+    return true;
+return false;
+}
+
 static bool iceberg_setup_resize(iceberg_table * table) {
   // grab write lock
   if (!write_lock(&table->metadata.rw_lock, TRY_ONCE_LOCK))
     return false;
 
   if (unlikely(!need_resize(table))) {
+    write_unlock(&table->metadata.rw_lock);
+    return false;
+  }
+  if (is_resize_active(table)) {
     write_unlock(&table->metadata.rw_lock);
     return false;
   }
@@ -405,7 +419,7 @@ static inline bool iceberg_lv2_insert(iceberg_table * table, KeyType key, ValueT
 
 bool iceberg_insert(iceberg_table * table, KeyType key, ValueType value, uint8_t thread_id) {
 
-  if (unlikely(need_resize(table))) {
+  if (!is_resize_active(table) && unlikely(need_resize(table))) {
     if (iceberg_setup_resize(table)) {
       pthread_mutex_lock(&resize_mutex);
       pthread_cond_signal(&resize_cond);
@@ -718,7 +732,7 @@ static bool iceberg_lv1_move_block(iceberg_table * table, uint8_t thread_id) {
         printf("Failed insert during resize lv1\n");
         exit(0);
       }
-      ValueType *val;
+      //ValueType *val;
       //if (!iceberg_get_value(table, key, &val, thread_id)) {
       // printf("Key not found during resize lv1: %ld\n", key);
       //exit(0);
@@ -743,9 +757,8 @@ static bool iceberg_lv2_move_block(iceberg_table * table, uint8_t thread_id) {
       continue;
     ValueType value = table->level2[bnum].slots[j].val;
 
-    ValueType *val;
     // move to new location
-    if (!iceberg_get_value(table, key, &val, thread_id)) {
+    //if (!iceberg_get_value(table, key, &val, thread_id)) {
       if (!iceberg_lv2_remove(table, key, bnum, thread_id, mask)) {
         printf("Failed remove during resize lv2\n");
         exit(0);
@@ -754,11 +767,12 @@ static bool iceberg_lv2_move_block(iceberg_table * table, uint8_t thread_id) {
         printf("Failed insert during resize lv2\n");
         exit(0);
       }
-      // if (!iceberg_get_value(table, key, &val, thread_id)) {
-      // printf("Key not found during resize lv2: %ld\n", key);
-      // exit(0);
-      // }
-    }
+      //ValueType *val;
+      //if (!iceberg_get_value(table, key, &val, thread_id)) {
+      //printf("Key not found during resize lv2: %ld\n", key);
+      //exit(0);
+      //}
+    //}
   }
 
   return false;
@@ -778,13 +792,12 @@ static bool iceberg_lv3_move_block(iceberg_table * table, uint8_t thread_id) {
       KeyType key = current_node->key;
       ValueType value = current_node->val;
 
-      uint8_t fprint;
-      uint64_t index;
+      //uint8_t fprint;
+      //uint64_t index;
 
-      split_hash(lv1_hash(key), &fprint, &index, &table->metadata);
+      //split_hash(lv1_hash(key), &fprint, &index, &table->metadata);
       // move to new location
-      ValueType *val;
-      if (index != bnum) {
+      //if (index != bnum) {
         current_node = current_node->next_node;
         if (!iceberg_lv3_remove(table, key, bnum, thread_id)) {
           printf("Failed remove during resize lv3: %" PRIu64 "\n", key);
@@ -794,13 +807,14 @@ static bool iceberg_lv3_move_block(iceberg_table * table, uint8_t thread_id) {
           printf("Failed insert during resize lv3\n");
           exit(0);
         }
+        // ValueType *val;
         //if (!iceberg_get_value(table, key, &val, thread_id)) {
         // printf("Key not found during resize lv3: %ld\n", key);
         //exit(0);
         //}
-      }
-      else
-        current_node = current_node->next_node;
+      //}
+      //else
+      //  current_node = current_node->next_node;
     }
   }
 
