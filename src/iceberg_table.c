@@ -100,12 +100,9 @@ static inline double iceberg_load_factor_aprox(iceberg_table * table) {
 }
 
 bool need_resize(iceberg_table * table) {
-  uint64_t nitems = tot_balls_aprox(table);
-  if (unlikely(nitems && nitems % table->metadata.load_check == 0)) {
-    double lf = nitems / (double)total_capacity_aprox(table);
-    if (lf >= 0.9)
-      return true;
-  }
+  double lf = iceberg_load_factor_aprox(table);
+  if (lf >= 0.9)
+    return true;
   return false;
 }
 
@@ -178,7 +175,6 @@ int iceberg_init(iceberg_table *table, uint64_t log_slots) {
   table->metadata.lv1_resize_block_ctr = total_blocks;
   table->metadata.lv2_resize_block_ctr = total_blocks;
   table->metadata.lv3_resize_block_ctr = total_blocks;
-  table->metadata.load_check = 0.05 * table->metadata.nslots;
 
   uint32_t procs = get_nprocs();
   pc_init(&table->metadata.lv1_balls, &table->metadata.lv1_ctr, procs, 1000);
