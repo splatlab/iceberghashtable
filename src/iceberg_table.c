@@ -48,12 +48,20 @@ static inline uint8_t word_select(uint64_t val, int rank) {
 }
 
 uint64_t lv1_balls(iceberg_table * table) {
-  //pc_sync(table->metadata.lv1_balls);
+  pc_sync(&table->metadata.lv1_balls);
+  return *(table->metadata.lv1_balls.global_counter);
+}
+
+uint64_t lv1_balls_aprox(iceberg_table * table) {
   return *(table->metadata.lv1_balls.global_counter);
 }
 
 uint64_t lv2_balls(iceberg_table * table) {
-  //pc_sync(table->metadata.lv2_balls);
+  pc_sync(&table->metadata.lv2_balls);
+  return *(table->metadata.lv2_balls.global_counter);
+}
+
+uint64_t lv2_balls_aprox(iceberg_table * table) {
   return *(table->metadata.lv2_balls.global_counter);
 }
 
@@ -62,22 +70,38 @@ uint64_t lv3_balls(iceberg_table * table) {
   return *(table->metadata.lv3_balls.global_counter);
 }
 
+uint64_t lv3_balls_aprox(iceberg_table * table) {
+  return *(table->metadata.lv3_balls.global_counter);
+}
+
 uint64_t tot_balls(iceberg_table * table) {
   return lv1_balls(table) + lv2_balls(table) + lv3_balls(table);
 }
 
-static inline uint64_t total_capacity(iceberg_table * table) {
+uint64_t tot_balls_aprox(iceberg_table * table) {
+  return lv1_balls_aprox(table) + lv2_balls_aprox(table) + lv3_balls_aprox(table);
+}
+
+inline uint64_t total_capacity(iceberg_table * table) {
   return lv3_balls(table) + table->metadata.nblocks * ((1 << SLOT_BITS) + C_LV2 + MAX_LG_LG_N / D_CHOICES);
+}
+
+inline uint64_t total_capacity_aprox(iceberg_table * table) {
+  return lv3_balls_aprox(table) + table->metadata.nblocks * ((1 << SLOT_BITS) + C_LV2 + MAX_LG_LG_N / D_CHOICES);
 }
 
 inline double iceberg_load_factor(iceberg_table * table) {
   return (double)tot_balls(table) / (double)total_capacity(table);
 }
 
+inline double iceberg_load_factor_aprox(iceberg_table * table) {
+  return tot_balls_aprox(table) / (double)total_capacity_aprox(table);
+}
+
 bool need_resize(iceberg_table * table) {
-  uint64_t total_items = tot_balls(table);
-  if (unlikely(total_items && total_items % table->metadata.load_check == 0)) {
-    double lf = iceberg_load_factor(table);
+  uint64_t nitems = tot_balls_aprox(table);
+  if (unlikely(nitems && nitems % table->metadata.load_check == 0)) {
+    double lf = nitems / (double)total_capacity_aprox(table);
     if (lf >= 0.9)
       return true;
   }
@@ -150,7 +174,6 @@ int iceberg_init(iceberg_table *table, uint64_t log_slots) {
   table->metadata.nslots = 1 << log_slots;
   table->metadata.nblocks = total_blocks;
   table->metadata.block_bits = log_slots - SLOT_BITS;
-  table->metadata.resize_ctr = 0;
   table->metadata.lv1_resize_block_ctr = total_blocks;
   table->metadata.lv2_resize_block_ctr = total_blocks;
   table->metadata.lv3_resize_block_ctr = total_blocks;
@@ -220,10 +243,15 @@ void iceberg_end(iceberg_table * table) {
   pthread_mutex_unlock(&resize_mutex);
 }
 
-static bool iceberg_setup_resize(iceberg_table * table, uint8_t ctr) {
+static bool iceberg_setup_resize(iceberg_table * table) {
   // grab write lock
   if (!write_lock(&table->metadata.rw_lock, TRY_ONCE_LOCK))
     return false;
+
+  if (unlikely(!need_resize(table))) {
+    write_unlock(&table->metadata.rw_lock);
+    return false;
+  }
 
   printf("Setting up resize\n");
 
@@ -379,9 +407,8 @@ static inline bool iceberg_lv2_insert(iceberg_table * table, KeyType key, ValueT
 
 bool iceberg_insert(iceberg_table * table, KeyType key, ValueType value, uint8_t thread_id) {
 
-  uint8_t ctr = table->metadata.resize_ctr;
   if (unlikely(need_resize(table))) {
-    if (iceberg_setup_resize(table, ctr)) {
+    if (iceberg_setup_resize(table)) {
       pthread_mutex_lock(&resize_mutex);
       pthread_cond_signal(&resize_cond);
       pthread_mutex_unlock(&resize_mutex);
