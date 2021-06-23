@@ -244,8 +244,6 @@ static bool is_resize_active(iceberg_table * table) {
 }
 
 void iceberg_end(iceberg_table * table) {
-  while (is_resize_active(table))
-    ;
   table->metadata.end_flag = true;
   pthread_mutex_lock(&resize_mutex);
   pthread_cond_signal(&resize_cond);
