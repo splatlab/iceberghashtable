@@ -99,7 +99,7 @@ static inline double iceberg_load_factor_aprox(iceberg_table * table) {
 
 bool need_resize(iceberg_table * table) {
   double lf = iceberg_load_factor_aprox(table);
-  if (lf >= 0.9)
+  if (lf >= 0.95)
     return true;
   return false;
 }
@@ -418,7 +418,7 @@ static inline bool iceberg_lv2_insert(iceberg_table * table, KeyType key, ValueT
 
 bool iceberg_insert(iceberg_table * table, KeyType key, ValueType value, uint8_t thread_id) {
 
-  if (!is_resize_active(table) && unlikely(need_resize(table))) {
+  if (unlikely(need_resize(table))) {
     if (iceberg_setup_resize(table)) {
       pthread_mutex_lock(&resize_mutex);
       pthread_cond_signal(&resize_cond);

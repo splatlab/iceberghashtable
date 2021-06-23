@@ -10,6 +10,14 @@ else
    HUGE=
 endif
 
+RESIZE_POLICY = -DENABLE_FGR
+
+ifdef BGR
+	RESIZE_POLICY = -DENABLE_BGR
+endif
+
+OPT += $(RESIZE_POLICY)
+
 CC = clang
 CPP = clang++
 CFLAGS = -g $(OPT) -Wall -march=native -pthread $(HUGE)
