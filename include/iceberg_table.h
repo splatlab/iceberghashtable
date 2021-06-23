@@ -70,6 +70,7 @@ extern "C" {
     uint64_t lv2_resize_block_ctr;
     uint64_t lv3_resize_block_ctr;
     bool end_flag;
+    uint8_t num_bg_threads;
   } iceberg_metadata;
 
   typedef struct iceberg_table {
@@ -84,7 +85,7 @@ extern "C" {
   uint64_t lv3_balls(iceberg_table * table);
   uint64_t tot_balls(iceberg_table * table);
 
-  int iceberg_init(iceberg_table *table, uint64_t nslots);
+  int iceberg_init(iceberg_table *table, uint64_t nslots, uint8_t bg_threads);
 
   double iceberg_load_factor(iceberg_table * table);
 

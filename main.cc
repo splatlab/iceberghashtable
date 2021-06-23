@@ -92,11 +92,11 @@ int main (int argc, char** argv) {
   uint64_t tbits = atoi(argv[1]);
   uint64_t threads = atoi(argv[2]);
   //uint64_t N = (1ULL << tbits) * 1.07;
-  uint64_t N = (1ULL << tbits) * 1.07 * 1.75;
+  uint64_t N = (1ULL << tbits) * 1.07 * 1.90;
 
   high_resolution_clock::time_point t1 = high_resolution_clock::now();
 
-  if (iceberg_init(&table, tbits)) {
+  if (iceberg_init(&table, tbits, threads)) {
     fprintf(stderr, "Can't allocate iceberg table.\n");
     exit(EXIT_FAILURE);
   }
@@ -176,6 +176,9 @@ int main (int argc, char** argv) {
   t2 = high_resolution_clock::now();
 
   double insert_throughput = N / elapsed(t1, t2);
+  iceberg_end(&table);
+  //	exit(0);
+
   if (!is_benchmark) {
     printf("%f\n", N / elapsed(t1, t2));
 
@@ -185,9 +188,6 @@ int main (int argc, char** argv) {
     printf("Number level 3 inserts: %ld\n", lv3_balls(&table));
     printf("Total inserts: %ld\n", tot_balls(&table));
   }
-
-  iceberg_end(&table);
-  //	exit(0);
 
   uint64_t max_size = 0, sum_sizes = 0;
   for(uint64_t i = 0; i < table.metadata.nblocks; ++i) {
