@@ -96,7 +96,7 @@ int main (int argc, char** argv) {
 
   high_resolution_clock::time_point t1 = high_resolution_clock::now();
 
-  if (iceberg_init(&table, tbits, threads)) {
+  if (iceberg_init(&table, tbits)) {
     fprintf(stderr, "Can't allocate iceberg table.\n");
     exit(EXIT_FAILURE);
   }
@@ -176,7 +176,6 @@ int main (int argc, char** argv) {
   t2 = high_resolution_clock::now();
 
   double insert_throughput = N / elapsed(t1, t2);
-  iceberg_end(&table);
   //	exit(0);
 
   if (!is_benchmark) {
