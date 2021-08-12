@@ -517,7 +517,7 @@ bool iceberg_insert(iceberg_table * table, KeyType key, ValueType value, uint8_t
         uint64_t idx = chunk_idx * 8 + i;
         printf("LV1 Before: Moving block: %ld load: %f\n", idx, iceberg_block_load(table, idx));
         iceberg_lv1_move_block(table, idx, thread_id);
-        printf("LV2 After: Moving block: %ld load: %f\n", idx, iceberg_block_load(table, idx));
+        printf("LV1 After: Moving block: %ld load: %f\n", idx, iceberg_block_load(table, idx));
       }
   }
 
