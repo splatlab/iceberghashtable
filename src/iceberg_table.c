@@ -124,7 +124,7 @@ static inline uint64_t slot_mask_64(uint8_t * metadata, uint8_t fprint) {
 static double iceberg_block_load(iceberg_table * table, uint64_t index) {
   __mmask64 md_mask = slot_mask_64(table->metadata.lv1_md[index].block_md, 0);
 
-  return __builtin_popcountll(md_mask) / (1 << SLOT_BITS);
+  return __builtin_popcountll(md_mask) / (double)(1ULL << SLOT_BITS);
 }
 
 static inline size_t round_up(size_t n, size_t k) {
