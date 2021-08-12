@@ -397,7 +397,7 @@ static bool iceberg_lv3_move_block(iceberg_table * table, uint64_t bnum, uint8_t
 
 static inline bool iceberg_lv3_insert(iceberg_table * table, KeyType key, ValueType value, uint64_t lv3_index, uint8_t thread_id) {
 
-  if (unlikely(is_resize_active(table))) {
+  if (unlikely(is_resize_active(table) && lv3_index < (table->metadata.nblocks >> 1))) {
     uint64_t chunk_idx = lv3_index / 8;
     if (!__sync_lock_test_and_set(&table->metadata.lv3_resize_marker[chunk_idx], 1))
       for (uint8_t i = 0; i < 8; ++i)
@@ -437,13 +437,13 @@ static inline bool iceberg_lv2_insert(iceberg_table * table, KeyType key, ValueT
   split_hash(lv2_hash(key, 1), &fprint2, &index2, metadata);
 
   // move blocks if resize is active and not already moved.
-  if (unlikely(is_resize_active(table))) {
+  if (unlikely(is_resize_active(table) && index1 < (table->metadata.nblocks >> 1))) {
     uint64_t chunk_idx = index1 / 8;
     if (!__sync_lock_test_and_set(&table->metadata.lv2_resize_marker[chunk_idx], 1))
       for (uint8_t i = 0; i < 8; ++i)
         iceberg_lv2_move_block(table, chunk_idx * 8 + i, thread_id);
   }
-  if (unlikely(is_resize_active(table))) {
+  if (unlikely(is_resize_active(table) && index2 < (table->metadata.nblocks >> 1))) {
     uint64_t chunk_idx = index2 / 8;
     if (!__sync_lock_test_and_set(&table->metadata.lv2_resize_marker[chunk_idx], 1))
       for (uint8_t i = 0; i < 8; ++i)
@@ -498,7 +498,7 @@ bool iceberg_insert(iceberg_table * table, KeyType key, ValueType value, uint8_t
   split_hash(lv1_hash(key), &fprint, &index, metadata);
  
   // move blocks if resize is active and not already moved.
-  if (unlikely(is_resize_active(table))) {
+  if (unlikely(is_resize_active(table) && index < (table->metadata.nblocks >> 1))) {
     uint64_t chunk_idx = index / 8;
     if (!__sync_lock_test_and_set(&table->metadata.lv1_resize_marker[chunk_idx], 1))
       for (uint8_t i = 0; i < 8; ++i) {
