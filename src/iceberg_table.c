@@ -121,6 +121,12 @@ static inline uint64_t slot_mask_64(uint8_t * metadata, uint8_t fprint) {
   return _mm512_cmp_epi8_mask(bcast, block, _MM_CMPINT_EQ);
 }
 
+static double iceberg_block_load(iceberg_table * table, uint64_t index) {
+  __mmask64 md_mask = slot_mask_64(table->metadata.lv1_md[index].block_md, 0);
+
+  return __builtin_popcountll(md_mask) / (1 << SLOT_BITS);
+}
+
 static inline size_t round_up(size_t n, size_t k) {
   size_t rem = n % k;
   if (rem == 0) {
@@ -494,8 +500,12 @@ bool iceberg_insert(iceberg_table * table, KeyType key, ValueType value, uint8_t
   if (unlikely(is_resize_active(table))) {
     uint64_t chunk_idx = index / 8;
     if (!__sync_lock_test_and_set(&table->metadata.lv1_resize_marker[chunk_idx], 1))
-      for (uint8_t i = 0; i < 8; ++i)
-        iceberg_lv1_move_block(table, chunk_idx * 8 + i, thread_id);
+      for (uint8_t i = 0; i < 8; ++i) {
+        uint64_t idx = chunk_idx * 8 + i;
+        printf("Before: Moving block: %ld load: %f", idx, iceberg_block_load(table, idx));
+        iceberg_lv1_move_block(table, idx, thread_id);
+        printf("After: Moving block: %ld load: %f", idx, iceberg_block_load(table, idx));
+      }
   }
 
   __mmask64 md_mask = slot_mask_64(metadata->lv1_md[index].block_md, 0);
