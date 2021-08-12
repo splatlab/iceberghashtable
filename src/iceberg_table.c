@@ -394,7 +394,7 @@ static inline bool iceberg_lv3_insert(iceberg_table * table, KeyType key, ValueT
     uint64_t chunk_idx = lv3_index / 8;
     if (!__sync_lock_test_and_set(&table->metadata.lv3_resize_marker[chunk_idx], 1))
       for (uint8_t i = 0; i < 8; ++i)
-        iceberg_lv3_move_block(table, chunk_idx + i, thread_id);
+        iceberg_lv3_move_block(table, chunk_idx * 8 + i, thread_id);
   }
 
   iceberg_metadata * metadata = &table->metadata;
@@ -432,15 +432,15 @@ static inline bool iceberg_lv2_insert(iceberg_table * table, KeyType key, ValueT
   // move blocks if resize is active and not already moved.
   if (unlikely(is_resize_active(table))) {
     uint64_t chunk_idx = index1 / 8;
-    if (!__sync_lock_test_and_set(&table->metadata.lv2_resize_marker[chunk_idx/8], 1))
+    if (!__sync_lock_test_and_set(&table->metadata.lv2_resize_marker[chunk_idx], 1))
       for (uint8_t i = 0; i < 8; ++i)
-        iceberg_lv2_move_block(table, chunk_idx + i, thread_id);
+        iceberg_lv2_move_block(table, chunk_idx * 8 + i, thread_id);
   }
   if (unlikely(is_resize_active(table))) {
     uint64_t chunk_idx = index2 / 8;
-    if (!__sync_lock_test_and_set(&table->metadata.lv2_resize_marker[chunk_idx/8], 1))
+    if (!__sync_lock_test_and_set(&table->metadata.lv2_resize_marker[chunk_idx], 1))
       for (uint8_t i = 0; i < 8; ++i)
-        iceberg_lv2_move_block(table, chunk_idx + i, thread_id);
+        iceberg_lv2_move_block(table, chunk_idx * 8 + i, thread_id);
   }
 
   __mmask32 md_mask1 = slot_mask_32(metadata->lv2_md[index1].block_md, 0) & ((1 << (C_LV2 + MAX_LG_LG_N / D_CHOICES)) - 1);
@@ -493,9 +493,9 @@ bool iceberg_insert(iceberg_table * table, KeyType key, ValueType value, uint8_t
   // move blocks if resize is active and not already moved.
   if (unlikely(is_resize_active(table))) {
     uint64_t chunk_idx = index / 8;
-    if (!__sync_lock_test_and_set(&table->metadata.lv1_resize_marker[chunk_idx/8], 1))
+    if (!__sync_lock_test_and_set(&table->metadata.lv1_resize_marker[chunk_idx], 1))
       for (uint8_t i = 0; i < 8; ++i)
-        iceberg_lv1_move_block(table, chunk_idx + i, thread_id);
+        iceberg_lv1_move_block(table, chunk_idx * 8 + i, thread_id);
   }
 
   __mmask64 md_mask = slot_mask_64(metadata->lv1_md[index].block_md, 0);
