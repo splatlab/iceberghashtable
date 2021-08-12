@@ -129,7 +129,7 @@ static double iceberg_block_load(iceberg_table * table, uint64_t index, uint8_t 
   } else if (level == 2) {
       __mmask32 mask32 = slot_mask_32(table->metadata.lv2_md[index].block_md, 0) & ((1 << (C_LV2 + MAX_LG_LG_N / D_CHOICES)) - 1);
       uint64_t occ =  (C_LV2 + MAX_LG_LG_N / D_CHOICES) - __builtin_popcountll(mask32);
-      return occ / (double)(1ULL << SLOT_BITS);
+      return occ / (double)(C_LV2 + MAX_LG_LG_N / D_CHOICES);
   } else
       return table->metadata.lv3_sizes[index];
 }
