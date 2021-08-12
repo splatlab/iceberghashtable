@@ -502,9 +502,9 @@ bool iceberg_insert(iceberg_table * table, KeyType key, ValueType value, uint8_t
     if (!__sync_lock_test_and_set(&table->metadata.lv1_resize_marker[chunk_idx], 1))
       for (uint8_t i = 0; i < 8; ++i) {
         uint64_t idx = chunk_idx * 8 + i;
-        printf("Before: Moving block: %ld load: %f", idx, iceberg_block_load(table, idx));
+        printf("Before: Moving block: %ld load: %f\n", idx, iceberg_block_load(table, idx));
         iceberg_lv1_move_block(table, idx, thread_id);
-        printf("After: Moving block: %ld load: %f", idx, iceberg_block_load(table, idx));
+        printf("After: Moving block: %ld load: %f\n", idx, iceberg_block_load(table, idx));
       }
   }
 
