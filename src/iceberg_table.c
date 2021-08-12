@@ -121,11 +121,17 @@ static inline uint64_t slot_mask_64(uint8_t * metadata, uint8_t fprint) {
   return _mm512_cmp_epi8_mask(bcast, block, _MM_CMPINT_EQ);
 }
 
-static double iceberg_block_load(iceberg_table * table, uint64_t index) {
-  __mmask64 md_mask = slot_mask_64(table->metadata.lv1_md[index].block_md, 0);
-  uint64_t occ = (1ULL << SLOT_BITS) - __builtin_popcountll(md_mask); 
-
-  return occ / (double)(1ULL << SLOT_BITS);
+static double iceberg_block_load(iceberg_table * table, uint64_t index, uint8_t level) {
+  if (level == 1) {
+      __mmask64 mask64 = slot_mask_64(table->metadata.lv1_md[index].block_md, 0);
+      uint64_t occ = (1ULL << SLOT_BITS) - __builtin_popcountll(mask64); 
+      return occ / (double)(1ULL << SLOT_BITS);
+  } else if (level == 2) {
+      __mmask32 mask32 = slot_mask_32(table->metadata.lv2_md[index].block_md, 0) & ((1 << (C_LV2 + MAX_LG_LG_N / D_CHOICES)) - 1);
+      uint64_t occ =  (C_LV2 + MAX_LG_LG_N / D_CHOICES) - __builtin_popcountll(mask32);
+      return occ / (double)(1ULL << SLOT_BITS);
+  } else
+      return table->metadata.lv3_sizes[index];
 }
 
 static inline size_t round_up(size_t n, size_t k) {
@@ -402,9 +408,9 @@ static inline bool iceberg_lv3_insert(iceberg_table * table, KeyType key, ValueT
     if (!__sync_lock_test_and_set(&table->metadata.lv3_resize_marker[chunk_idx], 1))
       for (uint8_t i = 0; i < 8; ++i) {
         uint64_t idx = chunk_idx * 8 + i;
-        printf("LV3 Before: Moving block: %ld load: %f\n", idx, iceberg_block_load(table, idx));
+        printf("LV3 Before: Moving block: %ld load: %f\n", idx, iceberg_block_load(table, idx, 3));
         iceberg_lv3_move_block(table, idx, thread_id);
-        printf("LV3 After: Moving block: %ld load: %f\n", idx, iceberg_block_load(table, idx));
+        printf("LV3 After: Moving block: %ld load: %f\n", idx, iceberg_block_load(table, idx, 3));
       }
   }
 
@@ -446,9 +452,9 @@ static inline bool iceberg_lv2_insert(iceberg_table * table, KeyType key, ValueT
     if (!__sync_lock_test_and_set(&table->metadata.lv2_resize_marker[chunk_idx], 1))
       for (uint8_t i = 0; i < 8; ++i) {
         uint64_t idx = chunk_idx * 8 + i;
-        printf("LV2 Before: Moving block: %ld load: %f\n", idx, iceberg_block_load(table, idx));
+        printf("LV2 Before: Moving block: %ld load: %f\n", idx, iceberg_block_load(table, idx, 2));
         iceberg_lv2_move_block(table, idx, thread_id);
-        printf("LV2 After: Moving block: %ld load: %f\n", idx, iceberg_block_load(table, idx));
+        printf("LV2 After: Moving block: %ld load: %f\n", idx, iceberg_block_load(table, idx, 2));
       }
   }
   if (unlikely(is_resize_active(table) && index2 < (table->metadata.nblocks >> 1))) {
@@ -456,9 +462,9 @@ static inline bool iceberg_lv2_insert(iceberg_table * table, KeyType key, ValueT
     if (!__sync_lock_test_and_set(&table->metadata.lv2_resize_marker[chunk_idx], 1))
       for (uint8_t i = 0; i < 8; ++i) {
         uint64_t idx = chunk_idx * 8 + i;
-        printf("LV2 Before: Moving block: %ld load: %f\n", idx, iceberg_block_load(table, idx));
+        printf("LV2 Before: Moving block: %ld load: %f\n", idx, iceberg_block_load(table, idx, 2));
         iceberg_lv2_move_block(table, idx, thread_id);
-        printf("LV2 After: Moving block: %ld load: %f\n", idx, iceberg_block_load(table, idx));
+        printf("LV2 After: Moving block: %ld load: %f\n", idx, iceberg_block_load(table, idx, 2));
       }
   }
 
@@ -521,9 +527,9 @@ bool iceberg_insert(iceberg_table * table, KeyType key, ValueType value, uint8_t
     if (!__sync_lock_test_and_set(&table->metadata.lv1_resize_marker[chunk_idx], 1))
       for (uint8_t i = 0; i < 8; ++i) {
         uint64_t idx = chunk_idx * 8 + i;
-        printf("LV1 Before: Moving block: %ld load: %f\n", idx, iceberg_block_load(table, idx));
+        printf("LV1 Before: Moving block: %ld load: %f\n", idx, iceberg_block_load(table, idx, 1));
         iceberg_lv1_move_block(table, idx, thread_id);
-        printf("LV1 After: Moving block: %ld load: %f\n", idx, iceberg_block_load(table, idx));
+        printf("LV1 After: Moving block: %ld load: %f\n", idx, iceberg_block_load(table, idx, 1));
       }
   }
 
