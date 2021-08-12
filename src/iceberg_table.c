@@ -500,6 +500,7 @@ bool iceberg_insert(iceberg_table * table, KeyType key, ValueType value, uint8_t
     printf("Number level 1 inserts: %ld\n", lv1_balls(table));
     printf("Number level 2 inserts: %ld\n", lv2_balls(table));
     printf("Number level 3 inserts: %ld\n", lv3_balls(table));
+    printf("Total inserts: %ld\n", tot_balls(table));
     iceberg_setup_resize(table);
   }
 
