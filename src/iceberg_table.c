@@ -401,6 +401,29 @@ static bool iceberg_lv1_move_block(iceberg_table * table, uint64_t bnum, uint8_t
 static bool iceberg_lv2_move_block(iceberg_table * table, uint64_t bnum, uint8_t thread_id);
 static bool iceberg_lv3_move_block(iceberg_table * table, uint64_t bnum, uint8_t thread_id);
 
+
+// finish moving blocks that are left during the last resize.
+bool iceberg_end(iceberg_table * table) {
+  for (uint64_t j = 0; j < table->metadata.nblocks / 8; ++j) {
+    uint64_t chunk_idx = j;
+    if (!__sync_lock_test_and_set(&table->metadata.lv1_resize_marker[chunk_idx], 1))
+      for (uint8_t i = 0; i < 8; ++i) {
+        uint64_t idx = chunk_idx * 8 + i;
+        iceberg_lv1_move_block(table, idx, 0);
+      }
+    if (!__sync_lock_test_and_set(&table->metadata.lv2_resize_marker[chunk_idx], 1))
+      for (uint8_t i = 0; i < 8; ++i) {
+        uint64_t idx = chunk_idx * 8 + i;
+        iceberg_lv2_move_block(table, idx, 0);
+      }
+    if (!__sync_lock_test_and_set(&table->metadata.lv3_resize_marker[chunk_idx], 1))
+      for (uint8_t i = 0; i < 8; ++i) {
+        uint64_t idx = chunk_idx * 8 + i;
+        iceberg_lv3_move_block(table, idx, 0);
+      }
+  }
+}
+
 static inline bool iceberg_lv3_insert(iceberg_table * table, KeyType key, ValueType value, uint64_t lv3_index, uint8_t thread_id) {
 
   if (unlikely(is_resize_active(table) && lv3_index < (table->metadata.nblocks >> 1))) {
@@ -408,9 +431,9 @@ static inline bool iceberg_lv3_insert(iceberg_table * table, KeyType key, ValueT
     if (!__sync_lock_test_and_set(&table->metadata.lv3_resize_marker[chunk_idx], 1))
       for (uint8_t i = 0; i < 8; ++i) {
         uint64_t idx = chunk_idx * 8 + i;
-        printf("LV3 Before: Moving block: %ld load: %f\n", idx, iceberg_block_load(table, idx, 3));
+        /*printf("LV3 Before: Moving block: %ld load: %f\n", idx, iceberg_block_load(table, idx, 3));*/
         iceberg_lv3_move_block(table, idx, thread_id);
-        printf("LV3 After: Moving block: %ld load: %f\n", idx, iceberg_block_load(table, idx, 3));
+        /*printf("LV3 After: Moving block: %ld load: %f\n", idx, iceberg_block_load(table, idx, 3));*/
       }
   }
 
@@ -465,9 +488,9 @@ static inline bool iceberg_lv2_insert(iceberg_table * table, KeyType key, ValueT
     if (!__sync_lock_test_and_set(&table->metadata.lv2_resize_marker[chunk_idx], 1))
       for (uint8_t i = 0; i < 8; ++i) {
         uint64_t idx = chunk_idx * 8 + i;
-        printf("LV2 Before: Moving block: %ld load: %f\n", idx, iceberg_block_load(table, idx, 2));
+        /*printf("LV2 Before: Moving block: %ld load: %f\n", idx, iceberg_block_load(table, idx, 2));*/
         iceberg_lv2_move_block(table, idx, thread_id);
-        printf("LV2 After: Moving block: %ld load: %f\n", idx, iceberg_block_load(table, idx, 2));
+        /*printf("LV2 After: Moving block: %ld load: %f\n", idx, iceberg_block_load(table, idx, 2));*/
       }
   }
 
@@ -517,9 +540,9 @@ bool iceberg_insert(iceberg_table * table, KeyType key, ValueType value, uint8_t
     if (!__sync_lock_test_and_set(&table->metadata.lv1_resize_marker[chunk_idx], 1))
       for (uint8_t i = 0; i < 8; ++i) {
         uint64_t idx = chunk_idx * 8 + i;
-        printf("LV1 Before: Moving block: %ld load: %f\n", idx, iceberg_block_load(table, idx, 1));
+        /*printf("LV1 Before: Moving block: %ld load: %f\n", idx, iceberg_block_load(table, idx, 1));*/
         iceberg_lv1_move_block(table, idx, thread_id);
-        printf("LV1 After: Moving block: %ld load: %f\n", idx, iceberg_block_load(table, idx, 1));
+        /*printf("LV1 After: Moving block: %ld load: %f\n", idx, iceberg_block_load(table, idx, 1));*/
       }
   }
 

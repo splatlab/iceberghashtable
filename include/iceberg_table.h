@@ -96,6 +96,8 @@ extern "C" {
 
   bool iceberg_get_value(iceberg_table * table, KeyType key, ValueType **value, uint8_t thread_id);
 
+  bool iceberg_end(iceberg_table * table);
+
 #ifdef __cplusplus
 }
 #endif
