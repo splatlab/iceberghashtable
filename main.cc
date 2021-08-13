@@ -24,11 +24,17 @@ double elapsed(high_resolution_clock::time_point t1, high_resolution_clock::time
 
 void do_inserts(uint8_t id, uint64_t *keys, uint64_t *values, uint64_t start, uint64_t n) {
 
-  for(uint64_t i = start; i < start + n; ++i)
+  for(uint64_t i = start; i < start + n; ++i) {
     if(!iceberg_insert(&table, keys[i], values[i], id)) {
       printf("Failed insert\n");
       exit(0);
     }
+    uint64_t *val;
+    if (iceberg_get_value(&table, keys[i], &val, id) != true) {
+      printf("False negative query key: " "%" PRIu64 "\n", keys[i]);
+      exit(0);
+    }
+  }
 }
 
 void do_queries(uint8_t id, uint64_t *keys, uint64_t start, uint64_t n, bool positive) {
