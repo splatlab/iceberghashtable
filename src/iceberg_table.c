@@ -863,10 +863,10 @@ static bool iceberg_lv2_move_block(iceberg_table * table, uint64_t bnum, uint8_t
     if (key == 0)
       continue;
     ValueType value = table->level2[bnum].slots[j].val;
-    /*uint8_t fprint;*/
-    /*uint64_t index;*/
+    uint8_t fprint;
+    uint64_t index;
 
-    /*split_hash(lv1_hash(key), &fprint, &index, &table->metadata);*/
+    split_hash(lv1_hash(key), &fprint, &index, &table->metadata);
 
     // move to new location
     //if (!iceberg_get_value(table, key, &val, thread_id)) {
