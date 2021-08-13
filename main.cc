@@ -24,21 +24,21 @@ double elapsed(high_resolution_clock::time_point t1, high_resolution_clock::time
 
 void do_inserts(uint8_t id, uint64_t *keys, uint64_t *values, uint64_t start, uint64_t n) {
 
-   for(uint64_t i = start; i < start + n; ++i) {
-      if(!iceberg_insert(&table, keys[i], values[i], id)) {
-         printf("Failed insert\n");
-         exit(0);
-      }
-      /*
-      uint64_t *val;
-      for(uint64_t j = start; j < i; ++j) {
-         if (iceberg_get_value(&table, keys[j], &val, id) != true) {
-            printf("False negative query key: " "%" PRIu64 "\n", keys[j]);
-            exit(0);
-         }
-      }
-      */
-   }
+  for(uint64_t i = start; i < start + n; ++i) {
+    if(!iceberg_insert(&table, keys[i], values[i], id)) {
+      printf("Failed insert\n");
+      exit(0);
+    }
+    /*
+       uint64_t *val;
+       for(uint64_t j = start; j < i; ++j) {
+       if (iceberg_get_value(&table, keys[j], &val, id) != true) {
+       printf("False negative query key: " "%" PRIu64 "\n", keys[j]);
+       exit(0);
+       }
+       }
+       */
+  }
 }
 
 void do_queries(uint8_t id, uint64_t *keys, uint64_t start, uint64_t n, bool positive) {
@@ -48,9 +48,9 @@ void do_queries(uint8_t id, uint64_t *keys, uint64_t start, uint64_t n, bool pos
     if (iceberg_get_value(&table, keys[i], &val, id) != positive) {
 
       if(positive)
-         printf("False negative query key: " "%" PRIu64 "\n", keys[i]);
+        printf("False negative query key: " "%" PRIu64 "\n", keys[i]);
       else
-         printf("False positive query\n");
+        printf("False positive query\n");
       exit(0);
     }
 }
@@ -67,18 +67,18 @@ void do_removals(uint8_t id, uint64_t *keys, uint64_t start, uint64_t n) {
 }
 
 void safe_rand_bytes(unsigned char *v, size_t n) {
-   
-   while (n > 0) {
+
+  while (n > 0) {
     size_t round_size = n >= INT_MAX ? INT_MAX - 1 : n;
     RAND_bytes(v, round_size);
     v += round_size;
     n -= round_size;
   }
   /*
-  for (uint64_t i = 0; i < n; ++i) {
-  v[i] = rand();
-  }
-  */
+     for (uint64_t i = 0; i < n; ++i) {
+     v[i] = rand();
+     }
+     */
 }
 
 void do_mixed(uint8_t id, std::vector<std::pair<uint64_t, uint64_t>>& v, uint64_t start, uint64_t n) {
