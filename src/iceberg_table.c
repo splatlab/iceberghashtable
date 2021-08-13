@@ -851,7 +851,7 @@ static bool iceberg_lv2_move_block(iceberg_table * table, uint64_t bnum, uint8_t
         printf("Failed remove during resize lv2\n");
         exit(0);
       }
-      if (!iceberg_insert(table, key, value, thread_id)) {
+      if (!iceberg_lv2_insert(table, key, value, index, thread_id)) {
         printf("Failed insert during resize lv2\n");
         exit(0);
       }
@@ -891,7 +891,7 @@ static bool iceberg_lv3_move_block(iceberg_table * table, uint64_t bnum, uint8_t
           printf("Failed remove during resize lv3: %" PRIu64 "\n", key);
           exit(0);
         }
-        if (!iceberg_insert(table, key, value, thread_id)) {
+        if (!iceberg_lv3_insert(table, key, value, index, thread_id)) {
           printf("Failed insert during resize lv3\n");
           exit(0);
         }
