@@ -447,6 +447,8 @@ void iceberg_end(iceberg_table * table) {
         iceberg_lv3_move_block(table, idx, 0);
       }
   }
+
+  printf("Final resize done. Table load: %ld\n", iceberg_table_load(table));
 }
 
 static inline bool iceberg_lv3_insert(iceberg_table * table, KeyType key, ValueType value, uint64_t lv3_index, uint8_t thread_id) {
