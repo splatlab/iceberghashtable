@@ -99,7 +99,7 @@ static inline double iceberg_load_factor_aprox(iceberg_table * table) {
 
 bool need_resize(iceberg_table * table) {
   double lf = iceberg_load_factor_aprox(table);
-  if (lf >= 0.95)
+  if (lf >= 0.85)
     return true;
   return false;
 }
