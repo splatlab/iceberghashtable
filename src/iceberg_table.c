@@ -121,17 +121,36 @@ static inline uint64_t slot_mask_64(uint8_t * metadata, uint8_t fprint) {
   return _mm512_cmp_epi8_mask(bcast, block, _MM_CMPINT_EQ);
 }
 
-static double iceberg_block_load(iceberg_table * table, uint64_t index, uint8_t level) {
+static uint64_t iceberg_block_load(iceberg_table * table, uint64_t index, uint8_t level) {
   if (level == 1) {
       __mmask64 mask64 = slot_mask_64(table->metadata.lv1_md[index].block_md, 0);
-      uint64_t occ = (1ULL << SLOT_BITS) - __builtin_popcountll(mask64); 
-      return occ / (double)(1ULL << SLOT_BITS);
+      return (1ULL << SLOT_BITS) - __builtin_popcountll(mask64); 
   } else if (level == 2) {
       __mmask32 mask32 = slot_mask_32(table->metadata.lv2_md[index].block_md, 0) & ((1 << (C_LV2 + MAX_LG_LG_N / D_CHOICES)) - 1);
-      uint64_t occ =  (C_LV2 + MAX_LG_LG_N / D_CHOICES) - __builtin_popcountll(mask32);
-      return occ / (double)(C_LV2 + MAX_LG_LG_N / D_CHOICES);
+      return (C_LV2 + MAX_LG_LG_N / D_CHOICES) - __builtin_popcountll(mask32);
   } else
       return table->metadata.lv3_sizes[index];
+}
+
+static uint64_t iceberg_table_load(iceberg_table * table) {
+  uint64_t total = 0;
+
+  for (uint8_t i = 1; i <= 3; ++i) {
+    for (uint64_t j = 0; j < table->metadata.nblocks; ++j) {
+      total += iceberg_block_load(table, j, i); 
+    }
+  }
+
+  return total;
+}
+
+static double iceberg_block_load_factor(iceberg_table * table, uint64_t index, uint8_t level) {
+  if (level == 1)
+    return iceberg_block_load(table, index, level) / (double)(1ULL << SLOT_BITS);
+  else if (level == 2)
+    return iceberg_block_load(table, index, level) / (double)(C_LV2 + MAX_LG_LG_N / D_CHOICES);
+  else
+    return iceberg_block_load(table, index, level);
 }
 
 static inline size_t round_up(size_t n, size_t k) {
@@ -409,7 +428,7 @@ static bool iceberg_lv3_move_block(iceberg_table * table, uint64_t bnum, uint8_t
 
 
 // finish moving blocks that are left during the last resize.
-bool iceberg_end(iceberg_table * table) {
+void iceberg_end(iceberg_table * table) {
   for (uint64_t j = 0; j < table->metadata.nblocks / 8; ++j) {
     uint64_t chunk_idx = j;
     if (!__sync_lock_test_and_set(&table->metadata.lv1_resize_marker[chunk_idx], 1))
@@ -688,6 +707,29 @@ bool iceberg_remove(iceberg_table * table, KeyType key, uint8_t thread_id) {
   return ret;
 }
 
+static bool iceberg_nuke_key(iceberg_table * table, uint64_t level, uint64_t index, uint64_t slot, uint64_t thread_id) {
+
+  if (unlikely(!read_lock(&table->metadata.rw_lock, WAIT_FOR_LOCK, thread_id)))
+    return false;
+
+  iceberg_metadata * metadata = &table->metadata;
+
+  if (level == 1) {
+    iceberg_lv1_block * blocks = table->level1;
+    metadata->lv1_md[index].block_md[slot] = 0;
+    blocks[index].slots[slot].key = blocks[index].slots[slot].val = 0;
+    pc_add(&metadata->lv1_balls, -1, thread_id);
+  } else if (level == 2) {
+    iceberg_lv2_block * blocks = table->level2;
+    metadata->lv2_md[index].block_md[slot] = 0;
+    blocks[index].slots[slot].key = blocks[index].slots[slot].val = 0;
+    pc_add(&metadata->lv2_balls, -1, thread_id);
+  }
+
+  read_unlock(&table->metadata.rw_lock, thread_id);
+  return true;
+}
+
 bool iceberg_remove_lv1_resize(iceberg_table * table, KeyType key, uint8_t thread_id) {
 
   if (unlikely(!read_lock(&table->metadata.rw_lock, WAIT_FOR_LOCK, thread_id)))
@@ -831,7 +873,7 @@ static bool iceberg_lv1_move_block(iceberg_table * table, uint64_t bnum, uint8_t
     split_hash(lv1_hash(key), &fprint, &index, &table->metadata);
     // move to new location
     if (index != bnum) {
-      if (!iceberg_remove_lv1_resize(table, key, thread_id)) {
+      if (!iceberg_nuke_key(table, 1, bnum, j, thread_id)) {
         printf("Failed remove during resize lv1. key: %" PRIu64 ", block: %ld\n", key, bnum);
         exit(0);
       }
@@ -857,7 +899,6 @@ static bool iceberg_lv2_move_block(iceberg_table * table, uint64_t bnum, uint8_t
     return true;
 
   // relocate items in level2
-  uint64_t mask = ~(1ULL << (table->metadata.block_bits + FPRINT_BITS - 1));
   for (uint64_t j = 0; j < C_LV2 + MAX_LG_LG_N / D_CHOICES; ++j) {
     KeyType key = table->level2[bnum].slots[j].key;
     if (key == 0)
@@ -871,7 +912,7 @@ static bool iceberg_lv2_move_block(iceberg_table * table, uint64_t bnum, uint8_t
     // move to new location
     //if (!iceberg_get_value(table, key, &val, thread_id)) {
     /*if (index != bnum) {*/
-    if (!iceberg_lv2_remove(table, key, bnum, thread_id, mask)) {
+    if (!iceberg_nuke_key(table, 2, bnum, j, thread_id)) {
       printf("Failed remove during resize lv2\n");
       exit(0);
     }
