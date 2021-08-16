@@ -709,9 +709,6 @@ bool iceberg_remove(iceberg_table * table, KeyType key, uint8_t thread_id) {
 
 static bool iceberg_nuke_key(iceberg_table * table, uint64_t level, uint64_t index, uint64_t slot, uint64_t thread_id) {
 
-  if (unlikely(!read_lock(&table->metadata.rw_lock, WAIT_FOR_LOCK, thread_id)))
-    return false;
-
   iceberg_metadata * metadata = &table->metadata;
 
   if (level == 1) {
@@ -726,42 +723,7 @@ static bool iceberg_nuke_key(iceberg_table * table, uint64_t level, uint64_t ind
     pc_add(&metadata->lv2_balls, -1, thread_id);
   }
 
-  read_unlock(&table->metadata.rw_lock, thread_id);
   return true;
-}
-
-bool iceberg_remove_lv1_resize(iceberg_table * table, KeyType key, uint8_t thread_id) {
-
-  if (unlikely(!read_lock(&table->metadata.rw_lock, WAIT_FOR_LOCK, thread_id)))
-    return false;
-
-  iceberg_metadata * metadata = &table->metadata;
-  iceberg_lv1_block * blocks = table->level1;
-  uint64_t mask = ~(1ULL << (metadata->block_bits + FPRINT_BITS - 1));
-
-  uint8_t fprint;
-  uint64_t index;
-
-  split_hash(lv1_hash(key) & mask, &fprint, &index, metadata);
-
-  __mmask64 md_mask = slot_mask_64(metadata->lv1_md[index].block_md, fprint);
-  uint8_t popct = __builtin_popcountll(md_mask);
-
-  for(uint8_t i = 0; i < popct; ++i) {
-
-    uint8_t slot = word_select(md_mask, i);
-
-    if (blocks[index].slots[slot].key == key) {
-
-      metadata->lv1_md[index].block_md[slot] = 0;
-      pc_add(&metadata->lv1_balls, -1, thread_id);
-      read_unlock(&table->metadata.rw_lock, thread_id);
-      return true;
-    }
-  }
-
-  read_unlock(&table->metadata.rw_lock, thread_id);
-  return false;
 }
 
 static inline bool iceberg_lv3_get_value(iceberg_table * table, KeyType key, ValueType **value, uint64_t lv3_index) {
