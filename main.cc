@@ -195,7 +195,7 @@ int main (int argc, char** argv) {
   //	exit(0);
 
   if (!is_benchmark) {
-    printf("%f\n", N / elapsed(t1, t2));
+    printf("Insertions: %f\n", N / elapsed(t1, t2));
 
     printf("Load factor: %f\n", iceberg_load_factor(&table));
     printf("Number level 1 inserts: %ld\n", lv1_balls(&table));
