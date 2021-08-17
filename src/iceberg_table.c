@@ -300,13 +300,13 @@ static bool iceberg_setup_resize(iceberg_table * table) {
     return false;
   }
 
+  printf("Setting up resize\nCurrent stats: \n");
+  
   printf("Load factor: %f\n", iceberg_load_factor(table));
   printf("Number level 1 inserts: %ld\n", lv1_balls(table));
   printf("Number level 2 inserts: %ld\n", lv2_balls(table));
   printf("Number level 3 inserts: %ld\n", lv3_balls(table));
   printf("Total inserts: %ld\n", tot_balls(table));
-
-  printf("Setting up resize\n");
 
   // reset the block ctr 
   table->metadata.lv1_resize_ctr = 0;
