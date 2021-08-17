@@ -640,7 +640,7 @@ static inline bool iceberg_lv3_remove(iceberg_table * table, KeyType key, uint64
   return false;
 }
 
-static inline bool iceberg_lv2_remove(iceberg_table * table, KeyType key, uint64_t lv3_index, uint8_t thread_id, KeyType mask) {
+static inline bool iceberg_lv2_remove(iceberg_table * table, KeyType key, uint64_t lv3_index, uint8_t thread_id) {
 
   iceberg_metadata * metadata = &table->metadata;
   iceberg_lv2_block * blocks = table->level2;
@@ -650,7 +650,7 @@ static inline bool iceberg_lv2_remove(iceberg_table * table, KeyType key, uint64
     uint8_t fprint;
     uint64_t index;
 
-    split_hash(lv2_hash(key, i) & mask, &fprint, &index, metadata);
+    split_hash(lv2_hash(key, i), &fprint, &index, metadata);
 
     __mmask32 md_mask = slot_mask_32(metadata->lv2_md[index].block_md, fprint) & ((1 << (C_LV2 + MAX_LG_LG_N / D_CHOICES)) - 1);
     uint8_t popct = __builtin_popcount(md_mask);
@@ -679,7 +679,6 @@ bool iceberg_remove(iceberg_table * table, KeyType key, uint8_t thread_id) {
 
   iceberg_metadata * metadata = &table->metadata;
   iceberg_lv1_block * blocks = table->level1;
-  uint64_t mask = UINT64_MAX;
 
   uint8_t fprint;
   uint64_t index;
@@ -703,7 +702,7 @@ bool iceberg_remove(iceberg_table * table, KeyType key, uint8_t thread_id) {
     }
   }
 
-  bool ret = iceberg_lv2_remove(table, key, index, thread_id, mask);
+  bool ret = iceberg_lv2_remove(table, key, index, thread_id);
 
   read_unlock(&table->metadata.rw_lock, thread_id);
   return ret;
