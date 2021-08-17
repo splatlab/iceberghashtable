@@ -426,7 +426,6 @@ static bool iceberg_lv1_move_block(iceberg_table * table, uint64_t bnum, uint8_t
 static bool iceberg_lv2_move_block(iceberg_table * table, uint64_t bnum, uint8_t thread_id);
 static bool iceberg_lv3_move_block(iceberg_table * table, uint64_t bnum, uint8_t thread_id);
 
-
 // finish moving blocks that are left during the last resize.
 void iceberg_end(iceberg_table * table) {
   for (uint64_t j = 0; j < table->metadata.nblocks / 8; ++j) {
@@ -539,15 +538,7 @@ static inline bool iceberg_lv2_insert(iceberg_table * table, KeyType key, ValueT
   return iceberg_lv3_insert(table, key, value, lv3_index, thread_id);
 }
 
-bool iceberg_insert(iceberg_table * table, KeyType key, ValueType value, uint8_t thread_id) {
-
-  if (unlikely(need_resize(table))) {
-    iceberg_setup_resize(table);
-  }
-
- if (unlikely(!read_lock(&table->metadata.rw_lock, WAIT_FOR_LOCK, thread_id)))
-    return false;
-
+static bool iceberg_insert_internal(iceberg_table * table, KeyType key, ValueType value, uint8_t thread_id) {
   iceberg_metadata * metadata = &table->metadata;
   iceberg_lv1_block * blocks = table->level1;	
 
@@ -555,7 +546,7 @@ bool iceberg_insert(iceberg_table * table, KeyType key, ValueType value, uint8_t
   uint64_t index;
 
   split_hash(lv1_hash(key), &fprint, &index, metadata);
- 
+
   // move blocks if resize is active and not already moved.
   if (unlikely(is_resize_active(table) && index < (table->metadata.nblocks >> 1))) {
     uint64_t chunk_idx = index / 8;
@@ -588,7 +579,19 @@ bool iceberg_insert(iceberg_table * table, KeyType key, ValueType value, uint8_t
     }
   }
 
-  bool ret = iceberg_lv2_insert(table, key, value, index, thread_id);
+  return iceberg_lv2_insert(table, key, value, index, thread_id);
+}
+
+bool iceberg_insert(iceberg_table * table, KeyType key, ValueType value, uint8_t thread_id) {
+
+  if (unlikely(need_resize(table))) {
+    iceberg_setup_resize(table);
+  }
+
+ if (unlikely(!read_lock(&table->metadata.rw_lock, WAIT_FOR_LOCK, thread_id)))
+    return false;
+
+  bool ret = iceberg_insert_internal(table, key, value, thread_id);
 
   read_unlock(&table->metadata.rw_lock, thread_id);
   return ret;
@@ -840,7 +843,7 @@ static bool iceberg_lv1_move_block(iceberg_table * table, uint64_t bnum, uint8_t
         printf("Failed remove during resize lv1. key: %" PRIu64 ", block: %ld\n", key, bnum);
         exit(0);
       }
-      if (!iceberg_insert(table, key, value, thread_id)) {
+      if (!iceberg_insert_internal(table, key, value, thread_id)) {
         printf("Failed insert during resize lv1\n");
         exit(0);
       }
