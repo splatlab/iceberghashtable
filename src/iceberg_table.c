@@ -574,7 +574,6 @@ static bool iceberg_insert_internal(iceberg_table * table, KeyType key, ValueTyp
       blocks[index].slots[slot].val = value;
 
       metadata->lv1_md[index].block_md[slot] = fprint;
-      read_unlock(&table->metadata.rw_lock, thread_id);
       return true;
     }
   }
