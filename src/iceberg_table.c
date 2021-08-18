@@ -428,23 +428,25 @@ static bool iceberg_lv3_move_block(iceberg_table * table, uint64_t bnum, uint8_t
 
 // finish moving blocks that are left during the last resize.
 void iceberg_end(iceberg_table * table) {
-  for (uint64_t j = 0; j < table->metadata.nblocks / 8; ++j) {
-    uint64_t chunk_idx = j;
-    if (!__sync_lock_test_and_set(&table->metadata.lv1_resize_marker[chunk_idx], 1))
-      for (uint8_t i = 0; i < 8; ++i) {
-        uint64_t idx = chunk_idx * 8 + i;
-        iceberg_lv1_move_block(table, idx, 0);
-      }
-    if (!__sync_lock_test_and_set(&table->metadata.lv2_resize_marker[chunk_idx], 1))
-      for (uint8_t i = 0; i < 8; ++i) {
-        uint64_t idx = chunk_idx * 8 + i;
-        iceberg_lv2_move_block(table, idx, 0);
-      }
-    if (!__sync_lock_test_and_set(&table->metadata.lv3_resize_marker[chunk_idx], 1))
-      for (uint8_t i = 0; i < 8; ++i) {
-        uint64_t idx = chunk_idx * 8 + i;
-        iceberg_lv3_move_block(table, idx, 0);
-      }
+  if (is_resize_active(table)) {
+    for (uint64_t j = 0; j < table->metadata.nblocks / 8; ++j) {
+      uint64_t chunk_idx = j;
+      if (!__sync_lock_test_and_set(&table->metadata.lv1_resize_marker[chunk_idx], 1))
+        for (uint8_t i = 0; i < 8; ++i) {
+          uint64_t idx = chunk_idx * 8 + i;
+          iceberg_lv1_move_block(table, idx, 0);
+        }
+      if (!__sync_lock_test_and_set(&table->metadata.lv2_resize_marker[chunk_idx], 1))
+        for (uint8_t i = 0; i < 8; ++i) {
+          uint64_t idx = chunk_idx * 8 + i;
+          iceberg_lv2_move_block(table, idx, 0);
+        }
+      if (!__sync_lock_test_and_set(&table->metadata.lv3_resize_marker[chunk_idx], 1))
+        for (uint8_t i = 0; i < 8; ++i) {
+          uint64_t idx = chunk_idx * 8 + i;
+          iceberg_lv3_move_block(table, idx, 0);
+        }
+    }
   }
 
   printf("Final resize done. Table load: %ld\n", iceberg_table_load(table));
