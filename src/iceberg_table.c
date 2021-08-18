@@ -758,6 +758,38 @@ static inline bool iceberg_lv3_get_value(iceberg_table * table, KeyType key, Val
   }
 
   metadata->lv3_locks[lv3_index] = 0;
+
+  // check if there's an active resize and block isn't fixed yet
+  if (unlikely(is_resize_active(table) && lv3_index >= (table->metadata.nblocks >> 1))) {
+    uint64_t mask = ~(1ULL << (table->metadata.block_bits - 1));
+    uint64_t old_index = lv3_index & mask;
+    uint64_t chunk_idx = old_index / 8;
+    if (__atomic_load_n(&table->metadata.lv3_resize_marker[chunk_idx], __ATOMIC_SEQ_CST) == 0) { // not fixed yet
+      while(__sync_lock_test_and_set(metadata->lv3_locks + old_index, 1));
+
+      if(likely(!metadata->lv3_sizes[old_index])) {
+        metadata->lv3_locks[old_index] = 0;
+        return false;
+      }
+
+      iceberg_lv3_node * current_node = lists[old_index].head;
+
+      for(uint8_t i = 0; i < metadata->lv3_sizes[old_index]; ++i) {
+
+        if(current_node->key == key) {
+
+          *value = &current_node->val;
+          metadata->lv3_locks[old_index] = 0;
+          return true;
+        }
+
+        current_node = current_node->next_node;
+      }
+
+      metadata->lv3_locks[old_index] = 0;
+    }
+  }
+
   return false;
 }
 
@@ -785,6 +817,27 @@ static inline bool iceberg_lv2_get_value(iceberg_table * table, KeyType key, Val
         return true;
       }
     }
+
+    // check if there's an active resize and block isn't fixed yet
+    if (unlikely(is_resize_active(table) && index >= (table->metadata.nblocks >> 1))) {
+      uint64_t mask = ~(1ULL << (table->metadata.block_bits - 1));
+      uint64_t old_index = index & mask;
+      uint64_t chunk_idx = old_index / 8;
+      if (__atomic_load_n(&table->metadata.lv2_resize_marker[chunk_idx], __ATOMIC_SEQ_CST) == 0) { // not fixed yet
+        __mmask32 md_mask = slot_mask_32(metadata->lv2_md[old_index].block_md, fprint) & ((1 << (C_LV2 + MAX_LG_LG_N / D_CHOICES)) - 1);
+
+        while (md_mask != 0) {
+          int slot = __builtin_ctz(md_mask);
+          md_mask = md_mask & ~(1U << slot);
+
+          if (blocks[old_index].slots[slot].key == key) {
+            *value = &blocks[old_index].slots[slot].val;
+            return true;
+          }
+        }
+      }
+    }
+
   }
 
   return iceberg_lv3_get_value(table, key, value, lv3_index);
@@ -813,6 +866,27 @@ bool iceberg_get_value(iceberg_table * table, KeyType key, ValueType **value, ui
       *value = &blocks[index].slots[slot].val;
       read_unlock(&table->metadata.rw_lock, thread_id);
       return true;
+    }
+  }
+
+  // check if there's an active resize and block isn't fixed yet
+  if (unlikely(is_resize_active(table) && index >= (table->metadata.nblocks >> 1))) {
+    uint64_t mask = ~(1ULL << (table->metadata.block_bits - 1));
+    uint64_t old_index = index & mask;
+    uint64_t chunk_idx = old_index / 8;
+    if (__atomic_load_n(&table->metadata.lv1_resize_marker[chunk_idx], __ATOMIC_SEQ_CST) == 0) { // not fixed yet
+      __mmask64 md_mask = slot_mask_64(metadata->lv1_md[old_index].block_md, fprint);
+
+      while (md_mask != 0) {
+        int slot = __builtin_ctzll(md_mask);
+        md_mask = md_mask & ~(1ULL << slot);
+
+        if (blocks[old_index].slots[slot].key == key) {
+          *value = &blocks[old_index].slots[slot].val;
+          read_unlock(&table->metadata.rw_lock, thread_id);
+          return true;
+        }
+      }
     }
   }
 
