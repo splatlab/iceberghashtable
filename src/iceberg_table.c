@@ -883,7 +883,9 @@ static bool iceberg_lv2_move_block(iceberg_table * table, uint64_t bnum, uint8_t
       split_hash(lv2_hash(key, i), &fprint, &l2index, &table->metadata);
       
       // move to new location
-      if ((l2index & mask) == bnum && l2index != bnum) {
+      if ((l2index & mask) == bnum && l2index == bnum) {
+        continue;
+      } else if ((l2index & mask) == bnum && l2index != bnum) {
         if (!iceberg_nuke_key(table, 2, bnum, j, thread_id)) {
           printf("Failed remove during resize lv2\n");
           exit(0);
