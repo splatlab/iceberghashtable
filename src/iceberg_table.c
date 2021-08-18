@@ -865,7 +865,7 @@ static bool iceberg_lv2_move_block(iceberg_table * table, uint64_t bnum, uint8_t
   if (bctr >= (table->metadata.nblocks >> 1))
     return true;
 
-  uint64_t mask = ~(1ULL << (table->metadata.block_bits + FPRINT_BITS - 1));
+  uint64_t mask = ~(1ULL << (table->metadata.block_bits - 1));
   // relocate items in level2
   for (uint64_t j = 0; j < C_LV2 + MAX_LG_LG_N / D_CHOICES; ++j) {
     KeyType key = table->level2[bnum].slots[j].key;
@@ -892,6 +892,7 @@ static bool iceberg_lv2_move_block(iceberg_table * table, uint64_t bnum, uint8_t
           printf("Failed insert during resize lv2\n");
           exit(0);
         }
+        continue;
         //ValueType *val;
         //if (!iceberg_get_value(table, key, &val, thread_id)) {
         //printf("Key not found during resize lv2: %ld\n", key);
