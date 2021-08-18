@@ -981,7 +981,7 @@ static bool iceberg_lv2_move_block(iceberg_table * table, uint64_t bnum, uint8_t
           printf("Failed insert during resize lv2\n");
           exit(0);
         }
-        continue;
+        break;
         //ValueType *val;
         //if (!iceberg_get_value(table, key, &val, thread_id)) {
         //printf("Key not found during resize lv2: %ld\n", key);
