@@ -483,10 +483,33 @@ static inline bool iceberg_lv3_insert(iceberg_table * table, KeyType key, ValueT
   return true;
 }
 
+static inline bool iceberg_lv2_insert_internal(iceberg_table * table, KeyType key, ValueType value, uint8_t fprint, uint64_t index, uint64_t lv3_index, uint8_t thread_id) {
+  iceberg_metadata * metadata = &table->metadata;
+  iceberg_lv2_block * blocks = table->level2;
+  __mmask32 md_mask = slot_mask_32(metadata->lv2_md[index].block_md, 0) & ((1 << (C_LV2 + MAX_LG_LG_N / D_CHOICES)) - 1);
+  uint8_t popct = __builtin_popcountll(md_mask);
+
+  for(uint8_t i = 0; i < popct; ++i) {
+
+    uint8_t slot = word_select(md_mask, i);
+
+    if(__sync_bool_compare_and_swap(metadata->lv2_md[index].block_md + slot, 0, 1)) {
+
+      pc_add(&metadata->lv2_balls, 1, thread_id);
+      blocks[index].slots[slot].key = key;
+      blocks[index].slots[slot].val = value;
+
+      metadata->lv2_md[index].block_md[slot] = fprint;
+      return true;
+    }
+  }
+
+  return false;
+}
+
 static inline bool iceberg_lv2_insert(iceberg_table * table, KeyType key, ValueType value, uint64_t lv3_index, uint8_t thread_id) {
 
   iceberg_metadata * metadata = &table->metadata;
-  iceberg_lv2_block * blocks = table->level2;
 
   if (metadata->lv2_ctr == (int64_t)(C_LV2 * metadata->nblocks))
     return iceberg_lv3_insert(table, key, value, lv3_index, thread_id);
@@ -522,46 +545,17 @@ static inline bool iceberg_lv2_insert(iceberg_table * table, KeyType key, ValueT
       }
   }
 
-  for(uint8_t i = 0; i < popct1; ++i) {
-
-    uint8_t slot = word_select(md_mask1, i);
-
-    if(__sync_bool_compare_and_swap(metadata->lv2_md[index1].block_md + slot, 0, 1)) {
-
-      pc_add(&metadata->lv2_balls, 1, thread_id);
-      blocks[index1].slots[slot].key = key;
-      blocks[index1].slots[slot].val = value;
-
-      metadata->lv2_md[index1].block_md[slot] = fprint1;
-      return true;
-    }
-  }
+  if (iceberg_lv2_insert_internal(table, key, value, fprint1, index1, lv3_index, thread_id))
+    return true;
 
   return iceberg_lv3_insert(table, key, value, lv3_index, thread_id);
 }
 
-static bool iceberg_insert_internal(iceberg_table * table, KeyType key, ValueType value, uint8_t thread_id) {
+static bool iceberg_insert_internal(iceberg_table * table, KeyType key, ValueType value, uint8_t fprint, uint64_t index, uint8_t thread_id) {
   iceberg_metadata * metadata = &table->metadata;
   iceberg_lv1_block * blocks = table->level1;	
 
-  uint8_t fprint;
-  uint64_t index;
-
-  split_hash(lv1_hash(key), &fprint, &index, metadata);
-
-  // move blocks if resize is active and not already moved.
-  if (unlikely(is_resize_active(table) && index < (table->metadata.nblocks >> 1))) {
-    uint64_t chunk_idx = index / 8;
-    if (!__sync_lock_test_and_set(&table->metadata.lv1_resize_marker[chunk_idx], 1))
-      for (uint8_t i = 0; i < 8; ++i) {
-        uint64_t idx = chunk_idx * 8 + i;
-        /*printf("LV1 Before: Moving block: %ld load: %f\n", idx, iceberg_block_load(table, idx, 1));*/
-        iceberg_lv1_move_block(table, idx, thread_id);
-        /*printf("LV1 After: Moving block: %ld load: %f\n", idx, iceberg_block_load(table, idx, 1));*/
-      }
-  }
-
-  __mmask64 md_mask = slot_mask_64(metadata->lv1_md[index].block_md, 0);
+    __mmask64 md_mask = slot_mask_64(metadata->lv1_md[index].block_md, 0);
 
   uint8_t popct = __builtin_popcountll(md_mask);
 
@@ -580,7 +574,7 @@ static bool iceberg_insert_internal(iceberg_table * table, KeyType key, ValueTyp
     }
   }
 
-  return iceberg_lv2_insert(table, key, value, index, thread_id);
+  return false;
 }
 
 bool iceberg_insert(iceberg_table * table, KeyType key, ValueType value, uint8_t thread_id) {
@@ -589,10 +583,30 @@ bool iceberg_insert(iceberg_table * table, KeyType key, ValueType value, uint8_t
     iceberg_setup_resize(table);
   }
 
- if (unlikely(!read_lock(&table->metadata.rw_lock, WAIT_FOR_LOCK, thread_id)))
+  if (unlikely(!read_lock(&table->metadata.rw_lock, WAIT_FOR_LOCK, thread_id)))
     return false;
 
-  bool ret = iceberg_insert_internal(table, key, value, thread_id);
+  iceberg_metadata * metadata = &table->metadata;
+  uint8_t fprint;
+  uint64_t index;
+
+  split_hash(lv1_hash(key), &fprint, &index, metadata);
+
+  // move blocks if resize is active and not already moved.
+  if (unlikely(is_resize_active(table) && index < (table->metadata.nblocks >> 1))) {
+    uint64_t chunk_idx = index / 8;
+    if (!__sync_lock_test_and_set(&table->metadata.lv1_resize_marker[chunk_idx], 1))
+      for (uint8_t i = 0; i < 8; ++i) {
+        uint64_t idx = chunk_idx * 8 + i;
+        /*printf("LV1 Before: Moving block: %ld load: %f\n", idx, iceberg_block_load(table, idx, 1));*/
+        iceberg_lv1_move_block(table, idx, thread_id);
+        /*printf("LV1 After: Moving block: %ld load: %f\n", idx, iceberg_block_load(table, idx, 1));*/
+      }
+  }
+
+  bool ret = iceberg_insert_internal(table, key, value, fprint, index, thread_id);
+  if (!ret)
+    ret = iceberg_lv2_insert(table, key, value, index, thread_id);
 
   read_unlock(&table->metadata.rw_lock, thread_id);
   return ret;
@@ -918,7 +932,7 @@ static bool iceberg_lv1_move_block(iceberg_table * table, uint64_t bnum, uint8_t
         printf("Failed remove during resize lv1. key: %" PRIu64 ", block: %ld\n", key, bnum);
         exit(0);
       }
-      if (!iceberg_insert_internal(table, key, value, thread_id)) {
+      if (!iceberg_insert_internal(table, key, value, fprint, index, thread_id)) {
         printf("Failed insert during resize lv1\n");
         exit(0);
       }
@@ -952,9 +966,10 @@ static bool iceberg_lv2_move_block(iceberg_table * table, uint64_t bnum, uint8_t
     split_hash(lv1_hash(key), &fprint, &index, &table->metadata);
 
     for(int i = 0; i < D_CHOICES; ++i) {
+      uint8_t l2fprint;
       uint64_t l2index;
 
-      split_hash(lv2_hash(key, i), &fprint, &l2index, &table->metadata);
+      split_hash(lv2_hash(key, i), &l2fprint, &l2index, &table->metadata);
 
       // move to new location
       if ((l2index & mask) == bnum && l2index != bnum) {
@@ -962,7 +977,7 @@ static bool iceberg_lv2_move_block(iceberg_table * table, uint64_t bnum, uint8_t
           printf("Failed remove during resize lv2\n");
           exit(0);
         }
-        if (!iceberg_lv2_insert(table, key, value, index, thread_id)) {
+        if (!iceberg_lv2_insert_internal(table, key, value, l2fprint, l2index, index, thread_id)) {
           printf("Failed insert during resize lv2\n");
           exit(0);
         }
