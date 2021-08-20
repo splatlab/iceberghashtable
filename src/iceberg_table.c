@@ -464,6 +464,7 @@ void iceberg_end(iceberg_table * table) {
 
 static inline bool iceberg_lv3_insert(iceberg_table * table, KeyType key, ValueType value, uint64_t lv3_index, uint8_t thread_id) {
 
+#ifdef ENABLE_RESIZE
   if (unlikely(lv3_index < (table->metadata.nblocks >> 1))) {
     uint64_t chunk_idx = lv3_index / 8;
     if (!__sync_lock_test_and_set(&table->metadata.lv3_resize_marker[chunk_idx], 1))
@@ -474,6 +475,7 @@ static inline bool iceberg_lv3_insert(iceberg_table * table, KeyType key, ValueT
         /*printf("LV3 After: Moving block: %ld load: %f\n", idx, iceberg_block_load(table, idx, 3));*/
       }
   }
+#endif
 
   iceberg_metadata * metadata = &table->metadata;
   iceberg_lv3_list * lists = table->level3;
@@ -786,7 +788,9 @@ bool iceberg_remove(iceberg_table * table, KeyType key, uint8_t thread_id) {
       metadata->lv1_md[index].block_md[slot] = 0;
       blocks[index].slots[slot].key = blocks[index].slots[slot].val = 0;
       pc_add(&metadata->lv1_balls, -1, thread_id);
+#ifdef ENABLE_RESIZE
       read_unlock(&table->metadata.rw_lock, thread_id);
+#endif
       return true;
     }
   }
@@ -953,7 +957,9 @@ bool iceberg_get_value(iceberg_table * table, KeyType key, ValueType **value, ui
 
     if (blocks[index].slots[slot].key == key) {
       *value = &blocks[index].slots[slot].val;
+#ifdef ENABLE_RESIZE
       read_unlock(&table->metadata.rw_lock, thread_id);
+#endif
       return true;
     }
   }
