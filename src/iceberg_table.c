@@ -282,14 +282,26 @@ int iceberg_init(iceberg_table *table, uint64_t log_slots) {
 }
 
 #ifdef ENABLE_RESIZE
-static bool is_resize_active(iceberg_table * table) {
+static inline bool is_lv1_resize_active(iceberg_table * table) {
   uint64_t half_mark = table->metadata.nblocks >> 1;
   uint64_t lv1_ctr = __atomic_load_n(&table->metadata.lv1_resize_ctr, __ATOMIC_SEQ_CST);
+  return lv1_ctr < half_mark;
+}
+
+static inline bool is_lv2_resize_active(iceberg_table * table) {
+  uint64_t half_mark = table->metadata.nblocks >> 1;
   uint64_t lv2_ctr = __atomic_load_n(&table->metadata.lv2_resize_ctr, __ATOMIC_SEQ_CST);
+  return lv2_ctr < half_mark;
+}
+
+static inline bool is_lv3_resize_active(iceberg_table * table) {
+  uint64_t half_mark = table->metadata.nblocks >> 1;
   uint64_t lv3_ctr = __atomic_load_n(&table->metadata.lv3_resize_ctr, __ATOMIC_SEQ_CST);
-  if (lv1_ctr < half_mark || lv2_ctr < half_mark || lv3_ctr < half_mark)
-    return true;
-  return false;
+  return lv3_ctr < half_mark;
+}
+
+static bool is_resize_active(iceberg_table * table) {
+  return is_lv3_resize_active(table) || is_lv2_resize_active(table) || is_lv1_resize_active(table); 
 }
 
 static bool iceberg_setup_resize(iceberg_table * table) {
@@ -437,7 +449,7 @@ static bool iceberg_lv3_move_block(iceberg_table * table, uint64_t bnum, uint8_t
 
 // finish moving blocks that are left during the last resize.
 void iceberg_end(iceberg_table * table) {
-  if (is_resize_active(table)) {
+  if (is_lv1_resize_active(table)) {
     for (uint64_t j = 0; j < table->metadata.nblocks / 8; ++j) {
       uint64_t chunk_idx = j;
       if (!__sync_lock_test_and_set(&table->metadata.lv1_resize_marker[chunk_idx], 1))
@@ -445,11 +457,21 @@ void iceberg_end(iceberg_table * table) {
           uint64_t idx = chunk_idx * 8 + i;
           iceberg_lv1_move_block(table, idx, 0);
         }
+    }
+  }
+  if (is_lv2_resize_active(table)) {
+    for (uint64_t j = 0; j < table->metadata.nblocks / 8; ++j) {
+      uint64_t chunk_idx = j;
       if (!__sync_lock_test_and_set(&table->metadata.lv2_resize_marker[chunk_idx], 1))
         for (uint8_t i = 0; i < 8; ++i) {
           uint64_t idx = chunk_idx * 8 + i;
           iceberg_lv2_move_block(table, idx, 0);
         }
+    }
+  }
+  if (is_lv3_resize_active(table)) {
+    for (uint64_t j = 0; j < table->metadata.nblocks / 8; ++j) {
+      uint64_t chunk_idx = j;
       if (!__sync_lock_test_and_set(&table->metadata.lv3_resize_marker[chunk_idx], 1))
         for (uint8_t i = 0; i < 8; ++i) {
           uint64_t idx = chunk_idx * 8 + i;
