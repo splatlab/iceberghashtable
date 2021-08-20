@@ -10,6 +10,8 @@
 extern "C" {
 #endif
 
+#define ENABLE_RESIZE 1
+
 #define SLOT_BITS 6
 #define FPRINT_BITS 8
 #define D_CHOICES 2
@@ -65,6 +67,7 @@ extern "C" {
     iceberg_lv2_block_md * lv2_md;
     uint64_t * lv3_sizes;
     uint8_t * lv3_locks;
+#ifdef ENABLE_RESIZE
     ReaderWriterLock rw_lock;
     uint64_t lv1_resize_ctr;
     uint64_t lv2_resize_ctr;
@@ -72,6 +75,7 @@ extern "C" {
     uint8_t * lv1_resize_marker;
     uint8_t * lv2_resize_marker;
     uint8_t * lv3_resize_marker;
+#endif
   } iceberg_metadata;
 
   typedef struct iceberg_table {
@@ -96,7 +100,9 @@ extern "C" {
 
   bool iceberg_get_value(iceberg_table * table, KeyType key, ValueType **value, uint8_t thread_id);
 
+#ifdef ENABLE_RESIZE
   void iceberg_end(iceberg_table * table);
+#endif
 
 #ifdef __cplusplus
 }

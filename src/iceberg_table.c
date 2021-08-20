@@ -97,12 +97,14 @@ static inline double iceberg_load_factor_aprox(iceberg_table * table) {
   return (double)tot_balls_aprox(table) / (double)total_capacity_aprox(table);
 }
 
+#ifdef ENABLE_RESIZE
 bool need_resize(iceberg_table * table) {
   double lf = iceberg_load_factor_aprox(table);
   if (lf >= 0.85)
     return true;
   return false;
 }
+#endif
 
 static inline void split_hash(uint64_t hash, uint8_t *fprint, uint64_t *index, iceberg_metadata * metadata) {	
   *fprint = hash & ((1 << FPRINT_BITS) - 1);
@@ -200,9 +202,6 @@ int iceberg_init(iceberg_table *table, uint64_t log_slots) {
   table->metadata.nslots = 1 << log_slots;
   table->metadata.nblocks = total_blocks;
   table->metadata.block_bits = log_slots - SLOT_BITS;
-  table->metadata.lv1_resize_ctr = total_blocks;
-  table->metadata.lv2_resize_ctr = total_blocks;
-  table->metadata.lv3_resize_ctr = total_blocks;
 
   uint32_t procs = get_nprocs();
   pc_init(&table->metadata.lv1_balls, &table->metadata.lv1_ctr, procs, 1000);
@@ -234,6 +233,11 @@ int iceberg_init(iceberg_table *table, uint64_t log_slots) {
     exit(1);
   }
 
+#ifdef ENABLE_RESIZE
+  table->metadata.lv1_resize_ctr = total_blocks;
+  table->metadata.lv2_resize_ctr = total_blocks;
+  table->metadata.lv3_resize_ctr = total_blocks;
+
   // create one marker for 8 blocks.
   size_t resize_marker_size = sizeof(uint8_t) * total_blocks / 8;
   table->metadata.lv1_resize_marker = (uint8_t *)mmap(NULL, resize_marker_size, PROT_READ | PROT_WRITE, mmap_flags, 0, 0);
@@ -256,6 +260,7 @@ int iceberg_init(iceberg_table *table, uint64_t log_slots) {
   memset(table->metadata.lv3_resize_marker, 1, resize_marker_size);
 
   rw_lock_init(&table->metadata.rw_lock);
+#endif
 
   for (uint64_t i = 0; i < total_blocks; ++i) {
 
@@ -276,6 +281,7 @@ int iceberg_init(iceberg_table *table, uint64_t log_slots) {
   return 0;
 }
 
+#ifdef ENABLE_RESIZE
 static bool is_resize_active(iceberg_table * table) {
   uint64_t half_mark = table->metadata.nblocks >> 1;
   uint64_t lv1_ctr = __atomic_load_n(&table->metadata.lv1_resize_ctr, __ATOMIC_SEQ_CST);
@@ -454,6 +460,7 @@ void iceberg_end(iceberg_table * table) {
 
   printf("Final resize done. Table load: %ld\n", iceberg_table_load(table));
 }
+#endif
 
 static inline bool iceberg_lv3_insert(iceberg_table * table, KeyType key, ValueType value, uint64_t lv3_index, uint8_t thread_id) {
 
@@ -536,6 +543,7 @@ static inline bool iceberg_lv2_insert(iceberg_table * table, KeyType key, ValueT
     popct1 = popct2;
   }
   
+#ifdef ENABLE_RESIZE
   // move blocks if resize is active and not already moved.
   if (unlikely(index1 < (table->metadata.nblocks >> 1))) {
     uint64_t chunk_idx = index1 / 8;
@@ -547,6 +555,7 @@ static inline bool iceberg_lv2_insert(iceberg_table * table, KeyType key, ValueT
         /*printf("LV2 After: Moving block: %ld load: %f\n", idx, iceberg_block_load(table, idx, 2));*/
       }
   }
+#endif
 
   if (iceberg_lv2_insert_internal(table, key, value, fprint1, index1, lv3_index, thread_id))
     return true;
@@ -582,12 +591,14 @@ static bool iceberg_insert_internal(iceberg_table * table, KeyType key, ValueTyp
 
 bool iceberg_insert(iceberg_table * table, KeyType key, ValueType value, uint8_t thread_id) {
 
+#ifdef ENABLE_RESIZE
   if (unlikely(need_resize(table))) {
     iceberg_setup_resize(table);
   }
 
   if (unlikely(!read_lock(&table->metadata.rw_lock, WAIT_FOR_LOCK, thread_id)))
     return false;
+#endif
 
   iceberg_metadata * metadata = &table->metadata;
   uint8_t fprint;
@@ -595,6 +606,7 @@ bool iceberg_insert(iceberg_table * table, KeyType key, ValueType value, uint8_t
 
   split_hash(lv1_hash(key), &fprint, &index, metadata);
 
+#ifdef ENABLE_RESIZE
   // move blocks if resize is active and not already moved.
   if (unlikely(index < (table->metadata.nblocks >> 1))) {
     uint64_t chunk_idx = index / 8;
@@ -606,12 +618,16 @@ bool iceberg_insert(iceberg_table * table, KeyType key, ValueType value, uint8_t
         /*printf("LV1 After: Moving block: %ld load: %f\n", idx, iceberg_block_load(table, idx, 1));*/
       }
   }
+#endif
 
   bool ret = iceberg_insert_internal(table, key, value, fprint, index, thread_id);
   if (!ret)
     ret = iceberg_lv2_insert(table, key, value, index, thread_id);
 
+#ifdef ENABLE_RESIZE
   read_unlock(&table->metadata.rw_lock, thread_id);
+#endif
+
   return ret;
 }
 
@@ -668,6 +684,7 @@ static inline bool iceberg_lv3_remove(iceberg_table * table, KeyType key, uint64
   if (ret)
     return true;
 
+#ifdef ENABLE_RESIZE
   // check if there's an active resize and block isn't fixed yet
   if (unlikely(lv3_index >= (table->metadata.nblocks >> 1))) {
     uint64_t mask = ~(1ULL << (table->metadata.block_bits - 1));
@@ -678,6 +695,7 @@ static inline bool iceberg_lv3_remove(iceberg_table * table, KeyType key, uint64
 
     }
   }
+#endif
 
   return false;
 }
@@ -710,6 +728,7 @@ static inline bool iceberg_lv2_remove(iceberg_table * table, KeyType key, uint64
       }
     }
 
+#ifdef ENABLE_RESIZE
     // check if there's an active resize and block isn't fixed yet
     if (unlikely(index >= (table->metadata.nblocks >> 1))) {
       uint64_t mask = ~(1ULL << (table->metadata.block_bits - 1));
@@ -733,6 +752,7 @@ static inline bool iceberg_lv2_remove(iceberg_table * table, KeyType key, uint64
         }
       }
     }
+#endif
 
   }
 
@@ -741,8 +761,10 @@ static inline bool iceberg_lv2_remove(iceberg_table * table, KeyType key, uint64
 
 bool iceberg_remove(iceberg_table * table, KeyType key, uint8_t thread_id) {
 
+#ifdef ENABLE_RESIZE
   if (unlikely(!read_lock(&table->metadata.rw_lock, WAIT_FOR_LOCK, thread_id)))
     return false;
+#endif
 
   iceberg_metadata * metadata = &table->metadata;
   iceberg_lv1_block * blocks = table->level1;
@@ -769,6 +791,7 @@ bool iceberg_remove(iceberg_table * table, KeyType key, uint8_t thread_id) {
     }
   }
 
+#ifdef ENABLE_RESIZE
   // check if there's an active resize and block isn't fixed yet
   if (unlikely(index >= (table->metadata.nblocks >> 1))) {
     uint64_t mask = ~(1ULL << (table->metadata.block_bits - 1));
@@ -793,30 +816,15 @@ bool iceberg_remove(iceberg_table * table, KeyType key, uint8_t thread_id) {
       }
     }
   }
+#endif
 
   bool ret = iceberg_lv2_remove(table, key, index, thread_id);
 
+#ifdef ENABLE_RESIZE
   read_unlock(&table->metadata.rw_lock, thread_id);
+#endif
+
   return ret;
-}
-
-static bool iceberg_nuke_key(iceberg_table * table, uint64_t level, uint64_t index, uint64_t slot, uint64_t thread_id) {
-
-  iceberg_metadata * metadata = &table->metadata;
-
-  if (level == 1) {
-    iceberg_lv1_block * blocks = table->level1;
-    metadata->lv1_md[index].block_md[slot] = 0;
-    blocks[index].slots[slot].key = blocks[index].slots[slot].val = 0;
-    pc_add(&metadata->lv1_balls, -1, thread_id);
-  } else if (level == 2) {
-    iceberg_lv2_block * blocks = table->level2;
-    metadata->lv2_md[index].block_md[slot] = 0;
-    blocks[index].slots[slot].key = blocks[index].slots[slot].val = 0;
-    pc_add(&metadata->lv2_balls, -1, thread_id);
-  }
-
-  return true;
 }
 
 static inline bool iceberg_lv3_get_value_internal(iceberg_table * table, KeyType key, ValueType **value, uint64_t lv3_index) {
@@ -856,6 +864,7 @@ static inline bool iceberg_lv3_get_value(iceberg_table * table, KeyType key, Val
   if (ret)
     return true;
   
+#ifdef ENABLE_RESIZE
   // check if there's an active resize and block isn't fixed yet
   if (unlikely(lv3_index >= (table->metadata.nblocks >> 1))) {
     uint64_t mask = ~(1ULL << (table->metadata.block_bits - 1));
@@ -865,6 +874,7 @@ static inline bool iceberg_lv3_get_value(iceberg_table * table, KeyType key, Val
       return iceberg_lv3_get_value_internal(table, key, value, old_index);
     }
   }
+#endif
 
   return false;
 }
@@ -893,6 +903,7 @@ static inline bool iceberg_lv2_get_value(iceberg_table * table, KeyType key, Val
       }
     }
 
+#ifdef ENABLE_RESIZE
     // check if there's an active resize and block isn't fixed yet
     if (unlikely(index >= (table->metadata.nblocks >> 1))) {
       uint64_t mask = ~(1ULL << (table->metadata.block_bits - 1));
@@ -912,6 +923,7 @@ static inline bool iceberg_lv2_get_value(iceberg_table * table, KeyType key, Val
         }
       }
     }
+#endif
 
   }
 
@@ -920,8 +932,10 @@ static inline bool iceberg_lv2_get_value(iceberg_table * table, KeyType key, Val
 
 bool iceberg_get_value(iceberg_table * table, KeyType key, ValueType **value, uint8_t thread_id) {
 
+#ifdef ENABLE_RESIZE
   if (unlikely(!read_lock(&table->metadata.rw_lock, WAIT_FOR_LOCK, thread_id)))
     return false;
+#endif
 
   iceberg_metadata * metadata = &table->metadata;
   iceberg_lv1_block * blocks = table->level1;
@@ -944,6 +958,7 @@ bool iceberg_get_value(iceberg_table * table, KeyType key, ValueType **value, ui
     }
   }
 
+#ifdef ENABLE_RESIZE
   // check if there's an active resize and block isn't fixed yet
   if (unlikely(index >= (table->metadata.nblocks >> 1))) {
     uint64_t mask = ~(1ULL << (table->metadata.block_bits - 1));
@@ -964,11 +979,35 @@ bool iceberg_get_value(iceberg_table * table, KeyType key, ValueType **value, ui
       }
     }
   }
+#endif
 
   bool ret = iceberg_lv2_get_value(table, key, value, index);
 
+#ifdef ENABLE_RESIZE
   read_unlock(&table->metadata.rw_lock, thread_id);
+#endif
+
   return ret;
+}
+
+#ifdef ENABLE_RESIZE
+static bool iceberg_nuke_key(iceberg_table * table, uint64_t level, uint64_t index, uint64_t slot, uint64_t thread_id) {
+
+  iceberg_metadata * metadata = &table->metadata;
+
+  if (level == 1) {
+    iceberg_lv1_block * blocks = table->level1;
+    metadata->lv1_md[index].block_md[slot] = 0;
+    blocks[index].slots[slot].key = blocks[index].slots[slot].val = 0;
+    pc_add(&metadata->lv1_balls, -1, thread_id);
+  } else if (level == 2) {
+    iceberg_lv2_block * blocks = table->level2;
+    metadata->lv2_md[index].block_md[slot] = 0;
+    blocks[index].slots[slot].key = blocks[index].slots[slot].val = 0;
+    pc_add(&metadata->lv2_balls, -1, thread_id);
+  }
+
+  return true;
 }
 
 static bool iceberg_lv1_move_block(iceberg_table * table, uint64_t bnum, uint8_t thread_id) {
@@ -1097,4 +1136,4 @@ static bool iceberg_lv3_move_block(iceberg_table * table, uint64_t bnum, uint8_t
 
   return false;
 }
-
+#endif
