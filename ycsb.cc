@@ -9,6 +9,8 @@
 #include <atomic>
 #include <thread>
 
+#include "iceberg_table.h"
+
 using namespace std;
 
 // index types
