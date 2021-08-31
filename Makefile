@@ -26,7 +26,7 @@ SOURCES = src/iceberg_table.c src/hashutil.c src/partitioned_counter.c src/lock.
 OBJECTS = $(subst src/,obj/,$(subst .c,.o,$(SOURCES)))
 LIBS = -lssl -lcrypto -lpmem
 
-all: main directories
+all: main ycsb
 
 obj/%.o: src/%.c
 	@ mkdir -p obj
@@ -36,10 +36,17 @@ obj/main.o: main.cc
 	@ mkdir -p obj
 	$(CPP) $(CFLAGS) $(INCLUDE) -c $< -o $@
 
+obj/ycsb.o: ycsb.cc
+	@ mkdir -p obj
+	$(CPP) $(CFLAGS) $(INCLUDE) -c $< -o $@
+
 main: $(OBJECTS) obj/main.o
+	$(CPP) $(CFLAGS) $(INCLUDE) $^ -o $@ $(LIBS)
+
+ycsb: $(OBJECTS) obj/ycsb.o
 	$(CPP) $(CFLAGS) $(INCLUDE) $^ -o $@ $(LIBS)
 
 .PHONY: clean directories
 
 clean:
-	rm -f main $(OBJECTS) obj/main.o
+	rm -f main $(OBJECTS) obj/main.o obj/ycsb.o
