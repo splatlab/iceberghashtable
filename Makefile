@@ -1,7 +1,7 @@
 CC = clang
 CPP = clang++
-CFLAGS = -g -flto -O3 -Wall -march=native -pthread -DHUGE_TLB
-#CFLAGS = -g -march=native -pthread
+CFLAGS = -g -flto -O3 -Wall -Werror -Wfatal-errors -march=native -pthread -DHUGE_TLB
+#CFLAGS = -g -march=native -pthread -Wall -Werror -Wfatal-errors
 INCLUDE = -I ./include
 SOURCES = src/iceberg_table.c src/hashutil.c src/partitioned_counter.c
 OBJECTS = $(subst src/,obj/,$(subst .c,.o,$(SOURCES)))

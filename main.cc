@@ -55,12 +55,15 @@ void do_removals(uint8_t id, uint64_t *keys, uint64_t start, uint64_t n) {
 }
 
 void safe_rand_bytes(unsigned char *v, size_t n) {
-	while (n > 0) {
-		size_t round_size = n >= INT_MAX ? INT_MAX - 1 : n;
-		RAND_bytes(v, round_size);
-		v += round_size;
-		n -= round_size;
+	for (uint64_t i = 0; i < n; i++) {
+		v[i] = rand();
 	}
+	//while (n > 0) {
+	//	size_t round_size = n >= INT_MAX ? INT_MAX - 1 : n;
+	//	RAND_bytes(v, round_size);
+	//	v += round_size;
+	//	n -= round_size;
+	//}
 }
 
 void do_mixed(uint8_t id, std::vector<std::pair<uint64_t, uint64_t>>& v, uint64_t start, uint64_t n) {
@@ -86,12 +89,13 @@ int main (int argc, char** argv) {
 	}
 
 	uint64_t tbits = atoi(argv[1]);
+	uint64_t inittbits = tbits - 1;
 	uint64_t threads = atoi(argv[2]);
-	uint64_t N = (1ULL << tbits) * 1.07;
+	uint64_t N = (1ULL << tbits) * 1.0165;
 	
 	high_resolution_clock::time_point t1 = high_resolution_clock::now();
 
-	if ((table = iceberg_init(tbits)) == NULL) {
+	if ((table = iceberg_init(inittbits, tbits)) == NULL) {
 		fprintf(stderr, "Can't allocate iceberg table.\n");
 		exit(EXIT_FAILURE);
 	}
@@ -101,7 +105,8 @@ int main (int argc, char** argv) {
 		printf("Creation time: %f\n", elapsed(t1, t2));
 	}
 
-	srand(time(NULL));
+	srand(100);
+	//srand(time(NULL));
 
 	//Generating vectors of size N for data contained and not contained in the tablea
 	//
@@ -183,13 +188,14 @@ int main (int argc, char** argv) {
 //	exit(0);
 
 	uint64_t max_size = 0, sum_sizes = 0;
-	for(uint64_t i = 0; i < table->metadata->nblocks; ++i) {
+	uint64_t nblocks = 1 << table->metadata->log_nblocks;
+	for(uint64_t i = 0; i < nblocks; ++i) {
 		max_size = std::max(max_size, table->metadata->lv3_sizes[i]);
 		sum_sizes += table->metadata->lv3_sizes[i];
 	}
 
 	if (!is_benchmark) {
-		printf("Average list size: %f\n", sum_sizes / (double)table->metadata->nblocks);
+		printf("Average list size: %f\n", sum_sizes / (double)nblocks);
 		printf("Max list size: %ld\n", max_size);
 
 		printf("\nQUERIES\n");

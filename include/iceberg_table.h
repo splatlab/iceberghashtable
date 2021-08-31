@@ -52,9 +52,11 @@ extern "C" {
 
 	typedef struct iceberg_metadata {
 		uint64_t total_size_in_bytes;
-		uint64_t nblocks;
+		uint8_t initial_log_nblocks;
+		uint8_t log_nblocks;
+		uint8_t lv2_log_nblocks;
+		uint8_t lv3_log_nblocks;
 		uint64_t nslots;
-		uint64_t block_bits;
 		pc_t * lv1_balls;
 		pc_t * lv2_balls;
 		pc_t * lv3_balls;
@@ -76,7 +78,7 @@ extern "C" {
 	uint64_t lv3_balls(iceberg_table * table);
 	uint64_t tot_balls(iceberg_table * table);
 
-	iceberg_table * iceberg_init(uint64_t nslots);
+	iceberg_table * iceberg_init(uint64_t log_slots, uint64_t final_log_slots);
 
 	double iceberg_load_factor(iceberg_table * table);
 
