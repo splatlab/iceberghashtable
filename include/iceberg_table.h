@@ -15,11 +15,12 @@ extern "C" {
 	#define D_CHOICES 2
 	#define MAX_LG_LG_N 4
 	#define C_LV2 6
+	#define MAX_GENERATIONS 8
 
 	typedef uint64_t KeyType;
 	typedef uint64_t ValueType;
 
-	typedef struct __attribute__ ((__packed__)) kv_pair {
+	typedef struct kv_pair {
 		KeyType key;
 		ValueType val;
 	} kv_pair;
@@ -54,6 +55,7 @@ extern "C" {
 		uint64_t total_size_in_bytes;
 		uint8_t initial_log_nblocks;
 		uint8_t log_nblocks;
+		uint32_t resize_lock;
 		uint8_t lv2_log_nblocks;
 		uint8_t lv3_log_nblocks;
 		uint64_t nslots;
@@ -68,7 +70,7 @@ extern "C" {
 
 	typedef struct iceberg_table {
 		iceberg_metadata * metadata;
-		iceberg_lv1_block * level1;
+		iceberg_lv1_block * level1[MAX_GENERATIONS];
 		iceberg_lv2_block * level2;
 		iceberg_lv3_list * level3;
 	} iceberg_table;
