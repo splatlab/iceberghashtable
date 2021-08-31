@@ -46,41 +46,14 @@ enum {
     ZIPFIAN,
 };
 
-/////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
 
-////////////////////////Helper functions for P-CLHT/////////////////////////////
+////////////////////////Helper functions for Icerberg HashTable/////////////////
 typedef struct thread_data {
     uint32_t id;
-    clht_t *ht;
+    iceberg_table *ht;
 } thread_data_t;
 
-typedef struct barrier {
-    pthread_cond_t complete;
-    pthread_mutex_t mutex;
-    int count;
-    int crossing;
-} barrier_t;
-
-void barrier_init(barrier_t *b, int n) {
-    pthread_cond_init(&b->complete, NULL);
-    pthread_mutex_init(&b->mutex, NULL);
-    b->count = n;
-    b->crossing = 0;
-}
-
-void barrier_cross(barrier_t *b) {
-    pthread_mutex_lock(&b->mutex);
-    b->crossing++;
-    if (b->crossing < b->count) {
-        pthread_cond_wait(&b->complete, &b->mutex);
-    } else {
-        pthread_cond_broadcast(&b->complete);
-        b->crossing = 0;
-    }
-    pthread_mutex_unlock(&b->mutex);
-}
-
-barrier_t barrier;
 /////////////////////////////////////////////////////////////////////////////////
 
 static uint64_t LOAD_SIZE = 64000000;
@@ -188,10 +161,9 @@ void ycsb_load_run_randint(int index_type, int wl, int kt, int ap, int num_threa
     range_complete.store(0);
     range_incomplete.store(0);
 
-    if (index_type == TYPE_CLHT) {
-        clht_t *hashtable = clht_create(512);
-
-        barrier_init(&barrier, num_thread);
+    if (index_type == TYPE_ICEBERG) {
+        iceberg_table hashtable;
+        iceberg_init(&hashtable, 24);
 
         thread_data_t *tds = (thread_data_t *) malloc(num_thread * sizeof(thread_data_t));
 
@@ -204,16 +176,17 @@ void ycsb_load_run_randint(int index_type, int wl, int kt, int ap, int num_threa
             auto func = [&]() {
                 int thread_id = next_thread_id.fetch_add(1);
                 tds[thread_id].id = thread_id;
-                tds[thread_id].ht = hashtable;
+                tds[thread_id].ht = &hashtable;
 
                 uint64_t start_key = LOAD_SIZE / num_thread * (uint64_t)thread_id;
                 uint64_t end_key = start_key + LOAD_SIZE / num_thread;
 
-                clht_gc_thread_init(tds[thread_id].ht, tds[thread_id].id);
-                barrier_cross(&barrier);
-
                 for (uint64_t i = start_key; i < end_key; i++) {
-                    clht_put(tds[thread_id].ht, init_keys[i], init_keys[i]);
+                  if(!iceberg_insert(tds[thread_id].ht, init_keys[i],
+                        init_keys[i], thread_id)) {
+                    printf("Failed insert\n");
+                    exit(0);
+                  }
                 }
             };
 
@@ -229,8 +202,6 @@ void ycsb_load_run_randint(int index_type, int wl, int kt, int ap, int num_threa
             printf("Throughput: load, %f ,ops/us\n", (LOAD_SIZE * 1.0) / duration.count());
         }
 
-        barrier.crossing = 0;
-
         {
             // Run
             auto starttime = std::chrono::system_clock::now();
@@ -238,21 +209,23 @@ void ycsb_load_run_randint(int index_type, int wl, int kt, int ap, int num_threa
             auto func = [&]() {
                 int thread_id = next_thread_id.fetch_add(1);
                 tds[thread_id].id = thread_id;
-                tds[thread_id].ht = hashtable;
+                tds[thread_id].ht = &hashtable;
 
                 uint64_t start_key = RUN_SIZE / num_thread * (uint64_t)thread_id;
                 uint64_t end_key = start_key + RUN_SIZE / num_thread;
 
-                clht_gc_thread_init(tds[thread_id].ht, tds[thread_id].id);
-                barrier_cross(&barrier);
-
                 for (uint64_t i = start_key; i < end_key; i++) {
                     if (ops[i] == OP_INSERT) {
-                        clht_put(tds[thread_id].ht, keys[i], keys[i]);
+                      if(!iceberg_insert(tds[thread_id].ht, keys[i],
+                            keys[i], thread_id)) {
+                        printf("Failed insert\n");
+                        exit(0);
+                      }
                     } else if (ops[i] == OP_READ) {
-                        uintptr_t val = clht_get(tds[thread_id].ht->ht, keys[i]);
-                        if (val != keys[i]) {
-                            std::cout << "[CLHT] wrong key read: " << val << "expected: " << keys[i] << std::endl;
+                        uintptr_t *val;
+                        iceberg_get_value(tds[thread_id].ht, keys[i], &val, thread_id);
+                        if (*val != keys[i]) {
+                            std::cout << "[ICEBERG] wrong key read: " << val << "expected: " << keys[i] << std::endl;
                             exit(1);
                         }
                     } else if (ops[i] == OP_SCAN) {
@@ -276,7 +249,7 @@ void ycsb_load_run_randint(int index_type, int wl, int kt, int ap, int num_threa
                     std::chrono::system_clock::now() - starttime);
             printf("Throughput: run, %f ,ops/us\n", (RUN_SIZE * 1.0) / duration.count());
         }
-        clht_gc_destroy(hashtable);
+        // TODO: Add a iceberg destroy function
     }
 }
 
@@ -359,7 +332,9 @@ int main(int argc, char **argv) {
         memset(&ops[0], 0x00, RUN_SIZE * sizeof(int));
 
         ycsb_load_run_randint(index_type, wl, kt, ap, num_thread, init_keys, keys, ranges, ops);
-    } else {
+    }
+    /*
+    else {
         std::vector<Key *> init_keys;
         std::vector<Key *> keys;
         std::vector<int> ranges;
@@ -377,6 +352,7 @@ int main(int argc, char **argv) {
 
         ycsb_load_run_string(index_type, wl, kt, ap, num_thread, init_keys, keys, ranges, ops);
     }
+    */
 
     return 0;
 }

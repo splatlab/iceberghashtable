@@ -94,7 +94,7 @@ extern "C" {
   uint64_t lv3_balls(iceberg_table * table);
   uint64_t tot_balls(iceberg_table * table);
 
-  int iceberg_init(iceberg_table *table, uint64_t nslots);
+  int iceberg_init(iceberg_table *table, uint64_t log_slots);
 
   double iceberg_load_factor(iceberg_table * table);
 
