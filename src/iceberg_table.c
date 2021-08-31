@@ -90,6 +90,11 @@ uint64_t total_capacity(iceberg_table * table) {
 	return num_blocks(table->metadata) * (lv1_block_capacity() + lv2_block_capacity());
 }
 
+__attribute__ ((unused))
+static inline uint64_t lv2_capacity(iceberg_table * table) {
+	return num_blocks(table->metadata) * lv2_block_capacity();
+}
+
 double iceberg_load_factor(iceberg_table * table) {
 	return (double)tot_balls(table) / (double)total_capacity(table);
 }
@@ -156,7 +161,6 @@ iceberg_table * iceberg_init(uint64_t log_slots, uint64_t final_log_slots) {
 		exit(1);
 	}
         size_t level2_size = sizeof(iceberg_lv2_block) * lv2_total_blocks;
-	printf("level2 size: %lu\n", level2_size);
         //table->level2 = (iceberg_lv2_block *)malloc(level2_size);
 	table->level2 = (iceberg_lv2_block *)mmap(NULL, level2_size, PROT_READ | PROT_WRITE, mmap_flags, 0, 0);
 	if (!table->level2) {
@@ -437,7 +441,8 @@ static inline void iceberg_maybe_split(iceberg_table *table, uint64_t index) {
 __attribute__ ((unused))
 static inline void iceberg_maybe_resize(iceberg_table *table) {
 	uint8_t log_nblocks = table->metadata->log_nblocks;
-	if (unlikely(lv1_balls(table) >= total_capacity(table))) {
+	if (unlikely(lv2_balls(table) >= (1ULL << log_nblocks) * 7)) {
+		printf("Needs resize\n");
 		__atomic_compare_exchange_n(&table->metadata->log_nblocks,
 				&log_nblocks, log_nblocks + 1, false,
 				__ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
@@ -449,7 +454,7 @@ bool iceberg_insert(iceberg_table * table, KeyType key, ValueType value, uint8_t
 	iceberg_metadata * metadata = table->metadata;
 	iceberg_lv1_block * blocks = table->level1;	
 
-	//iceberg_maybe_resize(table);
+	iceberg_maybe_resize(table);
 
 	uint8_t fprint;
 	uint64_t index;
@@ -457,7 +462,7 @@ bool iceberg_insert(iceberg_table * table, KeyType key, ValueType value, uint8_t
 
 	split_hash(lv1_hash(key), &fprint, &index, log_nblocks);
 
-	//iceberg_maybe_split(table, index);
+	iceberg_maybe_split(table, index);
 
 	//uint8_t gen = iceberg_index_generation(metadata, index);
 	//if (unlikely(gen != iceberg_generation(metadata, metadata->log_nblocks))) {
