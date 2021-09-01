@@ -62,7 +62,7 @@ extern "C" {
 		pc_t * lv1_balls;
 		pc_t * lv2_balls;
 		pc_t * lv3_balls;
-		iceberg_lv1_block_md * lv1_md;
+		iceberg_lv1_block_md * lv1_md[MAX_GENERATIONS];
 		iceberg_lv2_block_md * lv2_md;
 		uint64_t * lv3_sizes;
 		uint8_t * lv3_locks;

@@ -64,6 +64,42 @@ uint64_t tot_balls(iceberg_table * table) {
 	return lv1_balls(table) + lv2_balls(table) + lv3_balls(table);
 }
 
+static inline void
+lv1_counter_inc(iceberg_table *table, uint8_t thread_id)
+{
+	pc_add(table->metadata->lv1_balls, 1, thread_id);
+}
+
+static inline void
+lv2_counter_inc(iceberg_table *table, uint8_t thread_id)
+{
+	pc_add(table->metadata->lv2_balls, 1, thread_id);
+}
+
+static inline void
+lv3_counter_inc(iceberg_table *table, uint8_t thread_id)
+{
+	pc_add(table->metadata->lv3_balls, 1, thread_id);
+}
+
+static inline void
+lv1_counter_dec(iceberg_table *table, uint8_t thread_id)
+{
+	pc_add(table->metadata->lv1_balls, -1, thread_id);
+}
+
+static inline void
+lv2_counter_dec(iceberg_table *table, uint8_t thread_id)
+{
+	pc_add(table->metadata->lv2_balls, -1, thread_id);
+}
+
+static inline void
+lv3_counter_dec(iceberg_table *table, uint8_t thread_id)
+{
+	pc_add(table->metadata->lv3_balls, -1, thread_id);
+}
+
 static inline uint64_t num_blocks(iceberg_metadata *md) {
 	return 1ULL << md->log_nblocks;
 }
@@ -130,27 +166,23 @@ size_t round_up(size_t n, size_t k) {
 	return n;
 }
 
-static inline kv_pair *iceberg_lv1_get_entry(iceberg_table *table, uint64_t index, uint64_t slot) {
+static inline uint8_t
+iceberg_log_nblocks(iceberg_table *table)
+{
+	return table->metadata->log_nblocks;
+}
+
+static inline void
+iceberg_lv1_get_md_and_block(iceberg_table *table,
+		             uint64_t index,
+			     kv_pair **block,
+			     uint8_t **md)
+{
 	uint64_t slice = 64 - __lzcnt64(index >> table->metadata->initial_log_nblocks);
 	uint64_t mask_slice = slice == 0 ? 1 : slice;
 	uint64_t subindex = index & ((1ULL << (mask_slice + table->metadata->initial_log_nblocks - 1)) - 1);
-	return &table->level1[slice][subindex].slots[slot];
-}
-
-__attribute__ ((unused))
-static inline void iceberg_lv1_set_entry(iceberg_table *table, uint64_t index, uint64_t slot, kv_pair kv, uint8_t fprint) {
-	*iceberg_lv1_get_entry(table, index, slot) = kv;
-	//assert(table->metadata->lv1_md[index].block_md[slot] == SLOT_RESERVED);
-	table->metadata->lv1_md[index].block_md[slot] = fprint;
-}
-
-__attribute__ ((unused))
-static inline void iceberg_lv1_remove_entry(iceberg_table *table, uint64_t index, uint64_t slot) {
-	table->metadata->lv1_md[index].block_md[slot] = SLOT_RESERVED;
-	kv_pair *kv = iceberg_lv1_get_entry(table, index, slot);
-	kv->key = 0;
-	kv->val = 0;
-	table->metadata->lv1_md[index].block_md[slot] = SLOT_EMPTY;
+	*block = &table->level1[slice][subindex].slots[0];
+	*md = &table->metadata->lv1_md[slice][subindex].block_md[0];
 }
 
 iceberg_table * iceberg_init(uint64_t log_slots, uint64_t final_log_slots) {
@@ -159,7 +191,6 @@ iceberg_table * iceberg_init(uint64_t log_slots, uint64_t final_log_slots) {
 
 	uint64_t log_total_blocks = log_slots - SLOT_BITS;
 	uint64_t total_blocks = 1 << log_total_blocks;
-	uint64_t final_total_blocks = 1 << (final_log_slots - SLOT_BITS);
 	uint64_t lv2_log_nblocks = final_log_slots - SLOT_BITS;
 	uint64_t lv2_total_blocks = 1 << lv2_log_nblocks;
 	uint64_t lv3_log_nblocks = final_log_slots - SLOT_BITS;
@@ -218,8 +249,10 @@ iceberg_table * iceberg_init(uint64_t log_slots, uint64_t final_log_slots) {
 	* lv3_ctr = 0;
 	pc_init(table->metadata->lv3_balls, lv3_ctr, 64, 1000);
 
-	size_t lv1_md_size = sizeof(iceberg_lv1_block_md) * final_total_blocks + 64;
-	table->metadata->lv1_md = (iceberg_lv1_block_md *)mmap(NULL, lv1_md_size, PROT_READ | PROT_WRITE, mmap_flags, 0, 0);
+	size_t lv1_md_size = sizeof(iceberg_lv1_block_md) * total_blocks + 64;
+	table->metadata->lv1_md[0] = (iceberg_lv1_block_md *)mmap(NULL, lv1_md_size, PROT_READ | PROT_WRITE, mmap_flags, 0, 0);
+	memset(table->metadata->lv1_md[0], 0, lv1_md_size);
+
 	size_t lv2_md_size = sizeof(iceberg_lv2_block_md) * lv2_total_blocks + 32;
 	table->metadata->lv2_md = (iceberg_lv2_block_md *)mmap(NULL, lv2_md_size, PROT_READ | PROT_WRITE, mmap_flags, 0, 0);
 	table->metadata->lv3_sizes = (uint64_t *)malloc(sizeof(uint64_t) * lv3_total_blocks);
@@ -240,8 +273,9 @@ iceberg_table * iceberg_init(uint64_t log_slots, uint64_t final_log_slots) {
 }
 
 void iceberg_lv1_print(iceberg_table *table, uint64_t index) {
-	iceberg_lv1_block_md md = table->metadata->lv1_md[index];
-	kv_pair *entry = iceberg_lv1_get_entry(table, index, 0);
+	kv_pair *block;
+	uint8_t *md;
+	iceberg_lv1_get_md_and_block(table, index, &block, &md);
 
 		printf("-----------------------------------------------------------------------------------------------------------------------------------------------------------------\n");
 		printf("| index: %-12lu                                                                                                                                           |\n", index);
@@ -249,18 +283,18 @@ void iceberg_lv1_print(iceberg_table *table, uint64_t index) {
 		printf("|---------------------------------------------------------------------------------------------------------------------------------------------------------------|\n");
 		for (uint64_t j = 0; j < 16; j++) {
 			uint64_t pos = i * 16 + j;
-			printf("| %2lu 0x%02x ", pos, md.block_md[pos]);
+			printf("| %2lu 0x%02x ", pos, md[pos]);
 		}
 		printf("|\n");
 		for (uint64_t j = 0; j < 16; j++) {
 			uint64_t pos = i * 16 + j;
-			uint16_t key = (uint16_t)entry[pos].key;
+			uint16_t key = (uint16_t)block[pos].key;
 			printf("|  0x%04x ", key);
 		}
 		printf("|\n");
 		for (uint64_t j = 0; j < 16; j++) {
 			uint64_t pos = i * 16 + j;
-			uint16_t val = (uint16_t)entry[pos].val;
+			uint16_t val = (uint16_t)block[pos].val;
 			printf("|  0x%04x ", val);
 		}
 		printf("|\n");
@@ -284,7 +318,7 @@ bool iceberg_lv3_insert(iceberg_table * table, KeyType key, ValueType value, uin
 	lists[lv3_index].head = new_node;
 
 	metadata->lv3_sizes[lv3_index]++;
-	pc_add(metadata->lv3_balls, 1, thread_id);
+	lv3_counter_inc(table, thread_id);
 	metadata->lv3_locks[lv3_index] = 0;
 
 	return true;
@@ -320,7 +354,7 @@ bool iceberg_lv2_insert(iceberg_table * table, KeyType key, ValueType value, uin
 
 		if(__sync_bool_compare_and_swap(metadata->lv2_md[index1].block_md + slot, 0, 1)) {
 
-			pc_add(metadata->lv2_balls, 1, thread_id);
+			lv2_counter_inc(table, thread_id);
 			blocks[index1].slots[slot].key = key;
 			blocks[index1].slots[slot].val = value;
 
@@ -332,27 +366,22 @@ bool iceberg_lv2_insert(iceberg_table * table, KeyType key, ValueType value, uin
 	return iceberg_lv3_insert(table, key, value, lv3_index, thread_id);
 }
 
-static inline bool iceberg_lv1_try_reserve_slot(iceberg_metadata *md, uint64_t index, uint64_t slot) {
+static inline bool iceberg_try_reserve_slot(uint8_t *md_slot) {
 	uint8_t slot_empty = SLOT_EMPTY;
-	bool ret =  __atomic_compare_exchange_n(&md->lv1_md[index].block_md[slot],
-				&slot_empty, SLOT_RESERVED, false,
-				__ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
-	return ret;
+	return  __atomic_compare_exchange_n(md_slot,
+				            &slot_empty,
+					    SLOT_RESERVED,
+					    false,
+					    __ATOMIC_SEQ_CST,
+					    __ATOMIC_SEQ_CST);
 }
 
-static inline uint8_t iceberg_lv1_entry_fprint(iceberg_metadata *md, uint64_t index, uint64_t slot) {
-	return md->lv1_md[index].block_md[slot];
-}
-static inline void iceberg_lv1_entry_set_fprint(iceberg_metadata *md, uint64_t index, uint64_t slot, uint8_t fprint) {
-	md->lv1_md[index].block_md[slot] = fprint;
+static inline uint8_t iceberg_generation(iceberg_table *table, uint8_t log_nblocks) {
+	return log_nblocks - table->metadata->initial_log_nblocks;
 }
 
-static inline uint8_t iceberg_generation(iceberg_metadata *md, uint8_t log_nblocks) {
-	return log_nblocks - md->initial_log_nblocks;
-}
-
-static inline uint8_t iceberg_index_generation(iceberg_metadata *md, uint64_t index) {
-	return md->lv1_md[index].block_md[0];
+static inline uint8_t iceberg_index_generation(uint8_t *md) {
+	return md[0];
 }
 
 static inline bool iceberg_first_half(uint64_t index, uint8_t log_nblocks) {
@@ -372,85 +401,97 @@ static inline uint64_t iceberg_split_to(uint64_t index, uint8_t log_nblocks) {
 	return index | (1ULL << (log_nblocks - 1));
 }
 
-static inline bool iceberg_try_start_split(iceberg_metadata *md, uint8_t log_nblocks, uint64_t index) {
-	uint8_t index_generation = iceberg_index_generation(md, index);
-	if (index_generation == iceberg_generation(md, log_nblocks)) {
+static inline bool
+iceberg_try_start_split(iceberg_table *table,
+		        uint8_t log_nblocks,
+			uint8_t index_gen,
+			uint8_t *from_md,
+			uint8_t *to_md)
+{
+	uint8_t from_gen = iceberg_index_generation(from_md);
+	if (from_gen != index_gen) {
 		return false;
 	}
-	uint64_t split_from = iceberg_split_from(index, log_nblocks);
-	uint8_t from_gen = iceberg_index_generation(md, split_from);
-	if (from_gen != index_generation) {
-		return false;
-	}
-	uint8_t to_gen = iceberg_generation(md, log_nblocks);
-	return __atomic_compare_exchange_n(&md->lv1_md[split_from].block_md[0],
-			&from_gen, to_gen, false, __ATOMIC_SEQ_CST,
-			__ATOMIC_SEQ_CST);
+	uint8_t to_gen = iceberg_generation(table, log_nblocks);
+	return __atomic_compare_exchange_n(&from_md[0],
+			                   &from_gen,
+			                   to_gen,
+			                   false,
+					   __ATOMIC_SEQ_CST,
+			                   __ATOMIC_SEQ_CST);
 }
 
-
-static inline bool iceberg_needs_split(iceberg_metadata *md, uint8_t log_nblocks, uint64_t index) {
+static inline bool
+iceberg_needs_split(iceberg_table *table,
+		    uint8_t log_nblocks,
+		    uint8_t *md)
+{
 	//assert(iceberg_index_generation(md, index) <= iceberg_generation(md, log_nblocks));
-	bool needs_split = iceberg_index_generation(md, index) != iceberg_generation(md, log_nblocks);
-
-	return needs_split;
+	return iceberg_index_generation(md) != iceberg_generation(table, log_nblocks);
 }
 
-__attribute__ ((unused))
-static inline void iceberg_maybe_split(iceberg_table *table, uint64_t index) {
-	iceberg_metadata *md = table->metadata;
-	uint8_t log_nblocks = md->log_nblocks;
-
-	if (!iceberg_try_start_split(md, log_nblocks, index)) {
+static inline void
+iceberg_maybe_split(iceberg_table *table,
+		    uint64_t index,
+		    kv_pair *block,
+		    uint8_t *md)
+{
+	uint8_t log_nblocks = iceberg_log_nblocks(table);
+	uint8_t index_gen = iceberg_index_generation(md);
+	if (index_gen == iceberg_generation(table, log_nblocks)) {
 		return;
 	}
 
 	uint64_t split_from = iceberg_split_from(index, log_nblocks);
 	uint64_t split_to = iceberg_split_to(index, log_nblocks);
 	//iceberg_lv1_print(table, split_from);
+	kv_pair *from_block, *to_block;
+	uint8_t *from_md, *to_md;
+	iceberg_lv1_get_md_and_block(table, split_from, &from_block, &from_md);
+	iceberg_lv1_get_md_and_block(table, split_to, &to_block, &to_md);
+
+	if (!iceberg_try_start_split(table, log_nblocks, index_gen, from_md, to_md)) {
+		return;
+	}
+
 	uint64_t to_idx = 1;
-	kv_pair *split_from_entry = iceberg_lv1_get_entry(table, split_from, 0);
-	kv_pair *split_to_entry = iceberg_lv1_get_entry(table, split_to, 0);
 	for (uint64_t from_idx = 1; from_idx < lv1_block_capacity(); from_idx++) {
 		//assert(to_idx < lv1_block_capacity());
 		// FIXME: [aconway 2021-08-30]
 		// Revisit these for consistency semantics
-		while (iceberg_lv1_entry_fprint(md, split_from, from_idx) == SLOT_RESERVED);
-		if (iceberg_lv1_entry_fprint(md, split_from, from_idx) == SLOT_EMPTY) {
+		while (from_md[from_idx] == SLOT_RESERVED);
+		if (from_md[from_idx] == SLOT_EMPTY) {
 			continue;
 		}
-		kv_pair *kv = &split_from_entry[from_idx];
 		uint8_t fprint;
 		uint64_t new_index;
-		split_hash(lv1_hash_inline(kv->key), &fprint, &new_index, log_nblocks);
+		uint64_t hash = lv1_hash_inline(from_block[from_idx].key);
+		split_hash(hash, &fprint, &new_index, log_nblocks);
 		if (new_index != split_from) {
 			assert(new_index == split_to);
 			while (to_idx < lv1_block_capacity()) {
-				if (iceberg_lv1_try_reserve_slot(md, split_to, to_idx)) {
-					split_to_entry[to_idx] = *kv;
-					//assert(table->metadata->lv1_md[split_to].block_md[to_idx] == SLOT_RESERVED);
-					table->metadata->lv1_md[split_to].block_md[to_idx] = fprint;
-
-					//assert(to_idx < lv1_block_capacity());
-					//iceberg_lv1_set_entry(table, split_to, to_idx, kv, fprint);
+				if (iceberg_try_reserve_slot(&to_md[to_idx])) {
+					to_block[to_idx] = from_block[from_idx];
+					to_md[to_idx] = fprint;
 					break;
 				}
 				to_idx++;
 			}
-			table->metadata->lv1_md[split_from].block_md[from_idx] = SLOT_RESERVED;
-			kv->key = 0;
-			kv->val = 0;
-			table->metadata->lv1_md[split_from].block_md[from_idx] = SLOT_EMPTY;
+			assert(to_idx < lv1_block_capacity());
+		        from_md[from_idx] = SLOT_RESERVED;
+			from_block[from_idx].key = 0;
+			from_block[from_idx].val = 0;
+		        from_md[from_idx] = SLOT_EMPTY;
 		}
 	}
-	iceberg_lv1_entry_set_fprint(md, split_to, 0, iceberg_generation(md, log_nblocks));
+	to_md[0] = iceberg_generation(table, log_nblocks);
 	//iceberg_lv1_print(table, split_from);
 	//iceberg_lv1_print(table, split_to);
 }
 
 __attribute__ ((unused))
 static inline void iceberg_maybe_resize(iceberg_table *table) {
-	uint8_t log_nblocks = table->metadata->log_nblocks;
+	uint8_t log_nblocks = iceberg_log_nblocks(table);
 	if (unlikely(lv2_balls(table) >= (1ULL << log_nblocks) * 7)) {
 		printf("Needs resize\n");
 		printf("level1: %lu\n", lv1_balls(table));
@@ -458,7 +499,7 @@ static inline void iceberg_maybe_resize(iceberg_table *table) {
 		printf("level3: %lu\n", lv3_balls(table));
 		if (__atomic_exchange_n(&table->metadata->resize_lock, 1,
 					__ATOMIC_SEQ_CST) == 0) {
-			if (table->metadata->log_nblocks != log_nblocks) {
+			if (iceberg_log_nblocks(table) != log_nblocks) {
 				table->metadata->resize_lock = 0;
 				return;
 			}
@@ -471,12 +512,22 @@ static inline void iceberg_maybe_resize(iceberg_table *table) {
 #else
 			int mmap_flags = MAP_SHARED | MAP_ANONYMOUS | MAP_POPULATE;
 #endif
-			table->level1[generation] = (iceberg_lv1_block *)mmap(NULL, new_size, PROT_READ | PROT_WRITE, mmap_flags, 0, 0);
+			table->level1[generation] = (iceberg_lv1_block
+					*)mmap(NULL, new_size, PROT_READ |
+						PROT_WRITE, mmap_flags, 0, 0);
 			if (!table->level1[generation]) {
 				perror("level1 malloc failed");
 				exit(1);
 			}
 			memset(table->level1[generation], 0, new_size);
+
+			size_t new_md_size = sizeof(iceberg_lv1_block_md) * new_blocks + 64;
+			table->metadata->lv1_md[generation] =
+				(iceberg_lv1_block_md *)mmap(NULL, new_md_size,
+						PROT_READ | PROT_WRITE,
+						mmap_flags, 0, 0);
+			memset(table->metadata->lv1_md[generation], 0, new_md_size);
+
 			__atomic_store_n(&table->metadata->log_nblocks, log_nblocks + 1, __ATOMIC_SEQ_CST);
 			table->metadata->resize_lock = 0;
 		}
@@ -486,53 +537,52 @@ static inline void iceberg_maybe_resize(iceberg_table *table) {
 	}
 }
 
-bool iceberg_insert(iceberg_table * table, KeyType key, ValueType value, uint8_t thread_id) {
-
-	iceberg_metadata * metadata = table->metadata;
-	//iceberg_lv1_block * blocks = table->level1[0];	
-
+bool
+iceberg_insert(iceberg_table * table,
+	       KeyType key,
+	       ValueType value,
+	       uint8_t thread_id)
+{
 	iceberg_maybe_resize(table);
 
+	uint8_t log_nblocks = iceberg_log_nblocks(table);
 	uint8_t fprint;
 	uint64_t index;
-	uint8_t log_nblocks = metadata->log_nblocks;
-
 	split_hash(lv1_hash(key), &fprint, &index, log_nblocks);
 
-	iceberg_maybe_split(table, index);
+	kv_pair *block;
+	uint8_t *md;
+	iceberg_lv1_get_md_and_block(table, index, &block, &md);
+
+	iceberg_maybe_split(table, index, block, md);
 
 	//uint8_t gen = iceberg_index_generation(metadata, index);
 	//if (unlikely(gen != iceberg_generation(metadata, metadata->log_nblocks))) {
 	//	return iceberg_insert(table, key, value, thread_id);
 	//}
 
-	__mmask64 md_mask = slot_mask_64(metadata->lv1_md[index].block_md, 0);
+	__mmask64 md_mask = slot_mask_64(md, 0);
 	md_mask &= ~1;
 
 	uint8_t popct = __builtin_popcountll(md_mask);
 
 	for(uint8_t i = 0; i < popct; ++i) {
-	
 		uint8_t slot = word_select(md_mask, i);
 		//assert(slot != 0);
 		//assert(slot < 64);
 
-		if(__sync_bool_compare_and_swap(metadata->lv1_md[index].block_md + slot, 0, 1)) {
-			
-			pc_add(metadata->lv1_balls, 1, thread_id);
-			kv_pair *kv = iceberg_lv1_get_entry(table, index, slot);
-			kv->key = key;
-			kv->val = value;
+		if (iceberg_try_reserve_slot(&md[slot])) {
+			lv1_counter_inc(table, thread_id);
+			block[slot].key = key;
+			block[slot].val = value;
 
 			//if (unlikely(gen != iceberg_generation(metadata, metadata->log_nblocks))) {
-			//	pc_add(metadata->lv1_balls, -1, thread_id);
 			//	blocks[index].slots[slot].key = 0;
 			//	blocks[index].slots[slot].val = 0;
 			//	return iceberg_insert(table, key, value, thread_id);
 			//}
 
-
-			metadata->lv1_md[index].block_md[slot] = fprint;
+			md[slot] = fprint;
 			return true;
 		}
 	}
@@ -556,7 +606,7 @@ bool iceberg_lv3_remove(iceberg_table * table, KeyType key, uint64_t lv3_index, 
 		free(old_head);
 
 		metadata->lv3_sizes[lv3_index]--;
-		pc_add(metadata->lv3_balls, -1, thread_id);
+		lv3_counter_dec(table, thread_id);
 		metadata->lv3_locks[lv3_index] = 0;
 
 		return true;
@@ -573,7 +623,7 @@ bool iceberg_lv3_remove(iceberg_table * table, KeyType key, uint64_t lv3_index, 
 			free(old_node);
 
 			metadata->lv3_sizes[lv3_index]--;
-			pc_add(metadata->lv3_balls, -1, thread_id);
+			lv3_counter_dec(table, thread_id);
 			metadata->lv3_locks[lv3_index] = 0;
 
 			return true;
@@ -608,7 +658,7 @@ bool iceberg_lv2_remove(iceberg_table * table, KeyType key, uint64_t lv3_index, 
 			if (blocks[index].slots[slot].key == key) {
 
 				metadata->lv2_md[index].block_md[slot] = 0;
-				pc_add(metadata->lv2_balls, -1, thread_id);
+				lv2_counter_dec(table, thread_id);
 				blocks[index].slots[slot].key = key;
 				return true;
 			}
@@ -620,27 +670,30 @@ bool iceberg_lv2_remove(iceberg_table * table, KeyType key, uint64_t lv3_index, 
 
 bool iceberg_remove(iceberg_table * table, KeyType key, uint8_t thread_id) {
 
-	iceberg_metadata * metadata = table->metadata;
-	iceberg_lv1_block * blocks = table->level1[0];
-
 	uint8_t fprint;
 	uint64_t index;
-	uint8_t log_nblocks = metadata->log_nblocks;
+	uint8_t log_nblocks = iceberg_log_nblocks(table);
 
 	split_hash(lv1_hash(key), &fprint, &index, log_nblocks);
 
-	__mmask64 md_mask = slot_mask_64(metadata->lv1_md[index].block_md, fprint);
+	kv_pair *block;
+	uint8_t *md;
+	iceberg_lv1_get_md_and_block(table, index, &block, &md);
+
+	__mmask64 md_mask = slot_mask_64(md, fprint);
+	md_mask &= ~1;
 	uint8_t popct = __builtin_popcountll(md_mask);
 
 	for(uint8_t i = 0; i < popct; ++i) {
 
 		uint8_t slot = word_select(md_mask, i);
 
-		if (blocks[index].slots[slot].key == key) {
-
-			metadata->lv1_md[index].block_md[slot] = 0;
-			pc_add(metadata->lv1_balls, -1, thread_id);
-			blocks[index].slots[slot].key = key;
+		if (block[slot].key == key) {
+			md[slot] = SLOT_RESERVED;
+			lv1_counter_dec(table, thread_id);
+			block[slot].key = 0;
+			block[slot].val = 0;
+			md[slot] = SLOT_EMPTY;
 			return true;
 		}
 	}
@@ -707,19 +760,23 @@ bool iceberg_lv2_get_value(iceberg_table * table, KeyType key, ValueType **value
 	return iceberg_lv3_get_value(table, key, value, lv3_index);
 }
 
-bool iceberg_lv1_get_value(iceberg_table * table, uint64_t index, uint8_t fprint, KeyType key, ValueType **value) {
-
-	iceberg_metadata * metadata = table->metadata;
-
-	__mmask64 md_mask = slot_mask_64(metadata->lv1_md[index].block_md, fprint);
+bool
+iceberg_lv1_get_value(iceberg_table * table,
+		      kv_pair *block,
+		      uint8_t *md,
+		      uint8_t fprint,
+		      KeyType key,
+		      ValueType **value)
+{
+	__mmask64 md_mask = slot_mask_64(md, fprint);
+	md_mask &= ~1;
 	
 	while (md_mask != 0) {
 		int slot = __builtin_ctzll(md_mask);
 		md_mask = md_mask & ~(1ULL << slot);
 
-		kv_pair *kv = iceberg_lv1_get_entry(table, index, slot);
-		if (kv->key == key) {
-			*value = &kv->val;
+		if (block[slot].key == key) {
+			*value = &block[slot].val;
 			return true;
 		}
 	}
@@ -729,20 +786,28 @@ bool iceberg_lv1_get_value(iceberg_table * table, uint64_t index, uint8_t fprint
 
 bool iceberg_get_value(iceberg_table * table, KeyType key, ValueType **value) {
 
-	iceberg_metadata * md = table->metadata;
-	uint8_t log_nblocks = md->log_nblocks;
+	uint8_t log_nblocks = iceberg_log_nblocks(table);
 	uint8_t fprint;
 	uint64_t index;
 	split_hash(lv1_hash_inline(key), &fprint, &index, log_nblocks);
-	if (unlikely(iceberg_needs_split(md, log_nblocks, index && iceberg_second_half(index, log_nblocks)))) {
-		uint64_t split_from = iceberg_split_from(index, log_nblocks);
 
-		if (iceberg_lv1_get_value(table, split_from, fprint, key, value)) {
+	kv_pair *block;
+	uint8_t *md;
+	iceberg_lv1_get_md_and_block(table, index, &block, &md);
+
+	if (unlikely(iceberg_needs_split(table, log_nblocks, md) &&
+	             iceberg_second_half(index, log_nblocks))) {
+		uint64_t split_from = iceberg_split_from(index, log_nblocks);
+		kv_pair *from_block;
+		uint8_t *from_md;
+		iceberg_lv1_get_md_and_block(table, split_from, &from_block, &from_md);
+
+		if (iceberg_lv1_get_value(table, from_block, from_md, fprint, key, value)) {
 			return true;
 		}
 	}
 
-	if (iceberg_lv1_get_value(table, index, fprint, key, value)) {
+	if (iceberg_lv1_get_value(table, block, md, fprint, key, value)) {
 		return true;
 	} else {
 		return iceberg_lv2_get_value(table, key, value, index);
