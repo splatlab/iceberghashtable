@@ -102,28 +102,38 @@ do_mixed(uint8_t                                     id,
 int
 main(int argc, char **argv)
 {
-   if (argc != 3 && argc != 4) {
+   if (argc < 4) {
       fprintf(stderr,
               "Specify the log of the number of slots in the table and the "
               "number of threads to use.\n");
       exit(1);
    }
 
-   bool is_benchmark = false;
-   if (argc == 4) {
-      assert(strcmp(argv[3], "-b") == 0);
-      is_benchmark = true;
-   }
 
    uint64_t tbits     = atoi(argv[1]);
-   uint64_t inittbits = tbits - 2;
+   uint64_t inittbits = tbits - atoi(argv[2]);
    // uint64_t inittbits = tbits;
-   uint64_t threads = atoi(argv[2]);
+   uint64_t threads = atoi(argv[3]);
    uint64_t N       = (1ULL << tbits) * 1.05;
+
+   bool is_benchmark = false;
+   bool use_hugepages = false;
+   for (uint64_t arg_i = 4; arg_i < argc; arg_i++) {
+      if (strcmp(argv[arg_i], "-b") == 0) {
+         is_benchmark = true;
+      } else if (strcmp(argv[arg_i], "-h") == 0) {
+         use_hugepages = true;
+      } else {
+         fprintf(stderr,
+                 "Specify the log of the number of slots in the table and the "
+                 "number of threads to use.\n");
+         exit(1);
+      }
+   }
 
    high_resolution_clock::time_point t1 = high_resolution_clock::now();
 
-   if ((table = iceberg_init(inittbits, tbits)) == NULL) {
+   if ((table = iceberg_init(inittbits, tbits, use_hugepages)) == NULL) {
       fprintf(stderr, "Can't allocate iceberg table.\n");
       exit(EXIT_FAILURE);
    }

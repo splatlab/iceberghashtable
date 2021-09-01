@@ -237,7 +237,7 @@ iceberg_lv1_get_md_and_block(iceberg_table *table,
 }
 
 iceberg_table *
-iceberg_init(uint64_t log_slots, uint64_t final_log_slots)
+iceberg_init(uint64_t log_slots, uint64_t final_log_slots, bool use_hugepages)
 {
 
    iceberg_table *table;
@@ -266,11 +266,11 @@ iceberg_init(uint64_t log_slots, uint64_t final_log_slots)
    table->metadata->lv3_log_nblocks     = lv3_log_nblocks;
    table->metadata->resize_lock         = 0;
 
-#if defined(HUGE_TLB)
-   int mmap_flags = MAP_SHARED | MAP_ANONYMOUS | MAP_POPULATE | MAP_HUGETLB;
-#else
-   int mmap_flags = MAP_SHARED | MAP_ANONYMOUS | MAP_POPULATE;
-#endif
+   table->metadata->mmap_flags = MAP_SHARED | MAP_ANONYMOUS | MAP_POPULATE;
+   if (use_hugepages) {
+      table->metadata->mmap_flags |= MAP_HUGETLB;
+   }
+   int mmap_flags = table->metadata->mmap_flags;
 
    size_t level1_size = sizeof(iceberg_lv1_block) * total_blocks;
    table->level1[0] =
@@ -611,11 +611,7 @@ iceberg_maybe_resize(iceberg_table *table)
             1 << log_nblocks; // this is the current size of the table
          size_t new_size = sizeof(iceberg_lv1_block) * new_blocks;
          printf("level1[%u] size: %lu\n", generation, new_size);
-#if defined(HUGE_TLB)
-         int mmap_flags = MAP_SHARED | MAP_ANONYMOUS | MAP_HUGETLB;
-#else
-         int mmap_flags = MAP_SHARED | MAP_ANONYMOUS;
-#endif
+         int mmap_flags = table->metadata->mmap_flags;
          table->level1[generation] = (iceberg_lv1_block *)mmap(
             NULL, new_size, PROT_READ | PROT_WRITE, mmap_flags, 0, 0);
          if (!table->level1[generation]) {

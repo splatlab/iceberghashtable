@@ -66,6 +66,7 @@ typedef struct iceberg_metadata {
    iceberg_lv2_block_md *lv2_md;
    uint64_t             *lv3_sizes;
    uint8_t              *lv3_locks;
+   int                   mmap_flags;
 } iceberg_metadata;
 
 typedef struct iceberg_table {
@@ -85,7 +86,7 @@ uint64_t
 tot_balls(iceberg_table *table);
 
 iceberg_table *
-iceberg_init(uint64_t log_slots, uint64_t final_log_slots);
+iceberg_init(uint64_t log_slots, uint64_t final_log_slots, bool use_hugepages);
 
 double
 iceberg_load_factor(iceberg_table *table);
