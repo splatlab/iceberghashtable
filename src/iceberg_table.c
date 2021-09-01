@@ -483,7 +483,7 @@ iceberg_maybe_split(iceberg_table *table,
 		        from_md[from_idx] = SLOT_EMPTY;
 		}
 	}
-	to_md[0] = iceberg_generation(table, log_nblocks);
+	__atomic_store_n(&to_md[0], iceberg_generation(table, log_nblocks), __ATOMIC_SEQ_CST);
 	return iceberg_index_generation(md);
 	//iceberg_lv1_print(table, split_from);
 	//iceberg_lv1_print(table, split_to);
@@ -779,9 +779,11 @@ iceberg_lv1_get_value(iceberg_table * table,
 
 bool iceberg_get_value(iceberg_table * table, KeyType key, ValueType **value) {
 
-	uint8_t log_nblocks = iceberg_log_nblocks(table);
+	uint8_t log_nblocks;
 	uint8_t fprint;
 	uint64_t index;
+restart:
+	log_nblocks = iceberg_log_nblocks(table);
 	split_hash(lv1_hash_inline(key), &fprint, &index, log_nblocks);
 
 	kv_pair *block;
@@ -802,8 +804,8 @@ bool iceberg_get_value(iceberg_table * table, KeyType key, ValueType **value) {
 
 	if (iceberg_lv1_get_value(table, block, md, fprint, key, value)) {
 		return true;
-	} else {
+	} else if (likely(log_nblocks == iceberg_log_nblocks(table))) {
 		return iceberg_lv2_get_value(table, key, value, index);
 	}
+	goto restart;
 }
-
