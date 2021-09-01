@@ -1,5 +1,5 @@
-CC = clang
-CPP = clang++
+CC = clang-13
+CPP = clang++-13
 CFLAGS = -g -flto -O3 -Wall -Werror -Wfatal-errors -march=native -pthread -DHUGE_TLB
 #CFLAGS = -g -march=native -pthread -Wall -Werror -Wfatal-errors
 INCLUDE = -I ./include

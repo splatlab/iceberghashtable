@@ -595,16 +595,16 @@ iceberg_maybe_resize(iceberg_table *table)
 {
    uint8_t log_nblocks = iceberg_log_nblocks(table);
    if (unlikely(lv2_balls(table) >= (1ULL << log_nblocks) * 7)) {
-      printf("Needs resize\n");
-      printf("level1: %lu\n", lv1_balls(table));
-      printf("level2: %lu\n", lv2_balls(table));
-      printf("level3: %lu\n", lv3_balls(table));
       if (__atomic_exchange_n(
              &table->metadata->resize_lock, 1, __ATOMIC_SEQ_CST) == 0) {
          if (iceberg_log_nblocks(table) != log_nblocks) {
             table->metadata->resize_lock = 0;
             return;
          }
+         printf("Resize\n");
+         printf("level1: %lu\n", lv1_balls(table));
+         printf("level2: %lu\n", lv2_balls(table));
+         printf("level3: %lu\n", lv3_balls(table));
          uint8_t generation =
             log_nblocks - table->metadata->initial_log_nblocks + 1;
          uint64_t new_blocks =
@@ -778,38 +778,81 @@ iceberg_lv2_remove(iceberg_table *table,
 }
 
 bool
+iceberg_lv1_remove(iceberg_table *table,
+                   kv_pair       *block,
+                   uint8_t       *md,
+                   uint8_t        fprint,
+                   KeyType        key,
+                   uint8_t        thread_id)
+{
+   __mmask64 md_mask = slot_mask_64(md, fprint);
+   md_mask &= ~1;
+
+   while (md_mask != 0) {
+      int slot = __builtin_ctzll(md_mask);
+      md_mask  = md_mask & ~(1ULL << slot);
+
+      if (block[slot].key == key) {
+         if (__atomic_compare_exchange_n(&md[slot],
+                                         &fprint,
+                                         SLOT_RESERVED,
+                                         false,
+                                         __ATOMIC_SEQ_CST,
+                                         __ATOMIC_SEQ_CST)) {
+            block[slot].key = 0;
+            block[slot].val = 0;
+            md[slot]        = SLOT_EMPTY;
+            lv1_counter_dec(table, thread_id);
+            return true;
+         }
+      }
+   }
+   return false;
+}
+
+bool
 iceberg_remove(iceberg_table *table, KeyType key, uint8_t thread_id)
 {
-
+   uint8_t  log_nblocks;
    uint8_t  fprint;
    uint64_t index;
-   uint8_t  log_nblocks = iceberg_log_nblocks(table);
-
-   split_hash(lv1_hash(key), &fprint, &index, log_nblocks);
+restart:
+   log_nblocks = iceberg_log_nblocks(table);
+   split_hash(lv1_hash_inline(key), &fprint, &index, log_nblocks);
 
    kv_pair *block;
    uint8_t *md;
    iceberg_lv1_get_md_and_block(table, index, &block, &md);
 
-   __mmask64 md_mask = slot_mask_64(md, fprint);
-   md_mask &= ~1;
-   uint8_t popct = __builtin_popcountll(md_mask);
+   if (unlikely(iceberg_needs_split(table, log_nblocks, md) &&
+                iceberg_second_half(index, log_nblocks))) {
+      uint64_t split_from = iceberg_split_from(index, log_nblocks);
+      kv_pair *from_block;
+      uint8_t *from_md;
+      iceberg_lv1_get_md_and_block(table, split_from, &from_block, &from_md);
 
-   for (uint8_t i = 0; i < popct; ++i) {
-
-      uint8_t slot = word_select(md_mask, i);
-
-      if (block[slot].key == key) {
-         md[slot] = SLOT_RESERVED;
-         lv1_counter_dec(table, thread_id);
-         block[slot].key = 0;
-         block[slot].val = 0;
-         md[slot]        = SLOT_EMPTY;
+      if (iceberg_index_generation(from_md) ==
+          iceberg_generation(table, log_nblocks)) {
+         // split in progress
+         while (iceberg_index_generation(md) !=
+                iceberg_generation(table, log_nblocks)) {
+            // wait for split to finish
+            __builtin_ia32_pause();
+         }
+      } else if (iceberg_lv1_remove(
+                    table, from_block, from_md, fprint, key, thread_id) &&
+                 iceberg_index_generation(from_md) !=
+                    iceberg_generation(table, log_nblocks)) {
          return true;
       }
    }
 
-   return iceberg_lv2_remove(table, key, index, thread_id);
+   if (iceberg_lv1_remove(table, block, md, fprint, key, thread_id)) {
+      return true;
+   } else if (likely(log_nblocks == iceberg_log_nblocks(table))) {
+      return iceberg_lv2_remove(table, key, index, thread_id);
+   }
+   goto restart;
 }
 
 bool
@@ -930,8 +973,18 @@ restart:
       uint8_t *from_md;
       iceberg_lv1_get_md_and_block(table, split_from, &from_block, &from_md);
 
-      if (iceberg_lv1_get_value(
-             table, from_block, from_md, fprint, key, value)) {
+      if (iceberg_index_generation(from_md) ==
+          iceberg_generation(table, log_nblocks)) {
+         // split in progress
+         while (iceberg_index_generation(md) !=
+                iceberg_generation(table, log_nblocks)) {
+            // wait for split to finish
+            __builtin_ia32_pause();
+         }
+      } else if (iceberg_lv1_get_value(
+                    table, from_block, from_md, fprint, key, value) &&
+                 iceberg_index_generation(from_md) !=
+                    iceberg_generation(table, log_nblocks)) {
          return true;
       }
    }
