@@ -225,7 +225,7 @@ void ycsb_load_run_randint(int index_type, int wl, int kt, int ap, int num_threa
                         exit(0);
                       }
                     } else if (ops[i] == OP_READ) {
-                        uintptr_t *val = 0;
+                        uintptr_t *val;
                         auto ret = iceberg_get_value(tds[thread_id].ht, keys[i], &val, thread_id);
                         if (!ret) {
                             std::cout << "[ICEBERG] failed query: " << *val << " expected: " << keys[i] << std::endl;
