@@ -228,7 +228,7 @@ void ycsb_load_run_randint(int index_type, int wl, int kt, int ap, int num_threa
                         uintptr_t *val;
                         iceberg_get_value(tds[thread_id].ht, keys[i], &val, thread_id);
                         if (*val != keys[i]) {
-                            std::cout << "[ICEBERG] wrong key read: " << val << " expected: " << keys[i] << std::endl;
+                            std::cout << "[ICEBERG] wrong key read: " << *val << " expected: " << keys[i] << std::endl;
                             exit(1);
                         }
                     } else if (ops[i] == OP_SCAN) {
