@@ -1058,12 +1058,12 @@ static bool iceberg_lv1_move_block(iceberg_table * table, uint64_t bnum, uint8_t
     split_hash(lv1_hash(key), &fprint, &index, &table->metadata);
     // move to new location
     if (index != bnum) {
-      if (!iceberg_nuke_key(table, 1, bnum, j, thread_id)) {
-        printf("Failed remove during resize lv1. key: %" PRIu64 ", block: %ld\n", key, bnum);
-        exit(0);
-      }
       if (!iceberg_insert_internal(table, key, value, fprint, index, thread_id)) {
         printf("Failed insert during resize lv1\n");
+        exit(0);
+      }
+      if (!iceberg_nuke_key(table, 1, bnum, j, thread_id)) {
+        printf("Failed remove during resize lv1. key: %" PRIu64 ", block: %ld\n", key, bnum);
         exit(0);
       }
       //ValueType *val;
@@ -1103,12 +1103,12 @@ static bool iceberg_lv2_move_block(iceberg_table * table, uint64_t bnum, uint8_t
 
       // move to new location
       if ((l2index & mask) == bnum && l2index != bnum) {
-        if (!iceberg_nuke_key(table, 2, bnum, j, thread_id)) {
-          printf("Failed remove during resize lv2\n");
-          exit(0);
-        }
         if (!iceberg_lv2_insert_internal(table, key, value, l2fprint, l2index, index, thread_id)) {
           printf("Failed insert during resize lv2\n");
+          exit(0);
+        }
+        if (!iceberg_nuke_key(table, 2, bnum, j, thread_id)) {
+          printf("Failed remove during resize lv2\n");
           exit(0);
         }
         break;
@@ -1145,12 +1145,12 @@ static bool iceberg_lv3_move_block(iceberg_table * table, uint64_t bnum, uint8_t
       // move to new location
       if (index != bnum) {
         current_node = current_node->next_node;
-        if (!iceberg_lv3_remove(table, key, bnum, thread_id)) {
-          printf("Failed remove during resize lv3: %" PRIu64 "\n", key);
-          exit(0);
-        }
         if (!iceberg_lv3_insert(table, key, value, index, thread_id)) {
           printf("Failed insert during resize lv3\n");
+          exit(0);
+        }
+        if (!iceberg_lv3_remove(table, key, bnum, thread_id)) {
+          printf("Failed remove during resize lv3: %" PRIu64 "\n", key);
           exit(0);
         }
         // ValueType *val;
