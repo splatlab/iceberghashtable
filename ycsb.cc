@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <atomic>
 #include <thread>
+#include "tbb/tbb.h"
 
 #include "iceberg_table.h"
 
