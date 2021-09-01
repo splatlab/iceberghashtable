@@ -314,8 +314,10 @@ static bool iceberg_setup_resize(iceberg_table * table) {
     return false;
   }
   if (is_resize_active(table)) {
-    write_unlock(&table->metadata.rw_lock);
-    return false;
+    // finish the current resize
+    iceberg_end(table);
+    /*write_unlock(&table->metadata.rw_lock);*/
+    /*return false;*/
   }
 
   printf("Setting up resize\nCurrent stats: \n");
