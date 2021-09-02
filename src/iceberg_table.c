@@ -322,11 +322,11 @@ static bool iceberg_setup_resize(iceberg_table * table) {
 
   printf("Setting up resize\nCurrent stats: \n");
   
-  printf("Load factor: %f\n", iceberg_load_factor(table));
-  printf("Number level 1 inserts: %ld\n", lv1_balls(table));
-  printf("Number level 2 inserts: %ld\n", lv2_balls(table));
-  printf("Number level 3 inserts: %ld\n", lv3_balls(table));
-  printf("Total inserts: %ld\n", tot_balls(table));
+  /*printf("Load factor: %f\n", iceberg_load_factor(table));*/
+  /*printf("Number level 1 inserts: %ld\n", lv1_balls(table));*/
+  /*printf("Number level 2 inserts: %ld\n", lv2_balls(table));*/
+  /*printf("Number level 3 inserts: %ld\n", lv3_balls(table));*/
+  /*printf("Total inserts: %ld\n", tot_balls(table));*/
 
   // reset the block ctr 
   table->metadata.lv1_resize_ctr = 0;
@@ -925,7 +925,7 @@ static inline bool iceberg_lv3_get_value(iceberg_table * table, KeyType key, Val
     } else {
       // wait for the old block to be fixed
       uint64_t dest_chunk_idx = lv3_index / 8;
-      while(table->metadata.lv3_resize_marker[dest_chunk_idx] != 1)
+      while (__atomic_load_n(&table->metadata.lv3_resize_marker[dest_chunk_idx], __ATOMIC_SEQ_CST) == 0)
         ;
     }
   }
@@ -967,7 +967,7 @@ static inline bool iceberg_lv2_get_value(iceberg_table * table, KeyType key, Val
       } else {
         // wait for the old block to be fixed
         uint64_t dest_chunk_idx = index / 8;
-        while(table->metadata.lv2_resize_marker[dest_chunk_idx] != 1)
+        while (__atomic_load_n(&table->metadata.lv2_resize_marker[dest_chunk_idx], __ATOMIC_SEQ_CST) == 0)
           ;
       }
     }
@@ -1027,7 +1027,7 @@ bool iceberg_get_value(iceberg_table * table, KeyType key, ValueType **value, ui
     } else {
       // wait for the old block to be fixed
       uint64_t dest_chunk_idx = index / 8;
-      while(table->metadata.lv1_resize_marker[dest_chunk_idx] != 1)
+      while (__atomic_load_n(&table->metadata.lv1_resize_marker[dest_chunk_idx], __ATOMIC_SEQ_CST) == 0)
         ;
     }
   }
