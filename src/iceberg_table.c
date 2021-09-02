@@ -320,7 +320,7 @@ static bool iceberg_setup_resize(iceberg_table * table) {
     /*return false;*/
   }
 
-  printf("Setting up resize\nCurrent stats: \n");
+  /*printf("Setting up resize\nCurrent stats: \n");*/
   
   /*printf("Load factor: %f\n", iceberg_load_factor(table));*/
   /*printf("Number level 1 inserts: %ld\n", lv1_balls(table));*/
