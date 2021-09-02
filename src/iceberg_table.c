@@ -922,11 +922,12 @@ static inline bool iceberg_lv3_get_value(iceberg_table * table, KeyType key, Val
     uint64_t chunk_idx = old_index / 8;
     if (__atomic_load_n(&table->metadata.lv3_resize_marker[chunk_idx], __ATOMIC_SEQ_CST) == 0) { // not fixed yet
       return iceberg_lv3_get_value_internal(table, key, value, old_index);
+    } else {
+      // wait for the old block to be fixed
+      uint64_t dest_chunk_idx = lv3_index / 8;
+      while(table->metadata.lv3_resize_marker[dest_chunk_idx] != 1)
+        ;
     }
-    // wait for the old block to be fixed
-    uint64_t dest_chunk_idx = lv3_index / 8;
-    while(table->metadata.lv3_resize_marker[dest_chunk_idx] != 1)
-      ;
   }
 #endif
 
@@ -963,11 +964,12 @@ static inline bool iceberg_lv2_get_value(iceberg_table * table, KeyType key, Val
             return true;
           }
         }
+      } else {
+        // wait for the old block to be fixed
+        uint64_t dest_chunk_idx = index / 8;
+        while(table->metadata.lv2_resize_marker[dest_chunk_idx] != 1)
+          ;
       }
-      // wait for the old block to be fixed
-      uint64_t dest_chunk_idx = index / 8;
-      while(table->metadata.lv2_resize_marker[dest_chunk_idx] != 1)
-        ;
     }
 #endif
 
@@ -1022,11 +1024,12 @@ bool iceberg_get_value(iceberg_table * table, KeyType key, ValueType **value, ui
           return true;
         }
       }
+    } else {
+      // wait for the old block to be fixed
+      uint64_t dest_chunk_idx = index / 8;
+      while(table->metadata.lv1_resize_marker[dest_chunk_idx] != 1)
+        ;
     }
-    // wait for the old block to be fixed
-    uint64_t dest_chunk_idx = index / 8;
-    while(table->metadata.lv1_resize_marker[dest_chunk_idx] != 1)
-      ;
   }
 #endif
 
