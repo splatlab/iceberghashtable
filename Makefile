@@ -49,4 +49,4 @@ ycsb: $(OBJECTS) obj/ycsb.o
 .PHONY: clean directories
 
 clean:
-	rm -f main $(OBJECTS) obj/main.o obj/ycsb.o
+	rm -f main ycsb $(OBJECTS) obj/main.o obj/ycsb.o
