@@ -740,13 +740,18 @@ static inline bool iceberg_lv3_remove(iceberg_table * table, KeyType key, uint64
 
 #ifdef ENABLE_RESIZE
   // check if there's an active resize and block isn't fixed yet
-  if (unlikely(lv3_index >= (table->metadata.nblocks >> 1))) {
+  if (unlikely(lv3_index >= (table->metadata.nblocks >> 1) && is_lv3_resize_active(table))) {
     uint64_t mask = ~(1ULL << (table->metadata.block_bits - 1));
     uint64_t old_index = lv3_index & mask;
     uint64_t chunk_idx = old_index / 8;
     if (__atomic_load_n(&table->metadata.lv3_resize_marker[chunk_idx], __ATOMIC_SEQ_CST) == 0) { // not fixed yet
       return iceberg_lv3_remove_internal(table, key, old_index, thread_id);
 
+    } else {
+      // wait for the old block to be fixed
+      uint64_t dest_chunk_idx = lv3_index / 8;
+      while (__atomic_load_n(&table->metadata.lv3_resize_marker[dest_chunk_idx], __ATOMIC_SEQ_CST) == 0)
+        ;
     }
   }
 #endif
@@ -766,25 +771,9 @@ static inline bool iceberg_lv2_remove(iceberg_table * table, KeyType key, uint64
 
     split_hash(lv2_hash(key, i), &fprint, &index, metadata);
 
-    __mmask32 md_mask = slot_mask_32(metadata->lv2_md[index].block_md, fprint) & ((1 << (C_LV2 + MAX_LG_LG_N / D_CHOICES)) - 1);
-    uint8_t popct = __builtin_popcount(md_mask);
-
-    for(uint8_t i = 0; i < popct; ++i) {
-
-      uint8_t slot = word_select(md_mask, i);
-
-      if (blocks[index].slots[slot].key == key) {
-
-        metadata->lv2_md[index].block_md[slot] = 0;
-        blocks[index].slots[slot].key = blocks[index].slots[slot].val = 0;
-        pc_add(&metadata->lv2_balls, -1, thread_id);
-        return true;
-      }
-    }
-
 #ifdef ENABLE_RESIZE
     // check if there's an active resize and block isn't fixed yet
-    if (unlikely(index >= (table->metadata.nblocks >> 1))) {
+    if (unlikely(index >= (table->metadata.nblocks >> 1) && is_lv2_resize_active(table))) {
       uint64_t mask = ~(1ULL << (table->metadata.block_bits - 1));
       uint64_t old_index = index & mask;
       uint64_t chunk_idx = old_index / 8;
@@ -804,10 +793,30 @@ static inline bool iceberg_lv2_remove(iceberg_table * table, KeyType key, uint64
             return true;
           }
         }
+      } else {
+        // wait for the old block to be fixed
+        uint64_t dest_chunk_idx = index / 8;
+        while (__atomic_load_n(&table->metadata.lv2_resize_marker[dest_chunk_idx], __ATOMIC_SEQ_CST) == 0)
+          ;
       }
     }
 #endif
 
+    __mmask32 md_mask = slot_mask_32(metadata->lv2_md[index].block_md, fprint) & ((1 << (C_LV2 + MAX_LG_LG_N / D_CHOICES)) - 1);
+    uint8_t popct = __builtin_popcount(md_mask);
+
+    for(uint8_t i = 0; i < popct; ++i) {
+
+      uint8_t slot = word_select(md_mask, i);
+
+      if (blocks[index].slots[slot].key == key) {
+
+        metadata->lv2_md[index].block_md[slot] = 0;
+        blocks[index].slots[slot].key = blocks[index].slots[slot].val = 0;
+        pc_add(&metadata->lv2_balls, -1, thread_id);
+        return true;
+      }
+    }
   }
 
   return iceberg_lv3_remove(table, key, lv3_index, thread_id);
@@ -828,28 +837,9 @@ bool iceberg_remove(iceberg_table * table, KeyType key, uint8_t thread_id) {
 
   split_hash(lv1_hash(key), &fprint, &index, metadata);
 
-  __mmask64 md_mask = slot_mask_64(metadata->lv1_md[index].block_md, fprint);
-  uint8_t popct = __builtin_popcountll(md_mask);
-
-  for(uint8_t i = 0; i < popct; ++i) {
-
-    uint8_t slot = word_select(md_mask, i);
-
-    if (blocks[index].slots[slot].key == key) {
-
-      metadata->lv1_md[index].block_md[slot] = 0;
-      blocks[index].slots[slot].key = blocks[index].slots[slot].val = 0;
-      pc_add(&metadata->lv1_balls, -1, thread_id);
-#ifdef ENABLE_RESIZE
-      read_unlock(&table->metadata.rw_lock, thread_id);
-#endif
-      return true;
-    }
-  }
-
 #ifdef ENABLE_RESIZE
   // check if there's an active resize and block isn't fixed yet
-  if (unlikely(index >= (table->metadata.nblocks >> 1))) {
+  if (unlikely(index >= (table->metadata.nblocks >> 1) && is_lv1_resize_active(table))) {
     uint64_t mask = ~(1ULL << (table->metadata.block_bits - 1));
     uint64_t old_index = index & mask;
     uint64_t chunk_idx = old_index / 8;
@@ -870,9 +860,33 @@ bool iceberg_remove(iceberg_table * table, KeyType key, uint8_t thread_id) {
           return true;
         }
       }
+    } else {
+      // wait for the old block to be fixed
+      uint64_t dest_chunk_idx = index / 8;
+      while (__atomic_load_n(&table->metadata.lv1_resize_marker[dest_chunk_idx], __ATOMIC_SEQ_CST) == 0)
+        ;
     }
   }
 #endif
+
+  __mmask64 md_mask = slot_mask_64(metadata->lv1_md[index].block_md, fprint);
+  uint8_t popct = __builtin_popcountll(md_mask);
+
+  for(uint8_t i = 0; i < popct; ++i) {
+
+    uint8_t slot = word_select(md_mask, i);
+
+    if (blocks[index].slots[slot].key == key) {
+
+      metadata->lv1_md[index].block_md[slot] = 0;
+      blocks[index].slots[slot].key = blocks[index].slots[slot].val = 0;
+      pc_add(&metadata->lv1_balls, -1, thread_id);
+#ifdef ENABLE_RESIZE
+      read_unlock(&table->metadata.rw_lock, thread_id);
+#endif
+      return true;
+    }
+  }
 
   bool ret = iceberg_lv2_remove(table, key, index, thread_id);
 
