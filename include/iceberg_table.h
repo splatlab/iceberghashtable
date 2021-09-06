@@ -3,6 +3,7 @@
 
 #include <inttypes.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include "lock.h"
 
 #ifdef __cplusplus
@@ -47,13 +48,14 @@ extern "C" {
   } iceberg_lv2_block_md;
 
   typedef struct iceberg_lv3_node {
+    bool in_use;
     KeyType key;
     ValueType val;
-    struct iceberg_lv3_node * next_node;
+    ptrdiff_t next_idx;
   } iceberg_lv3_node;
 
   typedef struct iceberg_lv3_list {
-    iceberg_lv3_node * head;
+    ptrdiff_t head_idx;
   } iceberg_lv3_list;
 
   typedef struct iceberg_metadata {
@@ -87,6 +89,7 @@ extern "C" {
     iceberg_lv1_block * level1;
     iceberg_lv2_block * level2;
     iceberg_lv3_list * level3;
+    iceberg_lv3_node * level3_nodes;
   } iceberg_table;
 
   uint64_t lv1_balls(iceberg_table * table);
@@ -95,6 +98,8 @@ extern "C" {
   uint64_t tot_balls(iceberg_table * table);
 
   int iceberg_init(iceberg_table *table, uint64_t log_slots);
+  void iceberg_dismount(iceberg_table *table);
+  iceberg_table * iceberg_mount(uint64_t log_slots);
 
   double iceberg_load_factor(iceberg_table * table);
 

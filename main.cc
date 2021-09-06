@@ -107,7 +107,7 @@ int main (int argc, char** argv) {
   uint64_t tbits = atoi(argv[1]);
   uint64_t threads = atoi(argv[2]);
   //uint64_t N = (1ULL << tbits) * 1.07;
-  uint64_t N = (1ULL << tbits) * 1.07 * 1.90;
+  uint64_t N = (1ULL << tbits) * 0.9; // * 1.07; // * 1.90;
 
   high_resolution_clock::time_point t1 = high_resolution_clock::now();
 
@@ -213,6 +213,19 @@ int main (int argc, char** argv) {
   if (!is_benchmark) {
     printf("Average list size: %f\n", sum_sizes / (double)table.metadata.nblocks);
     printf("Max list size: %ld\n", max_size);
+
+    printf("RECOVERY\n");
+  }
+
+  //iceberg_dismount(&table);
+
+  //t1 = high_resolution_clock::now();
+  //table = iceberg_mount(tbits);
+  //t2 = high_resolution_clock::now();
+
+  //double recovery_throughput = N / elapsed(t1, t2);
+  if (!is_benchmark) {
+    //printf("Recovery: %f /sec\n", recovery_throughput);
 
     printf("\nQUERIES\n");
   }
