@@ -217,15 +217,15 @@ int main (int argc, char** argv) {
     printf("RECOVERY\n");
   }
 
-  //iceberg_dismount(&table);
+  uint64_t new_tbits = iceberg_dismount(&table);
 
-  //t1 = high_resolution_clock::now();
-  //table = iceberg_mount(tbits);
-  //t2 = high_resolution_clock::now();
+  t1 = high_resolution_clock::now();
+  iceberg_mount(&table, new_tbits);
+  t2 = high_resolution_clock::now();
 
-  //double recovery_throughput = N / elapsed(t1, t2);
+  double recovery_throughput = N / elapsed(t1, t2);
   if (!is_benchmark) {
-    //printf("Recovery: %f /sec\n", recovery_throughput);
+    printf("Recovery: %f /sec\n", recovery_throughput);
 
     printf("\nQUERIES\n");
   }
