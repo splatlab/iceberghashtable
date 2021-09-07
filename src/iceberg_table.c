@@ -1186,11 +1186,13 @@ static bool iceberg_nuke_key(iceberg_table * table, uint64_t level, uint64_t ind
     iceberg_lv1_block * blocks = table->level1;
     metadata->lv1_md[index].block_md[slot] = 0;
     blocks[index].slots[slot].key = blocks[index].slots[slot].val = 0;
+    pmem_persist(&blocks[index].slots[slot], sizeof(kv_pair));
     pc_add(&metadata->lv1_balls, -1, thread_id);
   } else if (level == 2) {
     iceberg_lv2_block * blocks = table->level2;
     metadata->lv2_md[index].block_md[slot] = 0;
     blocks[index].slots[slot].key = blocks[index].slots[slot].val = 0;
+    pmem_persist(&blocks[index].slots[slot], sizeof(kv_pair));
     pc_add(&metadata->lv2_balls, -1, thread_id);
   }
 
@@ -1198,7 +1200,7 @@ static bool iceberg_nuke_key(iceberg_table * table, uint64_t level, uint64_t ind
 }
 
 static bool iceberg_lv1_move_block(iceberg_table * table, uint64_t bnum, uint8_t thread_id) {
-  // grab a block 
+  // grab a block
   uint64_t bctr = __atomic_fetch_add(&table->metadata.lv1_resize_ctr, 1, __ATOMIC_SEQ_CST);
   if (bctr >= (table->metadata.nblocks >> 1))
     return true;
