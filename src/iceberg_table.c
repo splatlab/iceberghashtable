@@ -22,6 +22,8 @@
 #define FILENAME_LEN 1024
 #define NUM_LEVEL3_NODES 2048
 
+#define MiB (1024 * 1024)
+
 uint64_t seed[5] = { 12351327692179052ll, 23246347347385899ll, 35236262354132235ll, 13604702930934770ll, 57439820692984798ll };
 
 pthread_cond_t resize_cond = PTHREAD_COND_INITIALIZER;
@@ -591,69 +593,79 @@ static bool iceberg_setup_resize(iceberg_table * table) {
   uint64_t total_blocks = table->metadata.nblocks * 2;
   uint64_t total_size_in_bytes = (sizeof(iceberg_lv1_block) + sizeof(iceberg_lv2_block) + sizeof(iceberg_lv1_block_md) + sizeof(iceberg_lv2_block_md)) * total_blocks;
 
-  // remap level1
-  size_t old_level1_size = table->metadata.level1_size;
-  pmem_unmap(table->level1, table->metadata.level1_size);
-  size_t level1_size = sizeof(iceberg_lv1_block) * total_blocks;
-  table->metadata.level1_size = level1_size;
-  char level1_filename[FILENAME_LEN];
-  sprintf(level1_filename, "%s/level1", PMEM_PATH);
-  int fd = open(level1_filename, O_RDWR);
-  int rc = fallocate(fd, 0, old_level1_size, level1_size - old_level1_size);
-  assert(rc == 0);
-  rc = close(fd);
-  assert(rc == 0);
+  int fd;
+  int rc;
   size_t mapped_len;
   int is_pmem;
-  table->level1 = pmem_map_file(level1_filename, 0, 0, 0, &mapped_len, &is_pmem);
-  assert(mapped_len == level1_size);
-  assert(is_pmem);
-  if (table->level1 == NULL) {
-    perror("level1 remap failed");
-    exit(1);
+  // remap level1
+  size_t old_level1_size = table->metadata.level1_size;
+  size_t level1_size = round_up(sizeof(iceberg_lv1_block) * total_blocks, 2 * MiB);
+  if (old_level1_size != level1_size) {
+    pmem_unmap(table->level1, table->metadata.level1_size);
+    table->metadata.level1_size = level1_size;
+    char level1_filename[FILENAME_LEN];
+    sprintf(level1_filename, "%s/level1", PMEM_PATH);
+    fd = open(level1_filename, O_RDWR);
+    rc = fallocate(fd, 0, old_level1_size, level1_size - old_level1_size);
+    assert(rc == 0);
+    rc = close(fd);
+    assert(rc == 0);
+    table->level1 = pmem_map_file(level1_filename, 0, 0, 0, &mapped_len, &is_pmem);
+    assert(mapped_len == level1_size);
+    assert(is_pmem);
+    if (table->level1 == NULL) {
+      perror("level1 remap failed");
+      exit(1);
+    }
   }
 
   // remap level2
   size_t old_level2_size = table->metadata.level2_size;
-  pmem_unmap(table->level2, table->metadata.level2_size);
-  size_t level2_size = sizeof(iceberg_lv2_block) * total_blocks;
-  table->metadata.level2_size = level2_size;
-  char level2_filename[FILENAME_LEN];
-  sprintf(level2_filename, "%s/level2", PMEM_PATH);
-  fd = open(level2_filename, O_RDWR);
-  rc = fallocate(fd, 0, old_level2_size, level2_size - old_level2_size);
-  assert(rc == 0);
-  rc = close(fd);
-  assert(rc == 0);
-  table->level2 = pmem_map_file(level2_filename, 0, 0, 0, &mapped_len, &is_pmem);
-  assert(mapped_len == level2_size);
-  assert(is_pmem);
-  if (table->level2 == NULL) {
-    perror("level2 remap failed");
-    exit(1);
+  size_t level2_size = round_up(sizeof(iceberg_lv2_block) * total_blocks, 2 * MiB);
+  if (old_level2_size != level2_size) {
+    printf("old: %lu new %lu\n", old_level2_size, level2_size);
+    fflush(stdout);
+    pmem_unmap(table->level2, table->metadata.level2_size);
+    table->metadata.level2_size = level2_size;
+    char level2_filename[FILENAME_LEN];
+    sprintf(level2_filename, "%s/level2", PMEM_PATH);
+    fd = open(level2_filename, O_RDWR);
+    rc = fallocate(fd, 0, old_level2_size, level2_size - old_level2_size);
+    assert(rc == 0);
+    rc = close(fd);
+    assert(rc == 0);
+    table->level2 = pmem_map_file(level2_filename, 0, 0, 0, &mapped_len, &is_pmem);
+    assert(mapped_len == level2_size);
+    assert(is_pmem);
+    if (table->level2 == NULL) {
+      perror("level2 remap failed");
+      exit(1);
+    }
   }
 
   // remap level3
   size_t old_level3_size = table->metadata.level3_size;
-  pmem_unmap(table->level3, table->metadata.level3_size);
-  size_t level3_size = sizeof(iceberg_lv3_list) * total_blocks;
-  table->metadata.level3_size = level3_size;
-  char level3_filename[FILENAME_LEN];
-  sprintf(level3_filename, "%s/level3", PMEM_PATH);
-  fd = open(level3_filename, O_RDWR);
-  rc = fallocate(fd, 0, old_level3_size, level3_size - old_level3_size);
-  assert(rc == 0);
-  rc = close(fd);
-  assert(rc == 0);
-  table->level3 = pmem_map_file(level3_filename, 0, 0, 0, &mapped_len, &is_pmem);
-  assert(mapped_len == level3_size);
-  assert(is_pmem);
-  if (table->level3 == NULL) {
-    perror("level3 remap failed");
-    exit(1);
-  }
-  for (uint64_t i = old_total_blocks; i < total_blocks; i++) {
-    table->level3[i].head_idx = -1;
+  size_t level3_size = round_up(sizeof(iceberg_lv3_list) * total_blocks, 2 * MiB);
+  if (old_level3_size != level3_size) {
+    pmem_unmap(table->level3, table->metadata.level3_size);
+    table->metadata.level3_size = level3_size;
+    char level3_filename[FILENAME_LEN];
+    sprintf(level3_filename, "%s/level3", PMEM_PATH);
+    fd = open(level3_filename, O_RDWR);
+    rc = fallocate(fd, 0, old_level3_size, level3_size - old_level3_size);
+    assert(rc == 0);
+    rc = close(fd);
+    assert(rc == 0);
+    table->level3 = pmem_map_file(level3_filename, 0, 0, 0, &mapped_len, &is_pmem);
+    assert(mapped_len == level3_size);
+    assert(is_pmem);
+    if (table->level3 == NULL) {
+      perror("level3 remap failed");
+      exit(1);
+    }
+    for (uint64_t i = old_total_blocks; i < total_blocks; i++) {
+      table->level3[i].head_idx = -1;
+    }
   }
 
   // update metadata
