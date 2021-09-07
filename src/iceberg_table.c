@@ -8,6 +8,7 @@
 #include <tmmintrin.h>
 #include <sys/mman.h>
 #include <sys/sysinfo.h>
+#include <fcntl.h>
 #include <libpmem.h>
 
 #include "hashutil.h"
@@ -175,6 +176,7 @@ int iceberg_init(iceberg_table *table, uint64_t log_slots) {
   int is_pmem;
 
   size_t level1_size = round_up(sizeof(iceberg_lv1_block) * total_blocks, 2 * 1024 * 1024);
+  table->metadata.level1_size = level1_size;
   char level1_filename[FILENAME_LEN];
   sprintf(level1_filename, "%s/level1", PMEM_PATH);
   if ((table->level1 = (iceberg_lv1_block *)pmem_map_file(level1_filename,
@@ -187,6 +189,7 @@ int iceberg_init(iceberg_table *table, uint64_t log_slots) {
   assert(mapped_len == level1_size);
 
   size_t level2_size = round_up(sizeof(iceberg_lv2_block) * total_blocks, 2 * 1024 * 1024);
+  table->metadata.level2_size = level2_size;
   char level2_filename[FILENAME_LEN];
   sprintf(level2_filename, "%s/level2", PMEM_PATH);
   if ((table->level2 = (iceberg_lv2_block *)pmem_map_file(level2_filename,
@@ -198,6 +201,7 @@ int iceberg_init(iceberg_table *table, uint64_t log_slots) {
   }
 
   size_t level3_size = sizeof(iceberg_lv3_list) * total_blocks;
+  table->metadata.level3_size = level3_size;
   char level3_filename[FILENAME_LEN];
   sprintf(level3_filename, "%s/level3", PMEM_PATH);
   if ((table->level3 = (iceberg_lv3_list *)pmem_map_file(level3_filename,
@@ -338,6 +342,7 @@ static bool iceberg_setup_resize(iceberg_table * table) {
     write_unlock(&table->metadata.rw_lock);
     return false;
   }
+
   if (is_resize_active(table)) {
     // finish the current resize
     iceberg_end(table);
@@ -345,15 +350,15 @@ static bool iceberg_setup_resize(iceberg_table * table) {
     /*return false;*/
   }
 
-  /*printf("Setting up resize\nCurrent stats: \n");*/
-  
-  /*printf("Load factor: %f\n", iceberg_load_factor(table));*/
-  /*printf("Number level 1 inserts: %ld\n", lv1_balls(table));*/
-  /*printf("Number level 2 inserts: %ld\n", lv2_balls(table));*/
-  /*printf("Number level 3 inserts: %ld\n", lv3_balls(table));*/
-  /*printf("Total inserts: %ld\n", tot_balls(table));*/
+  printf("Setting up resize\nCurrent stats: \n");
 
-  // reset the block ctr 
+  printf("Load factor: %f\n", iceberg_load_factor(table));
+  printf("Number level 1 inserts: %ld\n", lv1_balls(table));
+  printf("Number level 2 inserts: %ld\n", lv2_balls(table));
+  printf("Number level 3 inserts: %ld\n", lv3_balls(table));
+  printf("Total inserts: %ld\n", tot_balls(table));
+
+  // reset the block ctr
   table->metadata.lv1_resize_ctr = 0;
   table->metadata.lv2_resize_ctr = 0;
   table->metadata.lv3_resize_ctr = 0;
@@ -363,31 +368,66 @@ static bool iceberg_setup_resize(iceberg_table * table) {
   uint64_t total_size_in_bytes = (sizeof(iceberg_lv1_block) + sizeof(iceberg_lv2_block) + sizeof(iceberg_lv1_block_md) + sizeof(iceberg_lv2_block_md)) * total_blocks;
 
   // remap level1
+  size_t old_level1_size = table->metadata.level1_size;
+  pmem_unmap(table->level1, table->metadata.level1_size);
   size_t level1_size = sizeof(iceberg_lv1_block) * total_blocks;
-  void * l1temp = mremap(table->level1, level1_size/2, level1_size, MREMAP_MAYMOVE);
-  if (l1temp == (void *)-1) {
+  table->metadata.level1_size = level1_size;
+  char level1_filename[FILENAME_LEN];
+  sprintf(level1_filename, "%s/level1", PMEM_PATH);
+  int fd = open(level1_filename, O_RDWR);
+  int rc = fallocate(fd, 0, old_level1_size, level1_size - old_level1_size);
+  assert(rc == 0);
+  rc = close(fd);
+  assert(rc == 0);
+  size_t mapped_len;
+  int is_pmem;
+  table->level1 = pmem_map_file(level1_filename, 0, 0, 0, &mapped_len, &is_pmem);
+  assert(mapped_len == level1_size);
+  assert(is_pmem);
+  if (table->level1 == NULL) {
     perror("level1 remap failed");
     exit(1);
   }
-  table->level1 = l1temp;
 
   // remap level2
+  size_t old_level2_size = table->metadata.level2_size;
+  pmem_unmap(table->level2, table->metadata.level2_size);
   size_t level2_size = sizeof(iceberg_lv2_block) * total_blocks;
-  void * l2temp = mremap(table->level2, level2_size/2, level2_size, MREMAP_MAYMOVE);
-  if (l2temp == (void *)-1) {
+  table->metadata.level2_size = level2_size;
+  char level2_filename[FILENAME_LEN];
+  sprintf(level2_filename, "%s/level2", PMEM_PATH);
+  fd = open(level2_filename, O_RDWR);
+  rc = fallocate(fd, 0, old_level2_size, level2_size - old_level2_size);
+  assert(rc == 0);
+  rc = close(fd);
+  assert(rc == 0);
+  table->level2 = pmem_map_file(level2_filename, 0, 0, 0, &mapped_len, &is_pmem);
+  assert(mapped_len == level2_size);
+  assert(is_pmem);
+  if (table->level2 == NULL) {
     perror("level2 remap failed");
     exit(1);
   }
-  table->level2 = l2temp;
 
   // remap level3
+  size_t old_level3_size = table->metadata.level3_size;
+  pmem_unmap(table->level3, table->metadata.level3_size);
   size_t level3_size = sizeof(iceberg_lv3_list) * total_blocks;
-  void * l3temp = mremap(table->level3, level3_size/2, level3_size, MREMAP_MAYMOVE);
-  if (l3temp == (void *)-1) {
+  table->metadata.level3_size = level3_size;
+  char level3_filename[FILENAME_LEN];
+  sprintf(level3_filename, "%s/level3", PMEM_PATH);
+  fd = open(level3_filename, O_RDWR);
+  rc = fallocate(fd, 0, old_level3_size, level3_size - old_level3_size);
+  assert(rc == 0);
+  rc = close(fd);
+  assert(rc == 0);
+  table->level3 = pmem_map_file(level3_filename, 0, 0, 0, &mapped_len, &is_pmem);
+  assert(mapped_len == level3_size);
+  assert(is_pmem);
+  if (table->level3 == NULL) {
     perror("level3 remap failed");
     exit(1);
   }
-  table->level3 = l3temp;
 
   // update metadata
   table->metadata.total_size_in_bytes = total_size_in_bytes;

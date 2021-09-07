@@ -69,6 +69,9 @@ extern "C" {
     pc_t lv1_balls;
     pc_t lv2_balls;
     pc_t lv3_balls;
+    size_t level1_size;
+    size_t level2_size;
+    size_t level3_size;
     iceberg_lv1_block_md * lv1_md;
     iceberg_lv2_block_md * lv2_md;
     uint64_t * lv3_sizes;
