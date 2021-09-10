@@ -1,0 +1,1 @@
+/usr/bin/c++   -Wno-long-long -fPIC -march=native -O3 -DNDEBUG -Ofast -O3 -DNDEBUG   CMakeFiles/test_pmem.dir/src/test_pmem.cpp.o  -o test_pmem   -L/home/aconway/dash/build/pmdk/src/PMDK/src/nondebug  -Wl,-rpath,/home/aconway/dash/build/pmdk/src/PMDK/src/nondebug -lpthread -lgflags -lpmemobj -lpmem 

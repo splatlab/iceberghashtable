@@ -1,0 +1,13 @@
+# Target labels
+ PMDK
+# Source files and their labels
+/home/aconway/dash/build/CMakeFiles/PMDK
+/home/aconway/dash/build/CMakeFiles/PMDK.rule
+/home/aconway/dash/build/CMakeFiles/PMDK-complete.rule
+/home/aconway/dash/build/pmdk/src/PMDK-stamp/PMDK-install.rule
+/home/aconway/dash/build/pmdk/src/PMDK-stamp/PMDK-mkdir.rule
+/home/aconway/dash/build/pmdk/src/PMDK-stamp/PMDK-download.rule
+/home/aconway/dash/build/pmdk/src/PMDK-stamp/PMDK-update.rule
+/home/aconway/dash/build/pmdk/src/PMDK-stamp/PMDK-patch.rule
+/home/aconway/dash/build/pmdk/src/PMDK-stamp/PMDK-configure.rule
+/home/aconway/dash/build/pmdk/src/PMDK-stamp/PMDK-build.rule

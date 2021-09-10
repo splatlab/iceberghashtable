@@ -575,13 +575,13 @@ static bool iceberg_setup_resize(iceberg_table * table) {
     /*return false;*/
   }
 
-  printf("Setting up resize\nCurrent stats: \n");
+  //printf("Setting up resize\nCurrent stats: \n");
 
-  printf("Load factor: %f\n", iceberg_load_factor(table));
-  printf("Number level 1 inserts: %ld\n", lv1_balls(table));
-  printf("Number level 2 inserts: %ld\n", lv2_balls(table));
-  printf("Number level 3 inserts: %ld\n", lv3_balls(table));
-  printf("Total inserts: %ld\n", tot_balls(table));
+  //printf("Load factor: %f\n", iceberg_load_factor(table));
+  //printf("Number level 1 inserts: %ld\n", lv1_balls(table));
+  //printf("Number level 2 inserts: %ld\n", lv2_balls(table));
+  //printf("Number level 3 inserts: %ld\n", lv3_balls(table));
+  //printf("Total inserts: %ld\n", tot_balls(table));
 
   // reset the block ctr
   table->metadata.lv1_resize_ctr = 0;
@@ -623,7 +623,6 @@ static bool iceberg_setup_resize(iceberg_table * table) {
   size_t old_level2_size = table->metadata.level2_size;
   size_t level2_size = round_up(sizeof(iceberg_lv2_block) * total_blocks, 2 * MiB);
   if (old_level2_size != level2_size) {
-    printf("old: %lu new %lu\n", old_level2_size, level2_size);
     fflush(stdout);
     pmem_unmap(table->level2, table->metadata.level2_size);
     table->metadata.level2_size = level2_size;

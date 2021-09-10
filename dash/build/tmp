@@ -1,0 +1,234 @@
+insert positive negative remove
+Distribution = uniform
+Initialize Dash-EH
+creating a new pool
+pool opened at: 0x5f0000000000
+Generate workload
+Finish Generate workload
+load num = 0
+Start load warm-up workload
+Comprehensive Benchmark
+insertion start
+Insert1 Begin
+1 threads, Time = 51.672651 s, throughput = 1233794.256076 ops/s, fastest = 1233794.256076, slowest = 1233794.256076
+Insert1 End
+The size of the bucket is 256
+seg_count = 131072
+verify_seg_count = 131072
+Pos_search1 Begin
+not_found = 0
+1 threads, Time = 20.323660 s, throughput = 3136906.443032 ops/s, fastest = 3136906.443032, slowest = 3136906.443032
+Pos_search1 End
+Neg_search1 Begin
+not_found = 63753420
+1 threads, Time = 16.641722 s, throughput = 3830938.889617 ops/s, fastest = 3830938.889617, slowest = 3830938.889617
+Neg_search1 End
+Delete1 Begin
+not_found = 0
+1 threads, Time = 37.396180 s, throughput = 1704811.026153 ops/s, fastest = 1704811.026153, slowest = 1704811.026153
+Delete1 End
+The size of the bucket is 256
+seg_count = 131072
+verify_seg_count = 131072
+Distribution = uniform
+Initialize Dash-EH
+creating a new pool
+pool opened at: 0x5f0000000000
+Generate workload
+Finish Generate workload
+load num = 0
+Start load warm-up workload
+Comprehensive Benchmark
+insertion start
+Insert2 Begin
+2 threads, Time = 24.552828 s, throughput = 2596581.542460 ops/s, fastest = 2821852.403569, slowest = 2404618.792942
+Insert2 End
+The size of the bucket is 256
+seg_count = 131072
+verify_seg_count = 131072
+Pos_search2 Begin
+not_found = 0
+not_found = 0
+2 threads, Time = 11.710116 s, throughput = 5444303.260715 ops/s, fastest = 5555604.258284, slowest = 5337374.283323
+Pos_search2 End
+Neg_search2 Begin
+not_found = 31876710
+not_found = 31876710
+2 threads, Time = 9.829022 s, throughput = 6486242.476617 ops/s, fastest = 6530637.289424, slowest = 6442447.174009
+Neg_search2 End
+Delete2 Begin
+not_found = 0
+not_found = 0
+2 threads, Time = 19.342734 s, throughput = 3295988.043883 ops/s, fastest = 3474343.797060, slowest = 3135049.970016
+Delete2 End
+The size of the bucket is 256
+seg_count = 131072
+verify_seg_count = 131072
+Distribution = uniform
+Initialize Dash-EH
+creating a new pool
+pool opened at: 0x5f0000000000
+Generate workload
+Finish Generate workload
+load num = 0
+Start load warm-up workload
+Comprehensive Benchmark
+insertion start
+Insert4 Begin
+4 threads, Time = 13.405327 s, throughput = 4755827.114257 ops/s, fastest = 5144415.566433, slowest = 4420736.392074
+Insert4 End
+The size of the bucket is 256
+seg_count = 131072
+verify_seg_count = 131072
+Pos_search4 Begin
+not_found = 0
+not_found = 0
+not_found = 0
+not_found = 0
+4 threads, Time = 6.688434 s, throughput = 9531891.137140 ops/s, fastest = 9742032.590890, slowest = 9297332.880474
+Pos_search4 End
+Neg_search4 Begin
+not_found = 15938355
+not_found = 15938355
+not_found = 15938355
+not_found = 15938355
+4 threads, Time = 5.674308 s, throughput = 11235452.851696 ops/s, fastest = 11344279.248965, slowest = 11095491.817187
+Neg_search4 End
+Delete4 Begin
+not_found = 0
+not_found = 0
+not_found = 0
+not_found = 0
+4 threads, Time = 11.008011 s, throughput = 5791547.628359 ops/s, fastest = 6082796.008755, slowest = 5529537.813548
+Delete4 End
+The size of the bucket is 256
+seg_count = 131072
+verify_seg_count = 131072
+Distribution = uniform
+Initialize Dash-EH
+creating a new pool
+pool opened at: 0x5f0000000000
+Generate workload
+Finish Generate workload
+load num = 0
+Start load warm-up workload
+Comprehensive Benchmark
+insertion start
+Insert8 Begin
+8 threads, Time = 7.781674 s, throughput = 8192764.179019 ops/s, fastest = 8767229.948736, slowest = 7688245.177106
+Insert8 End
+The size of the bucket is 256
+seg_count = 131072
+verify_seg_count = 131072
+Pos_search8 Begin
+not_found = 0
+not_found = 0
+not_found = 0
+not_found = 0
+not_found = 0
+not_found = 0
+not_found = 0
+not_found = 0
+8 threads, Time = 4.061703 s, throughput = 15696227.447924 ops/s, fastest = 15971411.829634, slowest = 15397558.114513
+Pos_search8 End
+Neg_search8 Begin
+not_found = 7969181
+not_found = 7969177
+not_found = 7969177
+not_found = 7969177
+not_found = 7969177
+not_found = 7969177
+not_found = 7969177
+not_found = 7969177
+8 threads, Time = 3.429631 s, throughput = 18589002.723617 ops/s, fastest = 18744654.752272, slowest = 18400322.789287
+Neg_search8 End
+Delete8 Begin
+not_found = 0
+not_found = 0
+not_found = 0
+not_found = 0
+not_found = 0
+not_found = 0
+not_found = 0
+not_found = 0
+8 threads, Time = 6.751613 s, throughput = 9442695.181286 ops/s, fastest = 9792992.617939, slowest = 9109696.726958
+Delete8 End
+The size of the bucket is 256
+seg_count = 131072
+verify_seg_count = 131072
+Distribution = uniform
+Initialize Dash-EH
+creating a new pool
+pool opened at: 0x5f0000000000
+Generate workload
+Finish Generate workload
+load num = 0
+Start load warm-up workload
+Comprehensive Benchmark
+insertion start
+Insert16 Begin
+16 threads, Time = 5.290181 s, throughput = 12051274.144762 ops/s, fastest = 13036786.713865, slowest = 11199251.666623
+Insert16 End
+The size of the bucket is 256
+seg_count = 131072
+verify_seg_count = 131072
+Pos_search16 Begin
+not_found = 0
+not_found = 0
+not_found = 0
+not_found = 0
+not_found = 0
+not_found = 0
+not_found = 0
+not_found = 0
+not_found = 0
+not_found = 0
+not_found = 0
+not_found = 0
+not_found = 0
+not_found = 0
+not_found = 0
+not_found = 0
+16 threads, Time = 3.180437 s, throughput = 20045487.846513 ops/s, fastest = 20288769.280855, slowest = 19797858.405859
+Pos_search16 End
+Neg_search16 Begin
+not_found = 3984588
+not_found = 3984600
+not_found = 3984588
+not_found = 3984588
+not_found = 3984588
+not_found = 3984588
+not_found = 3984588
+not_found = 3984588
+not_found = 3984588
+not_found = 3984588
+not_found = 3984588
+not_found = 3984588
+not_found = 3984588
+not_found = 3984588
+not_found = 3984588
+not_found = 3984588
+16 threads, Time = 2.301782 s, throughput = 27697422.542814 ops/s, fastest = 27860275.214163, slowest = 27513389.131090
+Neg_search16 End
+Delete16 Begin
+not_found = 0
+not_found = 0
+not_found = 0
+not_found = 0
+not_found = 0
+not_found = 0
+not_found = 0
+not_found = 0
+not_found = 0
+not_found = 0
+not_found = 0
+not_found = 0
+not_found = 0
+not_found = 0
+not_found = 0
+not_found = 0
+16 threads, Time = 4.921424 s, throughput = 12954263.324787 ops/s, fastest = 14279808.761621, slowest = 11863789.785295
+Delete16 End
+The size of the bucket is 256
+seg_count = 131072
+verify_seg_count = 131072

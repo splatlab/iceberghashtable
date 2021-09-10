@@ -12,6 +12,16 @@
 
 #include "iceberg_table.h"
 
+// Dash
+#include "Hash.h"
+#include "allocator.h"
+#include "ex_finger.h"
+
+// pool path and name
+static const char *pool_name = "/mnt/pmem1/pmem_hash.data";
+// pool size
+static const size_t pool_size = 1024ul * 1024ul * 1024ul * 10ul;
+
 using namespace std;
 
 // index types
@@ -55,6 +65,13 @@ typedef struct thread_data {
     iceberg_table *ht;
 } thread_data_t;
 
+#define EPOCH_SIZE 1024
+
+typedef struct dash_thread_data {
+    uint64_t id;
+    Hash<uint64_t> *ht;
+} dash_thread_data;
+
 /////////////////////////////////////////////////////////////////////////////////
 
 static uint64_t LOAD_SIZE = 64000000;
@@ -71,37 +88,37 @@ void ycsb_load_run_randint(int index_type, int wl, int kt, int ap, int num_threa
 
     if (ap == UNIFORM) {
         if (kt == RANDINT_KEY && wl == WORKLOAD_A) {
-            init_file = "../RECIPE/index-microbench/workloads/loada_unif_int.dat";
-            txn_file = "../RECIPE/index-microbench/workloads/txnsa_unif_int.dat";
+            init_file = "/mnt/nvme3/RECIPE/index-microbench/workloads/loada_unif_int.dat";
+            txn_file = "/mnt/nvme3/RECIPE/index-microbench/workloads/txnsa_unif_int.dat";
         } else if (kt == RANDINT_KEY && wl == WORKLOAD_B) {
-            init_file = "../RECIPE/index-microbench/workloads/loadb_unif_int.dat";
-            txn_file = "../RECIPE/index-microbench/workloads/txnsb_unif_int.dat";
+            init_file = "/mnt/nvme3/RECIPE/index-microbench/workloads/loadb_unif_int.dat";
+            txn_file = "/mnt/nvme3/RECIPE/index-microbench/workloads/txnsb_unif_int.dat";
         } else if (kt == RANDINT_KEY && wl == WORKLOAD_C) {
-            init_file = "../RECIPE/index-microbench/workloads/loadc_unif_int.dat";
-            txn_file = "../RECIPE/index-microbench/workloads/txnsc_unif_int.dat";
+            init_file = "/mnt/nvme3/RECIPE/index-microbench/workloads/loadc_unif_int.dat";
+            txn_file = "/mnt/nvme3/RECIPE/index-microbench/workloads/txnsc_unif_int.dat";
         } else if (kt == RANDINT_KEY && wl == WORKLOAD_D) {
-            init_file = "../RECIPE/index-microbench/workloads/loadd_unif_int.dat";
-            txn_file = "../RECIPE/index-microbench/workloads/txnsd_unif_int.dat";
+            init_file = "/mnt/nvme3/RECIPE/index-microbench/workloads/loadd_unif_int.dat";
+            txn_file = "/mnt/nvme3/RECIPE/index-microbench/workloads/txnsd_unif_int.dat";
         } else if (kt == RANDINT_KEY && wl == WORKLOAD_E) {
-            init_file = "../RECIPE/index-microbench/workloads/loade_unif_int.dat";
-            txn_file = "../RECIPE/index-microbench/workloads/txnse_unif_int.dat";
+            init_file = "/mnt/nvme3/RECIPE/index-microbench/workloads/loade_unif_int.dat";
+            txn_file = "/mnt/nvme3/RECIPE/index-microbench/workloads/txnse_unif_int.dat";
         }
     } else {
         if (kt == RANDINT_KEY && wl == WORKLOAD_A) {
-            init_file = "../RECIPE/index-microbench/workloads/loada_unif_int.dat";
-            txn_file = "../RECIPE/index-microbench/workloads/txnsa_unif_int.dat";
+            init_file = "/mnt/nvme3/RECIPE/index-microbench/workloads/loada_unif_int.dat";
+            txn_file = "/mnt/nvme3/RECIPE/index-microbench/workloads/txnsa_unif_int.dat";
         } else if (kt == RANDINT_KEY && wl == WORKLOAD_B) {
-            init_file = "../RECIPE/index-microbench/workloads/loadb_unif_int.dat";
-            txn_file = "../RECIPE/index-microbench/workloads/txnsb_unif_int.dat";
+            init_file = "/mnt/nvme3/RECIPE/index-microbench/workloads/loadb_unif_int.dat";
+            txn_file = "/mnt/nvme3/RECIPE/index-microbench/workloads/txnsb_unif_int.dat";
         } else if (kt == RANDINT_KEY && wl == WORKLOAD_C) {
-            init_file = "../RECIPE/index-microbench/workloads/loadc_unif_int.dat";
-            txn_file = "../RECIPE/index-microbench/workloads/txnsc_unif_int.dat";
+            init_file = "/mnt/nvme3/RECIPE/index-microbench/workloads/loadc_unif_int.dat";
+            txn_file = "/mnt/nvme3/RECIPE/index-microbench/workloads/txnsc_unif_int.dat";
         } else if (kt == RANDINT_KEY && wl == WORKLOAD_D) {
-            init_file = "../RECIPE/index-microbench/workloads/loadd_unif_int.dat";
-            txn_file = "../RECIPE/index-microbench/workloads/txnsd_unif_int.dat";
+            init_file = "/mnt/nvme3/RECIPE/index-microbench/workloads/loadd_unif_int.dat";
+            txn_file = "/mnt/nvme3/RECIPE/index-microbench/workloads/txnsd_unif_int.dat";
         } else if (kt == RANDINT_KEY && wl == WORKLOAD_E) {
-            init_file = "../RECIPE/index-microbench/workloads/loade_unif_int.dat";
-            txn_file = "../RECIPE/index-microbench/workloads/txnse_unif_int.dat";
+            init_file = "/mnt/nvme3/RECIPE/index-microbench/workloads/loade_unif_int.dat";
+            txn_file = "/mnt/nvme3/RECIPE/index-microbench/workloads/txnse_unif_int.dat";
         }
     }
 
@@ -183,11 +200,11 @@ void ycsb_load_run_randint(int index_type, int wl, int kt, int ap, int num_threa
                 uint64_t end_key = start_key + LOAD_SIZE / num_thread;
 
                 for (uint64_t i = start_key; i < end_key; i++) {
-                  if(!iceberg_insert(tds[thread_id].ht, init_keys[i],
-                        init_keys[i], thread_id)) {
-                    printf("Failed insert\n");
-                    exit(0);
-                  }
+                    if(!iceberg_insert(tds[thread_id].ht, init_keys[i],
+                                init_keys[i], thread_id)) {
+                        printf("Failed insert\n");
+                        exit(0);
+                    }
                 }
             };
 
@@ -219,11 +236,11 @@ void ycsb_load_run_randint(int index_type, int wl, int kt, int ap, int num_threa
 
                 for (uint64_t i = start_key; i < end_key; i++) {
                     if (ops[i] == OP_INSERT) {
-                      if(!iceberg_insert(tds[thread_id].ht, keys[i],
-                            keys[i], thread_id)) {
-                        printf("Failed insert\n");
-                        exit(0);
-                      }
+                        if(!iceberg_insert(tds[thread_id].ht, keys[i],
+                                    keys[i], thread_id)) {
+                            printf("Failed insert\n");
+                            exit(0);
+                        }
                     } else if (ops[i] == OP_READ) {
                         uintptr_t *val;
                         auto ret = iceberg_get_value(tds[thread_id].ht, keys[i], &val, thread_id);
@@ -253,6 +270,133 @@ void ycsb_load_run_randint(int index_type, int wl, int kt, int ap, int num_threa
             printf("Throughput: run, %f ,ops/us\n", (RUN_SIZE * 1.0) / duration.count());
         }
         // TODO: Add a iceberg destroy function
+    } else if (index_type == TYPE_DASH) {
+        // Step 1: create (if not exist) and open the pool
+        bool file_exist = false;
+        if (FileExists(pool_name)) file_exist = true;
+        Allocator::Initialize(pool_name, pool_size);
+
+        // Step 2: Allocate the initial space for the hash table on PM and get the
+        // root; we use Dash-EH in this case.
+        Hash<uint64_t> *hash_table = reinterpret_cast<Hash<uint64_t> *>(
+                Allocator::GetRoot(sizeof(extendible::Finger_EH<uint64_t>)));
+
+        // Step 3: Initialize the hash table
+        if (!file_exist) {
+            // During initialization phase, allocate 64 segments for Dash-EH
+            size_t segment_number = 1 << 14;
+            new (hash_table) extendible::Finger_EH<uint64_t>(
+                    segment_number, Allocator::Get()->pm_pool_);
+        }else{
+            new (hash_table) extendible::Finger_EH<uint64_t>();
+        }
+
+        std::atomic<int> next_thread_id;
+
+        dash_thread_data *dtd = (dash_thread_data *)malloc(num_thread * sizeof(dash_thread_data));
+
+        {
+            // Load
+            auto starttime = std::chrono::system_clock::now();
+            next_thread_id.store(0);
+            auto func = [&]() {
+                int thread_id = next_thread_id.fetch_add(1);
+                dtd[thread_id].id = thread_id;
+                dtd[thread_id].ht = hash_table;
+
+                uint64_t start_key = LOAD_SIZE / num_thread * (uint64_t)thread_id;
+                uint64_t end_key = start_key + LOAD_SIZE / num_thread;
+
+                uint64_t num_epochs = ((end_key - start_key - 1) / EPOCH_SIZE) + 1;
+                for (uint64_t epoch = 0; epoch < num_epochs; epoch++) {
+                    for (uint64_t i = 0; i < EPOCH_SIZE; i++) {
+                        uint64_t curr_key = start_key + epoch * EPOCH_SIZE + i;
+                        if (curr_key >= end_key) {
+                            break;
+                        }
+                        auto epoch_guard = Allocator::AquireEpochGuard();
+                        auto ret = dtd[thread_id].ht->Insert(init_keys[curr_key], DEFAULT, true);
+                        if (ret == -1) {
+                            printf("Duplicate insert\n");
+                            exit(0);
+                        }
+                    }
+                }
+            };
+
+            std::vector<std::thread> thread_group;
+
+            for (int i = 0; i < num_thread; i++)
+                thread_group.push_back(std::thread{func});
+
+            for (int i = 0; i < num_thread; i++)
+                thread_group[i].join();
+
+            auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
+                    std::chrono::system_clock::now() - starttime);
+            printf("Throughput: load, %f ,ops/us\n", (LOAD_SIZE * 1.0) / duration.count());
+        }
+
+        {
+            // Run
+            auto starttime = std::chrono::system_clock::now();
+            next_thread_id.store(0);
+            auto func = [&]() {
+                int thread_id = next_thread_id.fetch_add(1);
+                dtd[thread_id].id = thread_id;
+                dtd[thread_id].ht = hash_table;
+
+                uint64_t start_key = RUN_SIZE / num_thread * (uint64_t)thread_id;
+                uint64_t end_key = start_key + RUN_SIZE / num_thread;
+
+                uint64_t num_epochs = ((end_key - start_key - 1) / EPOCH_SIZE) + 1;
+                for (uint64_t epoch = 0; epoch < num_epochs; epoch++) {
+                    auto epoch_guard = Allocator::AquireEpochGuard();
+                    for (uint64_t i = 0; i < EPOCH_SIZE; i++) {
+                        uint64_t curr = start_key + epoch * EPOCH_SIZE + i;
+                        if (curr >= end_key) {
+                            break;
+                        }
+                        switch (ops[curr]) {
+                            case OP_INSERT:
+                                {
+                                    auto ins_ret = dtd[thread_id].ht->Insert(keys[curr], DEFAULT, true);
+                                    if (ins_ret == -1) {
+                                        printf("Duplicate insert\n");
+                                        exit(0);
+                                    }
+                                    break;
+                                }
+                            case OP_READ:
+                                {
+                                    auto read_ret = dtd->ht->Get(keys[curr], true);
+                                    if (read_ret == NONE) {
+                                        std::cout << "QUERY RETURNED NONE\n";
+                                    }
+                                    break;
+                                }
+                            case OP_SCAN:
+                                std::cout << "NOT SUPPORTED CMD!\n";
+                                exit(0);
+                            case OP_UPDATE:
+                                std::cout << "NOT SUPPORTED CMD!\n";
+                                exit(0);
+                        }
+                    }
+                }
+            };
+
+            std::vector<std::thread> thread_group;
+
+            for (int i = 0; i < num_thread; i++)
+                thread_group.push_back(std::thread{func});
+
+            for (int i = 0; i < num_thread; i++)
+                thread_group[i].join();
+            auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
+                    std::chrono::system_clock::now() - starttime);
+            printf("Throughput: run, %f ,ops/us\n", (RUN_SIZE * 1.0) / duration.count());
+        }
     }
 }
 
@@ -337,25 +481,25 @@ int main(int argc, char **argv) {
         ycsb_load_run_randint(index_type, wl, kt, ap, num_thread, init_keys, keys, ranges, ops);
     }
     /*
-    else {
-        std::vector<Key *> init_keys;
-        std::vector<Key *> keys;
-        std::vector<int> ranges;
-        std::vector<int> ops;
+       else {
+       std::vector<Key *> init_keys;
+       std::vector<Key *> keys;
+       std::vector<int> ranges;
+       std::vector<int> ops;
 
-        init_keys.reserve(LOAD_SIZE);
-        keys.reserve(RUN_SIZE);
-        ranges.reserve(RUN_SIZE);
-        ops.reserve(RUN_SIZE);
+       init_keys.reserve(LOAD_SIZE);
+       keys.reserve(RUN_SIZE);
+       ranges.reserve(RUN_SIZE);
+       ops.reserve(RUN_SIZE);
 
-        memset(&init_keys[0], 0x00, LOAD_SIZE * sizeof(Key *));
-        memset(&keys[0], 0x00, RUN_SIZE * sizeof(Key *));
-        memset(&ranges[0], 0x00, RUN_SIZE * sizeof(int));
-        memset(&ops[0], 0x00, RUN_SIZE * sizeof(int));
+       memset(&init_keys[0], 0x00, LOAD_SIZE * sizeof(Key *));
+       memset(&keys[0], 0x00, RUN_SIZE * sizeof(Key *));
+       memset(&ranges[0], 0x00, RUN_SIZE * sizeof(int));
+       memset(&ops[0], 0x00, RUN_SIZE * sizeof(int));
 
-        ycsb_load_run_string(index_type, wl, kt, ap, num_thread, init_keys, keys, ranges, ops);
-    }
-    */
+       ycsb_load_run_string(index_type, wl, kt, ap, num_thread, init_keys, keys, ranges, ops);
+       }
+       */
 
     return 0;
 }

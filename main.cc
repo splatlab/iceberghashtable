@@ -105,13 +105,14 @@ int main (int argc, char** argv) {
   }
 
   uint64_t tbits = atoi(argv[1]);
+  uint64_t initbits = tbits;
+  //uint64_t initbits = 16;
   uint64_t threads = atoi(argv[2]);
-  //uint64_t N = (1ULL << tbits) * 1.07;
-  uint64_t N = (1ULL << tbits) * 1.07 * 1.90;
+  uint64_t N = (1ULL << tbits) * 0.95;
 
   high_resolution_clock::time_point t1 = high_resolution_clock::now();
 
-  if (iceberg_init(&table, tbits)) {
+  if (iceberg_init(&table, initbits)) {
     fprintf(stderr, "Can't allocate iceberg table.\n");
     exit(EXIT_FAILURE);
   }
@@ -214,18 +215,18 @@ int main (int argc, char** argv) {
     printf("Average list size: %f\n", sum_sizes / (double)table.metadata.nblocks);
     printf("Max list size: %ld\n", max_size);
 
-    printf("RECOVERY\n");
+    //printf("RECOVERY\n");
   }
 
-  uint64_t new_tbits = iceberg_dismount(&table);
+  //uint64_t new_tbits = iceberg_dismount(&table);
 
-  t1 = high_resolution_clock::now();
-  iceberg_mount(&table, new_tbits);
-  t2 = high_resolution_clock::now();
+  //t1 = high_resolution_clock::now();
+  //iceberg_mount(&table, new_tbits);
+  //t2 = high_resolution_clock::now();
 
-  double recovery_throughput = N / elapsed(t1, t2);
+  //double recovery_throughput = N / elapsed(t1, t2);
   if (!is_benchmark) {
-    printf("Recovery: %f /sec\n", recovery_throughput);
+    //printf("Recovery: %f /sec\n", recovery_throughput);
 
     printf("\nQUERIES\n");
   }

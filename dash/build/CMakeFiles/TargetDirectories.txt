@@ -1,0 +1,5 @@
+/home/aconway/dash/build/CMakeFiles/rebuild_cache.dir
+/home/aconway/dash/build/CMakeFiles/edit_cache.dir
+/home/aconway/dash/build/CMakeFiles/test_pmem.dir
+/home/aconway/dash/build/CMakeFiles/example.dir
+/home/aconway/dash/build/CMakeFiles/PMDK.dir

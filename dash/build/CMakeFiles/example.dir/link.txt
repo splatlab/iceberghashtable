@@ -1,0 +1,1 @@
+/usr/bin/c++   -Wno-long-long -fPIC -march=native -O3 -DNDEBUG -Ofast -O3 -DNDEBUG   CMakeFiles/example.dir/src/example.cpp.o  -o example   -L/home/aconway/dash/build/pmdk/src/PMDK/src/nondebug  -Wl,-rpath,/home/aconway/dash/build/pmdk/src/PMDK/src/nondebug -lpthread -lgflags -lpmemobj -lpmem 

@@ -16,15 +16,15 @@ ifdef BGR
 	RESIZE_POLICY = -DENABLE_BGR
 endif
 
-OPT += $(RESIZE_POLICY)
+OPT += $(RESIZE_POLICY) -DPMEM
 
 CC = clang
-CPP = clang++
+CPP = clang++ -std=c++17 
 CFLAGS = -g $(OPT) -Wall -march=native -pthread $(HUGE) -Wfatal-errors
-INCLUDE = -I ./include
+INCLUDE = -I ./include -I ./dash/src -I ./dash/build/_deps/epoch_reclaimer-src -I ./dash/build/pmdk/src/PMDK/src/include
 SOURCES = src/iceberg_table.c src/hashutil.c src/partitioned_counter.c src/lock.c
 OBJECTS = $(subst src/,obj/,$(subst .c,.o,$(SOURCES)))
-LIBS = -lssl -lcrypto -lpmem -ltbb
+LIBS = -L ./dash/build/pmdk/src/PMDK/src/nondebug -Wl,-rpath=/dash/build/pmdk/src/PMDK/src/nondebug -lpmem -lpmemobj -lssl -lcrypto -ltbb
 
 all: main ycsb
 

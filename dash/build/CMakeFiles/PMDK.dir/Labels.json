@@ -1,0 +1,43 @@
+{
+	"sources" : 
+	[
+		{
+			"file" : "/home/aconway/dash/build/CMakeFiles/PMDK"
+		},
+		{
+			"file" : "/home/aconway/dash/build/CMakeFiles/PMDK.rule"
+		},
+		{
+			"file" : "/home/aconway/dash/build/CMakeFiles/PMDK-complete.rule"
+		},
+		{
+			"file" : "/home/aconway/dash/build/pmdk/src/PMDK-stamp/PMDK-install.rule"
+		},
+		{
+			"file" : "/home/aconway/dash/build/pmdk/src/PMDK-stamp/PMDK-mkdir.rule"
+		},
+		{
+			"file" : "/home/aconway/dash/build/pmdk/src/PMDK-stamp/PMDK-download.rule"
+		},
+		{
+			"file" : "/home/aconway/dash/build/pmdk/src/PMDK-stamp/PMDK-update.rule"
+		},
+		{
+			"file" : "/home/aconway/dash/build/pmdk/src/PMDK-stamp/PMDK-patch.rule"
+		},
+		{
+			"file" : "/home/aconway/dash/build/pmdk/src/PMDK-stamp/PMDK-configure.rule"
+		},
+		{
+			"file" : "/home/aconway/dash/build/pmdk/src/PMDK-stamp/PMDK-build.rule"
+		}
+	],
+	"target" : 
+	{
+		"labels" : 
+		[
+			"PMDK"
+		],
+		"name" : "PMDK"
+	}
+}
