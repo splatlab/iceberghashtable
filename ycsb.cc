@@ -154,12 +154,12 @@ void ycsb_load_run_randint(int index_type, int wl, int kt, int ap, int num_threa
         count++;
     }
 
-    fprintf(stderr, "Loaded %d keys\n", count);
+    //fprintf(stderr, "Loaded %d keys\n", count);
 
     std::ifstream infile_txn(txn_file);
 
     count = 0;
-    while ((count < RUN_SIZE) && infile_txn.good()) {
+    while (infile_txn.good()) {
         infile_txn >> op >> key;
         if (op.compare(insert) == 0) {
             ops.push_back(OP_INSERT);
@@ -184,6 +184,8 @@ void ycsb_load_run_randint(int index_type, int wl, int kt, int ap, int num_threa
         }
         count++;
     }
+    count--;
+    //printf("Count: %lu\n", count);
 
     std::atomic<int> range_complete, range_incomplete;
     range_complete.store(0);
@@ -197,6 +199,8 @@ void ycsb_load_run_randint(int index_type, int wl, int kt, int ap, int num_threa
 
         std::atomic<int> next_thread_id;
 
+        double load_throughput;
+        double run_throughput;
         {
             // Load
             auto starttime = std::chrono::high_resolution_clock::now();
@@ -227,10 +231,14 @@ void ycsb_load_run_randint(int index_type, int wl, int kt, int ap, int num_threa
                 thread_group[i].join();
 
             //iceberg_end(&hashtable);
+            //auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
+            //        std::chrono::high_resolution_clock::now() - starttime);
+            //printf("Throughput: load, %f ,ops/us\n", (LOAD_SIZE * 1.0) / duration.count());
+            //printf("Blocks resolved: %lu\n", hashtable.metadata.lv1_resize_ctr);
             auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
                     std::chrono::high_resolution_clock::now() - starttime);
-            printf("Throughput: load, %f ,ops/us\n", (LOAD_SIZE * 1.0) / duration.count());
-            printf("Blocks resolved: %lu\n", hashtable.metadata.lv1_resize_ctr);
+            load_throughput = (LOAD_SIZE * 1.0) / duration.count();
+            //printf("Throughput: load, %f ,ops/us\n", (LOAD_SIZE * 1.0) / duration.count());
         }
 
         {
@@ -242,8 +250,8 @@ void ycsb_load_run_randint(int index_type, int wl, int kt, int ap, int num_threa
                 tds[thread_id].id = thread_id;
                 tds[thread_id].ht = &hashtable;
 
-                uint64_t start_key = RUN_SIZE / num_thread * (uint64_t)thread_id;
-                uint64_t end_key = start_key + RUN_SIZE / num_thread;
+                uint64_t start_key = count / num_thread * (uint64_t)thread_id;
+                uint64_t end_key = start_key + count / num_thread;
 
                 for (uint64_t i = start_key; i < end_key; i++) {
                     if (ops[i] == OP_INSERT) {
@@ -291,10 +299,12 @@ void ycsb_load_run_randint(int index_type, int wl, int kt, int ap, int num_threa
                 thread_group[i].join();
             auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
                     std::chrono::high_resolution_clock::now() - starttime);
-            printf("Time: %luus\n", duration.count());
-            printf("Throughput: run, %f ,ops/us\n", (RUN_SIZE * 1.0) / duration.count());
-            printf("Time: %fus\n", duration.count());
-            printf("Blocks resolved: %lu\n", hashtable.metadata.lv1_resize_ctr);
+            run_throughput = (count * 1.0) / duration.count();
+            printf("%lu %f %f\n", num_thread, load_throughput * 1000000, run_throughput * 1000000);
+            //printf("Time: %luus\n", duration.count());
+            //printf("Throughput: run, %f ,ops/us\n", (count * 1.0) / duration.count());
+            //printf("Time: %fus\n", duration.count());
+            //printf("Blocks resolved: %lu\n", hashtable.metadata.lv1_resize_ctr);
             //printf("Read Throughput: %f ops/us\n", global_read_count * 1000.0 / global_read_time);
             //printf("Insert Throughput: %f ops/us\n", global_insert_count * 1000.0 / global_insert_time);
         }
@@ -313,7 +323,7 @@ void ycsb_load_run_randint(int index_type, int wl, int kt, int ap, int num_threa
         // Step 3: Initialize the hash table
         if (!file_exist) {
             // During initialization phase, allocate 64 segments for Dash-EH
-            size_t segment_number = 1 << 14;
+            size_t segment_number = 1 << 15;
             new (hash_table) extendible::Finger_EH<uint64_t>(
                     segment_number, Allocator::Get()->pm_pool_);
         }else{
@@ -323,6 +333,9 @@ void ycsb_load_run_randint(int index_type, int wl, int kt, int ap, int num_threa
         std::atomic<int> next_thread_id;
 
         dash_thread_data *dtd = (dash_thread_data *)malloc(num_thread * sizeof(dash_thread_data));
+
+        double load_throughput;
+        double run_throughput;
 
         {
             // Load
@@ -338,12 +351,12 @@ void ycsb_load_run_randint(int index_type, int wl, int kt, int ap, int num_threa
 
                 uint64_t num_epochs = ((end_key - start_key - 1) / EPOCH_SIZE) + 1;
                 for (uint64_t epoch = 0; epoch < num_epochs; epoch++) {
+                    auto epoch_guard = Allocator::AquireEpochGuard();
                     for (uint64_t i = 0; i < EPOCH_SIZE; i++) {
                         uint64_t curr_key = start_key + epoch * EPOCH_SIZE + i;
                         if (curr_key >= end_key) {
                             break;
                         }
-                        auto epoch_guard = Allocator::AquireEpochGuard();
                         auto ret = dtd[thread_id].ht->Insert(init_keys[curr_key], DEFAULT, true);
                         if (ret == -1) {
                             printf("Duplicate insert\n");
@@ -363,7 +376,7 @@ void ycsb_load_run_randint(int index_type, int wl, int kt, int ap, int num_threa
 
             auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
                     std::chrono::high_resolution_clock::now() - starttime);
-            printf("Throughput: load, %f ,ops/us\n", (LOAD_SIZE * 1.0) / duration.count());
+            load_throughput = (LOAD_SIZE * 1.0) / duration.count();
         }
 
         {
@@ -375,8 +388,8 @@ void ycsb_load_run_randint(int index_type, int wl, int kt, int ap, int num_threa
                 dtd[thread_id].id = thread_id;
                 dtd[thread_id].ht = hash_table;
 
-                uint64_t start_key = RUN_SIZE / num_thread * (uint64_t)thread_id;
-                uint64_t end_key = start_key + RUN_SIZE / num_thread;
+                uint64_t start_key = count / num_thread * (uint64_t)thread_id;
+                uint64_t end_key = start_key + count / num_thread;
 
                 uint64_t num_epochs = ((end_key - start_key - 1) / EPOCH_SIZE) + 1;
                 for (uint64_t epoch = 0; epoch < num_epochs; epoch++) {
@@ -424,7 +437,8 @@ void ycsb_load_run_randint(int index_type, int wl, int kt, int ap, int num_threa
                 thread_group[i].join();
             auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
                     std::chrono::high_resolution_clock::now() - starttime);
-            printf("Throughput: run, %f ,ops/us\n", (RUN_SIZE * 1.0) / duration.count());
+            run_throughput = (count * 1.0) / duration.count();
+            printf("%lu %f %f\n", num_thread, load_throughput * 1000000, run_throughput * 1000000);
         }
     }
 }
@@ -440,7 +454,7 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    printf("%s, workload%s, %s, %s, threads %s\n", argv[1], argv[2], argv[3], argv[4], argv[5]);
+    //printf("%s, workload%s, %s, %s, threads %s\n", argv[1], argv[2], argv[3], argv[4], argv[5]);
 
     int index_type;
     if (strcmp(argv[1], "iceberg") == 0)
