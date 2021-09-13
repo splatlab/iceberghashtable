@@ -126,6 +126,7 @@ void ycsb_load_run_randint(int index_type, int wl, int kt, int ap, int num_threa
         init_keys.push_back(key);
         count++;
     }
+    count--;
 
     fprintf(stderr, "Loaded %d keys\n", count);
 
@@ -157,6 +158,7 @@ void ycsb_load_run_randint(int index_type, int wl, int kt, int ap, int num_threa
         }
         txn_count++;
     }
+    txn_count--;
     fprintf(stderr, "Loaded %d txn keys\n", txn_count);
 
     std::atomic<int> range_complete, range_incomplete;
