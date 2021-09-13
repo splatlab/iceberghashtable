@@ -44,7 +44,7 @@ void do_inserts(uint8_t id, uint64_t *keys, uint64_t *values, uint64_t start, ui
 void do_queries(uint8_t id, uint64_t *keys, uint64_t start, uint64_t n, bool positive) {
 
   uint64_t *val;
-  for(uint64_t i = start; i < start + n; ++i)
+  for(uint64_t i = start; i < start + n; ++i) {
     if (iceberg_get_value(&table, keys[i], &val, id) != positive) {
 
       if(positive)
@@ -53,6 +53,7 @@ void do_queries(uint8_t id, uint64_t *keys, uint64_t start, uint64_t n, bool pos
         printf("False positive query\n");
       exit(0);
     }
+  }
 }
 
 void do_removals(uint8_t id, uint64_t *keys, uint64_t start, uint64_t n) {
@@ -68,17 +69,9 @@ void do_removals(uint8_t id, uint64_t *keys, uint64_t start, uint64_t n) {
 
 void safe_rand_bytes(unsigned char *v, size_t n) {
 
-  while (n > 0) {
-    size_t round_size = n >= INT_MAX ? INT_MAX - 1 : n;
-    RAND_bytes(v, round_size);
-    v += round_size;
-    n -= round_size;
+  for (uint64_t i = 0; i < n; i++) {
+    v[i] = rand();
   }
-  /*
-     for (uint64_t i = 0; i < n; ++i) {
-     v[i] = rand();
-     }
-     */
 }
 
 void do_mixed(uint8_t id, std::vector<std::pair<uint64_t, uint64_t>>& v, uint64_t start, uint64_t n) {
@@ -105,7 +98,7 @@ int main (int argc, char** argv) {
   }
 
   uint64_t tbits = atoi(argv[1]);
-  uint64_t initbits = tbits;
+  uint64_t initbits = tbits - 2;
   //uint64_t initbits = 16;
   uint64_t threads = atoi(argv[2]);
   uint64_t N = (1ULL << tbits) * 0.95;
@@ -122,8 +115,8 @@ int main (int argc, char** argv) {
     printf("Creation time: %f\n", elapsed(t1, t2));
   }
 
-  srand(time(NULL));
-  //srand(0);
+  //srand(time(NULL));
+  srand(0);
 
   //Generating vectors of size N for data contained and not contained in the tablea
   //
@@ -232,7 +225,7 @@ int main (int argc, char** argv) {
   }
 
   std::mt19937 g(__builtin_ia32_rdtsc());
-  std::shuffle(&in_keys[0], &in_keys[N], g);
+  //std::shuffle(&in_keys[0], &in_keys[N], g);
 
   //	exit(0);
 
@@ -276,8 +269,8 @@ int main (int argc, char** argv) {
   uint64_t *removed = in_keys;
   uint64_t *non_removed = in_keys + num_removed;
 
-  shuffle(&removed[0], &removed[num_removed], g);
-  shuffle(&non_removed[0], &non_removed[N - num_removed], g);
+  //shuffle(&removed[0], &removed[num_removed], g);
+  //shuffle(&non_removed[0], &non_removed[N - num_removed], g);
 
   t1 = high_resolution_clock::now();
 

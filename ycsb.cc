@@ -24,6 +24,16 @@ static const size_t pool_size = 1024ul * 1024ul * 1024ul * 10ul;
 
 using namespace std;
 
+thread_local double read_time = 0.0;
+thread_local double insert_time = 0.0;
+thread_local uint64_t read_count = 0;
+thread_local uint64_t insert_count = 0;
+
+std::atomic<uint64_t> global_read_time = 0.0;
+std::atomic<uint64_t> global_insert_time = 0.0;
+std::atomic<uint64_t> global_read_count = 0;
+std::atomic<uint64_t> global_insert_count = 0;
+
 // index types
 enum {
     TYPE_ICEBERG,
@@ -189,7 +199,7 @@ void ycsb_load_run_randint(int index_type, int wl, int kt, int ap, int num_threa
 
         {
             // Load
-            auto starttime = std::chrono::system_clock::now();
+            auto starttime = std::chrono::high_resolution_clock::now();
             next_thread_id.store(0);
             auto func = [&]() {
                 int thread_id = next_thread_id.fetch_add(1);
@@ -216,15 +226,16 @@ void ycsb_load_run_randint(int index_type, int wl, int kt, int ap, int num_threa
             for (int i = 0; i < num_thread; i++)
                 thread_group[i].join();
 
-            iceberg_end(&hashtable);
+            //iceberg_end(&hashtable);
             auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
-                    std::chrono::system_clock::now() - starttime);
+                    std::chrono::high_resolution_clock::now() - starttime);
             printf("Throughput: load, %f ,ops/us\n", (LOAD_SIZE * 1.0) / duration.count());
+            printf("Blocks resolved: %lu\n", hashtable.metadata.lv1_resize_ctr);
         }
 
         {
             // Run
-            auto starttime = std::chrono::system_clock::now();
+            auto starttime = std::chrono::high_resolution_clock::now();
             next_thread_id.store(0);
             auto func = [&]() {
                 int thread_id = next_thread_id.fetch_add(1);
@@ -236,17 +247,26 @@ void ycsb_load_run_randint(int index_type, int wl, int kt, int ap, int num_threa
 
                 for (uint64_t i = start_key; i < end_key; i++) {
                     if (ops[i] == OP_INSERT) {
+                        //auto opstarttime = std::chrono::high_resolution_clock::now();
                         if(!iceberg_insert(tds[thread_id].ht, keys[i],
                                     keys[i], thread_id)) {
                             printf("Failed insert\n");
                             exit(0);
                         }
+                        //auto opendtime = std::chrono::high_resolution_clock::now();
+                        //insert_time += std::chrono::duration_cast<std::chrono::nanoseconds>(opendtime - opstarttime).count();
+                        insert_count++;
                     } else if (ops[i] == OP_READ) {
                         uintptr_t *val;
+                        //auto opstarttime = std::chrono::high_resolution_clock::now();
                         auto ret = iceberg_get_value(tds[thread_id].ht, keys[i], &val, thread_id);
+                        //auto opendtime = std::chrono::high_resolution_clock::now();
+                        //read_time += std::chrono::duration_cast<std::chrono::nanoseconds>(opendtime - opstarttime).count();
+                        read_count++;
+
                         if (*val != keys[i]) {
                             std::cout << "[ICEBERG] wrong key read: " << *val << " expected: " << keys[i] << " ret: " << ret << std::endl;
-                            exit(1);
+                            //exit(1);
                         }
                     } else if (ops[i] == OP_SCAN) {
                         std::cout << "NOT SUPPORTED CMD!\n";
@@ -256,6 +276,10 @@ void ycsb_load_run_randint(int index_type, int wl, int kt, int ap, int num_threa
                         exit(0);
                     }
                 }
+                //global_read_time.fetch_add((uint64_t)read_time, std::memory_order_seq_cst);
+                //global_insert_time.fetch_add((uint64_t)insert_time, std::memory_order_seq_cst);
+                //global_read_count.fetch_add(read_count, std::memory_order_seq_cst);
+                //global_insert_count.fetch_add(insert_count, std::memory_order_seq_cst);
             };
 
             std::vector<std::thread> thread_group;
@@ -266,8 +290,13 @@ void ycsb_load_run_randint(int index_type, int wl, int kt, int ap, int num_threa
             for (int i = 0; i < num_thread; i++)
                 thread_group[i].join();
             auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
-                    std::chrono::system_clock::now() - starttime);
+                    std::chrono::high_resolution_clock::now() - starttime);
+            printf("Time: %luus\n", duration.count());
             printf("Throughput: run, %f ,ops/us\n", (RUN_SIZE * 1.0) / duration.count());
+            printf("Time: %fus\n", duration.count());
+            printf("Blocks resolved: %lu\n", hashtable.metadata.lv1_resize_ctr);
+            //printf("Read Throughput: %f ops/us\n", global_read_count * 1000.0 / global_read_time);
+            //printf("Insert Throughput: %f ops/us\n", global_insert_count * 1000.0 / global_insert_time);
         }
         // TODO: Add a iceberg destroy function
     } else if (index_type == TYPE_DASH) {
@@ -297,7 +326,7 @@ void ycsb_load_run_randint(int index_type, int wl, int kt, int ap, int num_threa
 
         {
             // Load
-            auto starttime = std::chrono::system_clock::now();
+            auto starttime = std::chrono::high_resolution_clock::now();
             next_thread_id.store(0);
             auto func = [&]() {
                 int thread_id = next_thread_id.fetch_add(1);
@@ -333,13 +362,13 @@ void ycsb_load_run_randint(int index_type, int wl, int kt, int ap, int num_threa
                 thread_group[i].join();
 
             auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
-                    std::chrono::system_clock::now() - starttime);
+                    std::chrono::high_resolution_clock::now() - starttime);
             printf("Throughput: load, %f ,ops/us\n", (LOAD_SIZE * 1.0) / duration.count());
         }
 
         {
             // Run
-            auto starttime = std::chrono::system_clock::now();
+            auto starttime = std::chrono::high_resolution_clock::now();
             next_thread_id.store(0);
             auto func = [&]() {
                 int thread_id = next_thread_id.fetch_add(1);
@@ -371,7 +400,7 @@ void ycsb_load_run_randint(int index_type, int wl, int kt, int ap, int num_threa
                                 {
                                     auto read_ret = dtd->ht->Get(keys[curr], true);
                                     if (read_ret == NONE) {
-                                        std::cout << "QUERY RETURNED NONE\n";
+                                        printf("false negative query %lu\n", keys[curr]);
                                     }
                                     break;
                                 }
@@ -394,7 +423,7 @@ void ycsb_load_run_randint(int index_type, int wl, int kt, int ap, int num_threa
             for (int i = 0; i < num_thread; i++)
                 thread_group[i].join();
             auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
-                    std::chrono::system_clock::now() - starttime);
+                    std::chrono::high_resolution_clock::now() - starttime);
             printf("Throughput: run, %f ,ops/us\n", (RUN_SIZE * 1.0) / duration.count());
         }
     }
