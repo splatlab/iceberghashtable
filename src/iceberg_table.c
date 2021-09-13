@@ -182,48 +182,45 @@ int iceberg_init(iceberg_table *table, uint64_t log_slots) {
   char level1_filename[FILENAME_LEN];
   sprintf(level1_filename, "%s/level1", PMEM_PATH);
   if ((table->level1 = (iceberg_lv1_block *)pmem_map_file(level1_filename,
-          10ULL * 1024 * 1024 * 1024, PMEM_FILE_CREATE, 0666, &mapped_len,
+          10ULL * 1024 * 1024 * 1024, PMEM_FILE_CREATE | PMEM_FILE_SPARSE, 0666, &mapped_len,
           &is_pmem)) == NULL) {
     perror("pmem_map_file");
     exit(1);
   }
   assert(is_pmem);
   //assert(mapped_len == level1_size);
-  pmem_memset_persist(table->level1, 0, 10ULL * 1024 * 1024 * 1024);
 
   size_t level2_size = round_up(sizeof(iceberg_lv2_block) * total_blocks, 2 * 1024 * 1024);
   table->metadata.level2_size = level2_size;
   char level2_filename[FILENAME_LEN];
   sprintf(level2_filename, "%s/level2", PMEM_PATH);
   if ((table->level2 = (iceberg_lv2_block *)pmem_map_file(level2_filename,
-          10ULL * 1024 * 1024 * 1024, PMEM_FILE_CREATE, 0666, &mapped_len,
+          10ULL * 1024 * 1024 * 1024, PMEM_FILE_CREATE | PMEM_FILE_SPARSE, 0666, &mapped_len,
           &is_pmem)) == NULL) {
     perror("pmem_map_file");
   }
   assert(is_pmem);
   //assert(mapped_len == level2_size);
-  pmem_memset_persist(table->level2, 0, 10ULL * 1024 * 1024 * 1024);
 
   size_t level3_size = sizeof(iceberg_lv3_list) * total_blocks;
   table->metadata.level3_size = level3_size;
   char level3_filename[FILENAME_LEN];
   sprintf(level3_filename, "%s/level3", PMEM_PATH);
   if ((table->level3 = (iceberg_lv3_list *)pmem_map_file(level3_filename,
-          10ULL * 1024 * 1024 * 1024, PMEM_FILE_CREATE, 0666, &mapped_len,
+          10ULL * 1024 * 1024 * 1024, PMEM_FILE_CREATE | PMEM_FILE_SPARSE, 0666, &mapped_len,
           &is_pmem)) == NULL) {
     perror("pmem_map_file");
     exit(1);
   }
   assert(is_pmem);
   //assert(mapped_len == level3_size);
-  pmem_memset_persist(table->level3, 0, 10ULL * 1024 * 1024 * 1024);
 
   size_t level3_nodes_size = NUM_LEVEL3_NODES * sizeof(iceberg_lv3_node);
   char level3_nodes_filename[FILENAME_LEN];
   sprintf(level3_nodes_filename, "%s/level3_data", PMEM_PATH);
   table->level3_nodes =
     (iceberg_lv3_node *)pmem_map_file(level3_nodes_filename,
-        level3_nodes_size, PMEM_FILE_CREATE, 0666,
+        level3_nodes_size, PMEM_FILE_CREATE | PMEM_FILE_SPARSE, 0666,
         &mapped_len, &is_pmem);
   if (table->level3_nodes == NULL) {
     perror("pmem_map_file");
@@ -231,7 +228,6 @@ int iceberg_init(iceberg_table *table, uint64_t log_slots) {
   }
   assert(is_pmem);
   assert(mapped_len == level3_nodes_size);
-  pmem_memset_persist(table->level3_nodes, 0, level3_nodes_size);
 
   table->metadata.total_size_in_bytes = total_size_in_bytes;
   table->metadata.nslots = 1 << log_slots;
@@ -575,19 +571,19 @@ static bool iceberg_setup_resize(iceberg_table * table) {
 
   if (is_resize_active(table)) {
     // finish the current resize
-    printf("Running iceberg_end\n");
+    //printf("Running iceberg_end\n");
     iceberg_end(table);
     /*write_unlock(&table->metadata.rw_lock);*/
     /*return false;*/
   }
 
-  printf("Setting up resize\nCurrent stats: \n");
+  //printf("Setting up resize\nCurrent stats: \n");
 
-  printf("Load factor: %f\n", iceberg_load_factor(table));
-  printf("Number level 1 inserts: %ld\n", lv1_balls(table));
-  printf("Number level 2 inserts: %ld\n", lv2_balls(table));
-  printf("Number level 3 inserts: %ld\n", lv3_balls(table));
-  printf("Total inserts: %ld\n", tot_balls(table));
+  //printf("Load factor: %f\n", iceberg_load_factor(table));
+  //printf("Number level 1 inserts: %ld\n", lv1_balls(table));
+  //printf("Number level 2 inserts: %ld\n", lv2_balls(table));
+  //printf("Number level 3 inserts: %ld\n", lv3_balls(table));
+  //printf("Total inserts: %ld\n", tot_balls(table));
 
   // reset the block ctr
   table->metadata.lv1_resize_ctr = 0;
@@ -752,7 +748,7 @@ static bool iceberg_setup_resize(iceberg_table * table) {
   struct timespec end;
   clock_gettime(CLOCK_MONOTONIC_RAW, &end);
   uint64_t elapsed_ns = 1000000000ULL * (end.tv_sec - start.tv_sec) + end.tv_nsec - start.tv_nsec;
-  printf("Setup time: %luns\n", elapsed_ns);
+  //printf("Setup time: %luns\n", elapsed_ns);
 
   return true;
 }

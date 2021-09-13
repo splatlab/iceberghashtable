@@ -85,7 +85,7 @@ typedef struct dash_thread_data {
 /////////////////////////////////////////////////////////////////////////////////
 
 static uint64_t LOAD_SIZE = 64000000;
-static uint64_t RUN_SIZE = 64000000;
+static uint64_t RUN_SIZE = 1280000000ULL;
 
 void ycsb_load_run_randint(int index_type, int wl, int kt, int ap, int num_thread,
         std::vector<uint64_t> &init_keys,

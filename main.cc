@@ -98,7 +98,7 @@ int main (int argc, char** argv) {
   }
 
   uint64_t tbits = atoi(argv[1]);
-  uint64_t initbits = tbits - 2;
+  uint64_t initbits = tbits;
   //uint64_t initbits = 16;
   uint64_t threads = atoi(argv[2]);
   uint64_t N = (1ULL << tbits) * 0.95;
