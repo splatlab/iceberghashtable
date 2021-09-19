@@ -1,0 +1,13 @@
+# exclude .csv
+*.csv
+
+# exclude executables and objects
+main
+ycsb
+obj/*
+
+# exclude ctags
+tags
+
+# exclude data
+data/*

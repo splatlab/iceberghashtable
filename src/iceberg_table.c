@@ -220,6 +220,12 @@ iceberg_log_nblocks(iceberg_table *table)
    return table->metadata->log_nblocks;
 }
 
+static inline uint8_t
+iceberg_generation(iceberg_table *table, uint8_t log_nblocks)
+{
+   return log_nblocks - table->metadata->initial_log_nblocks;
+}
+
 static inline void
 iceberg_lv1_get_md_and_block(iceberg_table *table,
                              uint64_t       index,
@@ -228,6 +234,8 @@ iceberg_lv1_get_md_and_block(iceberg_table *table,
 {
    uint64_t slice =
       64 - __lzcnt64(index >> table->metadata->initial_log_nblocks);
+   //uint8_t log_nblocks = iceberg_log_nblocks(table);
+   //assert(slice <= iceberg_generation(table, log_nblocks));
    uint64_t mask_slice = slice == 0 ? 1 : slice;
    uint64_t subindex =
       index &
@@ -236,11 +244,11 @@ iceberg_lv1_get_md_and_block(iceberg_table *table,
    *md    = &table->metadata->lv1_md[slice][subindex].block_md[0];
 }
 
-iceberg_table *
-iceberg_init(uint64_t log_slots, uint64_t final_log_slots, bool use_hugepages)
+void
+iceberg_init(iceberg_table *table, uint64_t log_slots, uint64_t final_log_slots, bool use_hugepages)
 {
-
-   iceberg_table *table;
+   assert(table);
+   memset(table, 0, sizeof(*table));
 
    uint64_t log_total_blocks = log_slots - SLOT_BITS;
    uint64_t total_blocks     = 1 << log_total_blocks;
@@ -253,9 +261,6 @@ iceberg_init(uint64_t log_slots, uint64_t final_log_slots, bool use_hugepages)
       (sizeof(iceberg_lv1_block) + sizeof(iceberg_lv2_block) +
        sizeof(iceberg_lv1_block_md) + sizeof(iceberg_lv2_block_md)) *
       total_blocks;
-
-   table = (iceberg_table *)malloc(sizeof(iceberg_table));
-   assert(table);
 
    table->metadata = (iceberg_metadata *)malloc(sizeof(iceberg_metadata));
    table->metadata->total_size_in_bytes = total_size_in_bytes;
@@ -275,8 +280,8 @@ iceberg_init(uint64_t log_slots, uint64_t final_log_slots, bool use_hugepages)
    size_t level1_size = sizeof(iceberg_lv1_block) * total_blocks;
    table->level1[0] =
       mmap(NULL, level1_size, PROT_READ | PROT_WRITE, mmap_flags, 0, 0);
-   if (!table->level1[0]) {
-      perror("level1 malloc failed");
+   if (table->level1[0] == MAP_FAILED) {
+      perror("level1 mmap failed");
       exit(1);
    }
    memset(table->level1[0], 0, level1_size);
@@ -284,8 +289,8 @@ iceberg_init(uint64_t log_slots, uint64_t final_log_slots, bool use_hugepages)
    size_t level2_size = sizeof(iceberg_lv2_block) * lv2_total_blocks;
    table->level2 =
       mmap(NULL, level2_size, PROT_READ | PROT_WRITE, mmap_flags, 0, 0);
-   if (!table->level2) {
-      perror("level2 malloc failed");
+   if (table->level2 == MAP_FAILED) {
+      perror("level2 mmap failed");
       exit(1);
    }
    table->level3 = malloc(sizeof(iceberg_lv3_list) * lv3_total_blocks);
@@ -308,26 +313,32 @@ iceberg_init(uint64_t log_slots, uint64_t final_log_slots, bool use_hugepages)
    size_t lv1_md_size = sizeof(iceberg_lv1_block_md) * total_blocks + 64;
    table->metadata->lv1_md[0] =
       mmap(NULL, lv1_md_size, PROT_READ | PROT_WRITE, mmap_flags, 0, 0);
-   memset(table->metadata->lv1_md[0], 0, lv1_md_size);
+   if (table->metadata->lv1_md[0] == MAP_FAILED) {
+      perror("lv1_md mmap failed");
+      exit(1);
+   }
 
    size_t lv2_md_size = sizeof(iceberg_lv2_block_md) * lv2_total_blocks + 32;
    table->metadata->lv2_md =
       mmap(NULL, lv2_md_size, PROT_READ | PROT_WRITE, mmap_flags, 0, 0);
-   table->metadata->lv3_sizes = malloc(sizeof(uint64_t) * lv3_total_blocks);
-   table->metadata->lv3_locks = malloc(sizeof(uint8_t) * lv3_total_blocks);
-
-   for (uint64_t i = 0; i < lv2_total_blocks; ++i) {
-      for (uint64_t j = 0; j < C_LV2 + MAX_LG_LG_N / D_CHOICES; ++j) {
-         table->metadata->lv2_md[i].block_md[j] = 0;
-         table->level2[i].slots[j].key = table->level2[i].slots[j].val = 0;
-      }
+   if (table->metadata->lv2_md == MAP_FAILED) {
+      perror("lv2_md mmap failed");
+      exit(1);
    }
 
-   for (uint64_t i = 0; i < lv3_total_blocks; ++i) {
-      table->metadata->lv3_sizes[i] = table->metadata->lv3_locks[i] = 0;
+   size_t lv3_sizes_size = sizeof(uint64_t) * lv3_total_blocks;
+   table->metadata->lv3_sizes = malloc(lv3_sizes_size);
+   if (table->metadata->lv3_sizes == NULL) {
+      fprintf(stderr, "lv3_sizes malloc failed");
    }
+   memset(table->metadata->lv3_sizes, 0, lv3_sizes_size);
 
-   return table;
+   size_t lv3_locks_size = sizeof(uint8_t) * lv3_total_blocks;
+   table->metadata->lv3_locks = malloc(lv3_locks_size);
+   if (table->metadata->lv3_locks == NULL) {
+      fprintf(stderr, "lv3_locks malloc failed");
+   }
+   memset(table->metadata->lv3_locks, 0, lv3_locks_size);
 }
 
 void
@@ -462,12 +473,6 @@ iceberg_try_reserve_slot(uint8_t *md_slot)
                                       false,
                                       __ATOMIC_SEQ_CST,
                                       __ATOMIC_SEQ_CST);
-}
-
-static inline uint8_t
-iceberg_generation(iceberg_table *table, uint8_t log_nblocks)
-{
-   return log_nblocks - table->metadata->initial_log_nblocks;
 }
 
 static inline uint8_t
@@ -612,17 +617,22 @@ iceberg_maybe_resize(iceberg_table *table)
          size_t new_size = sizeof(iceberg_lv1_block) * new_blocks;
          printf("level1[%u] size: %lu\n", generation, new_size);
          int mmap_flags = table->metadata->mmap_flags;
-         table->level1[generation] = (iceberg_lv1_block *)mmap(
+         table->level1[generation] = mmap(
             NULL, new_size, PROT_READ | PROT_WRITE, mmap_flags, 0, 0);
-         if (!table->level1[generation]) {
-            perror("level1 malloc failed");
+         if (table->level1[generation] == MAP_FAILED) {
+            perror("level1 mmap failed");
             exit(1);
          }
          // memset(table->level1[generation], 0, new_size);
 
          size_t new_md_size = sizeof(iceberg_lv1_block_md) * new_blocks + 64;
-         table->metadata->lv1_md[generation] = (iceberg_lv1_block_md *)mmap(
+         table->metadata->lv1_md[generation] = mmap(
             NULL, new_md_size, PROT_READ | PROT_WRITE, mmap_flags, 0, 0);
+         if (table->metadata->lv1_md[generation] == MAP_FAILED) {
+            perror("lv1_md mmap failed");
+            exit(1);
+         }
+
          // memset(table->metadata->lv1_md[generation], 0, new_md_size);
 
          __atomic_store_n(
@@ -646,6 +656,7 @@ iceberg_insert(iceberg_table *table,
 restart:
    log_nblocks = iceberg_log_nblocks(table);
    split_hash(lv1_hash(key), &fprint, &index, log_nblocks);
+   //assert(index < 1 << log_nblocks);
 
    kv_pair *block;
    uint8_t *md;
@@ -969,18 +980,7 @@ restart:
       uint8_t *from_md;
       iceberg_lv1_get_md_and_block(table, split_from, &from_block, &from_md);
 
-      if (iceberg_index_generation(from_md) ==
-          iceberg_generation(table, log_nblocks)) {
-         // split in progress
-         while (iceberg_index_generation(md) !=
-                iceberg_generation(table, log_nblocks)) {
-            // wait for split to finish
-            __builtin_ia32_pause();
-         }
-      } else if (iceberg_lv1_get_value(
-                    table, from_block, from_md, fprint, key, value) &&
-                 iceberg_index_generation(from_md) !=
-                    iceberg_generation(table, log_nblocks)) {
+      if (iceberg_lv1_get_value(table, from_block, from_md, fprint, key, value)) {
          return true;
       }
    }

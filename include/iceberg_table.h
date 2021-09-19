@@ -85,8 +85,8 @@ lv3_balls(iceberg_table *table);
 uint64_t
 tot_balls(iceberg_table *table);
 
-iceberg_table *
-iceberg_init(uint64_t log_slots, uint64_t final_log_slots, bool use_hugepages);
+void
+iceberg_init(iceberg_table *table, uint64_t log_slots, uint64_t final_log_slots, bool use_hugepages);
 
 double
 iceberg_load_factor(iceberg_table *table);

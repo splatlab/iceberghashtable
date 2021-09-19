@@ -18,6 +18,37 @@ std::vector<std::pair<uint64_t, uint64_t>> in_table, not_in_table;
 
 iceberg_table *table;
 
+#define THOUSAND (1000UL)
+#define MILLION (THOUSAND * THOUSAND)
+#define BILLION (THOUSAND * MILLION)
+
+#define USEC_TO_SEC(x) ((x) / MILLION)
+#define USEC_TO_NSEC(x) ((x) * THOUSAND)
+#define NSEC_TO_SEC(x) ((x) / BILLION)
+#define NSEC_TO_MSEC(x) ((x) / MILLION)
+#define NSEC_TO_USEC(x) ((x) / THOUSAND)
+#define SEC_TO_MSEC(x) ((x) * THOUSAND)
+#define SEC_TO_USEC(x) ((x) * MILLION)
+#define SEC_TO_NSEC(x) ((x) * BILLION)
+
+typedef uint64_t timestamp;
+
+static inline timestamp
+get_timestamp(void)
+{
+   struct timespec ts;
+   clock_gettime(CLOCK_MONOTONIC, &ts);
+   return SEC_TO_NSEC(ts.tv_sec) + ts.tv_nsec;
+}
+
+static inline timestamp
+timestamp_elapsed(timestamp tv)
+{
+   struct timespec ts;
+   clock_gettime(CLOCK_MONOTONIC, &ts);
+   return SEC_TO_NSEC(ts.tv_sec) + ts.tv_nsec - tv;
+}
+
 double
 elapsed(high_resolution_clock::time_point t1,
         high_resolution_clock::time_point t2)
@@ -112,7 +143,6 @@ main(int argc, char **argv)
 
    uint64_t tbits     = atoi(argv[1]);
    uint64_t inittbits = tbits - atoi(argv[2]);
-   // uint64_t inittbits = tbits;
    uint64_t threads = atoi(argv[3]);
    uint64_t N       = (1ULL << tbits) * 1.05;
 
@@ -131,27 +161,25 @@ main(int argc, char **argv)
       }
    }
 
-   high_resolution_clock::time_point t1 = high_resolution_clock::now();
+   timestamp creation_start = get_timestamp();
 
-   if ((table = iceberg_init(inittbits, tbits, use_hugepages)) == NULL) {
-      fprintf(stderr, "Can't allocate iceberg table.\n");
-      exit(EXIT_FAILURE);
-   }
+   table = (iceberg_table *)malloc(sizeof(iceberg_table));
+   assert(table);
 
-   high_resolution_clock::time_point t2 = high_resolution_clock::now();
+   iceberg_init(table, inittbits, tbits, use_hugepages);
+
+   uint64_t creation_time = timestamp_elapsed(creation_start);
    if (!is_benchmark) {
-      printf("Creation time: %f\n", elapsed(t1, t2));
+      printf("Creation time: %luus\n", NSEC_TO_USEC(creation_time));
    }
 
    srand(100);
    // srand(time(NULL));
 
    // Generating vectors of size N for data contained and not contained in the
-   // tablea
+   // table
    //
-   uint64_t splits = 19;
-
-   uint64_t size = N / splits / threads;
+   uint64_t size = N / threads;
 
    N = N / size * size;
 
@@ -193,30 +221,24 @@ main(int argc, char **argv)
 
    //	exit(0);
 
-   t1 = high_resolution_clock::now();
+   timestamp insert_start = get_timestamp();
 
    std::vector<std::thread> thread_list;
-   for (uint64_t i = 0; i < splits; ++i) {
-
-      // t1 = high_resolution_clock::now();
-
-      for (uint64_t j = 0; j < threads; j++)
-         thread_list.emplace_back(
-            do_inserts, j, in_keys, in_values, (i * threads + j) * size, size);
-      for (uint64_t j = 0; j < threads; j++)
-         thread_list[j].join();
-
-      // t2 = high_resolution_clock::now();
-
-      // printf("%f\n", size * threads / elapsed(t1, t2));
-      thread_list.clear();
+   for (uint64_t j = 0; j < threads; j++) {
+      thread_list.emplace_back(
+         do_inserts, j, in_keys, in_values, j * size, size);
    }
+   for (uint64_t j = 0; j < threads; j++) {
+      thread_list[j].join();
+   }
+   thread_list.clear();
 
-   t2 = high_resolution_clock::now();
+   uint64_t insert_time_ns = timestamp_elapsed(insert_start);
+   double insert_throughput_mil = N / (double)NSEC_TO_USEC(insert_time_ns);
 
-   double insert_throughput = N / elapsed(t1, t2);
    if (!is_benchmark) {
-      printf("%f\n", N / elapsed(t1, t2));
+      printf("Time elapsed: %luus\n", NSEC_TO_USEC(insert_time_ns));
+      printf("Insertions: %fM/sec\n", insert_throughput_mil);
 
       printf("Load factor: %f\n", iceberg_load_factor(table));
       printf("Number level 1 inserts: %ld\n", lv1_balls(table));
@@ -246,7 +268,7 @@ main(int argc, char **argv)
 
    //	exit(0);
 
-   t1 = high_resolution_clock::now();
+   timestamp negative_start = get_timestamp();
 
    for (uint64_t i = 0; i < threads; ++i)
       thread_list.emplace_back(
@@ -254,29 +276,31 @@ main(int argc, char **argv)
    for (uint64_t i = 0; i < threads; ++i)
       thread_list[i].join();
 
-   t2                         = high_resolution_clock::now();
-   double negative_throughput = N / elapsed(t1, t2);
+   uint64_t negative_time_ns = timestamp_elapsed(negative_start);
+   double negative_throughput_mil = N / (double)NSEC_TO_SEC(negative_time_ns);
    if (!is_benchmark) {
-      printf("Negative queries: %f /sec\n", N / elapsed(t1, t2));
+      printf("Negative queries: %fM/sec\n", negative_throughput_mil);
    }
    thread_list.clear();
 
    //	exit(0);
 
-   t1 = high_resolution_clock::now();
+   timestamp positive_start = get_timestamp();
 
-   for (uint64_t i = 0; i < threads; ++i)
+   for (uint64_t i = 0; i < threads; ++i) {
       thread_list.emplace_back(
          do_queries, in_keys, i * (N / threads), N / threads, true);
-   for (uint64_t i = 0; i < threads; ++i)
+   }
+   for (uint64_t i = 0; i < threads; ++i) {
       thread_list[i].join();
-
-   t2                         = high_resolution_clock::now();
-   double positive_throughput = N / elapsed(t1, t2);
-   if (!is_benchmark) {
-      printf("Positive queries: %f /sec\n", N / elapsed(t1, t2));
    }
    thread_list.clear();
+
+   uint64_t positive_time_ns = timestamp_elapsed(positive_start);
+   double positive_throughput_mil = N / (double)NSEC_TO_SEC(positive_time_ns);
+   if (!is_benchmark) {
+      printf("Positive queries: %fM/sec\n", positive_throughput_mil);
+   }
 
    //	exit(0);
 
@@ -291,58 +315,68 @@ main(int argc, char **argv)
    shuffle(&removed[0], &removed[num_removed], g);
    shuffle(&non_removed[0], &non_removed[N - num_removed], g);
 
-   t1 = high_resolution_clock::now();
-
-   for (uint64_t i = 0; i < threads; ++i)
+   timestamp removal_start = get_timestamp();
+   for (uint64_t i = 0; i < threads; ++i) {
       thread_list.emplace_back(
          do_removals, i, removed, i * (N / 2 / threads), N / 2 / threads);
-   for (uint64_t i = 0; i < threads; ++i)
+   }
+   for (uint64_t i = 0; i < threads; ++i) {
       thread_list[i].join();
-
-   t2                        = high_resolution_clock::now();
-   double removal_throughput = num_removed / elapsed(t1, t2);
-   if (!is_benchmark) {
-      printf("Removals: %f /sec\n", num_removed / elapsed(t1, t2));
-      printf("Load factor: %f\n", iceberg_load_factor(table));
    }
    thread_list.clear();
+
+   uint64_t removal_time_ns = timestamp_elapsed(removal_start);
+   double removal_throughput_mil = N / (double)NSEC_TO_SEC(removal_time_ns);
+   if (!is_benchmark) {
+      printf("Removals: %fM/sec\n", removal_throughput_mil);
+      printf("Load factor: %f\n", iceberg_load_factor(table));
+   }
 
    shuffle(&removed[0], &removed[num_removed], g);
 
-   t1 = high_resolution_clock::now();
-
    if (is_benchmark) {
       printf("%f %f %f %f\n",
-             insert_throughput,
-             negative_throughput,
-             positive_throughput,
-             removal_throughput);
+             insert_throughput_mil,
+             negative_throughput_mil,
+             positive_throughput_mil,
+             removal_throughput_mil);
       return 0;
    }
 
-   for (uint64_t i = 0; i < threads; ++i)
+   timestamp negative_after_removal_start = get_timestamp();
+
+   for (uint64_t i = 0; i < threads; ++i) {
       thread_list.emplace_back(
          do_queries, removed, i * (N / 2 / threads), N / 2 / threads, false);
-   for (uint64_t i = 0; i < threads; ++i)
+   }
+   for (uint64_t i = 0; i < threads; ++i) {
       thread_list[i].join();
-
-   t2 = high_resolution_clock::now();
-   printf("Negative queries after removals: %f /sec\n",
-          num_removed / elapsed(t1, t2));
+   }
    thread_list.clear();
 
-   t1 = high_resolution_clock::now();
+   uint64_t negative_after_removal_time_ns = timestamp_elapsed(negative_after_removal_start);
+   double negative_after_removal_throughput_mil = N / (double)NSEC_TO_SEC(negative_after_removal_time_ns);
+   if (!is_benchmark) {
+      printf("Negative queries after removals: %fM/sec\n", negative_after_removal_throughput_mil);
+      printf("Load factor: %f\n", iceberg_load_factor(table));
+   }
 
-   for (uint64_t i = 0; i < threads; ++i)
+   timestamp positive_after_removal_start = get_timestamp();
+
+   for (uint64_t i = 0; i < threads; ++i) {
       thread_list.emplace_back(
          do_queries, non_removed, i * (N / 2 / threads), N / 2 / threads, true);
-   for (uint64_t i = 0; i < threads; ++i)
+   }
+   for (uint64_t i = 0; i < threads; ++i) {
       thread_list[i].join();
-
-   t2 = high_resolution_clock::now();
-   printf("Positive queries after removals: %f /sec\n",
-          num_removed / elapsed(t1, t2));
+   }
    thread_list.clear();
+
+   uint64_t positive_after_removal_time_ns = timestamp_elapsed(positive_after_removal_start);
+   double positive_after_removal_throughput_mil = N / (double)NSEC_TO_SEC(positive_after_removal_time_ns);
+   printf("Positive queries after removals: %fM/sec\n",
+          positive_after_removal_throughput_mil);
+
    /*
            printf("\nMIXED WORKLOAD, HIGH LOAD FACTOR\n");
 
