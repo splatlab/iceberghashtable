@@ -13,10 +13,12 @@
 
 #include "lock.h"
 
+#define NUM_COUNTERS 16
+
 void rw_lock_init(ReaderWriterLock *rwlock) {
   rwlock->readers = 0;
   rwlock->writer = 0;
-  pc_init(&rwlock->pc_counter, &rwlock->readers, 8, 8);
+  pc_init(&rwlock->pc_counter, &rwlock->readers, NUM_COUNTERS, NUM_COUNTERS);
 }
 
 /**
@@ -63,7 +65,7 @@ bool write_lock(ReaderWriterLock *rwlock, uint8_t flag) {
         ;
   }
   // wait for readers to finish
-  for (int i = 0; i < 8; i++)
+  for (int i = 0; i < NUM_COUNTERS; i++)
     while (rwlock->pc_counter.local_counters[i].counter)
       ;
 

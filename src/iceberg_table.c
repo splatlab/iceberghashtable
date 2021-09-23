@@ -320,9 +320,9 @@ static bool iceberg_setup_resize(iceberg_table * table) {
     /*return false;*/
   }
 
-  printf("Setting up resize\nCurrent stats: \n");
+  /*printf("Setting up resize\nCurrent stats: \n");*/
   
-  printf("Load factor: %f\n", iceberg_load_factor(table));
+  /*printf("Load factor: %f\n", iceberg_load_factor(table));*/
   /*printf("Number level 1 inserts: %ld\n", lv1_balls(table));*/
   /*printf("Number level 2 inserts: %ld\n", lv2_balls(table));*/
   /*printf("Number level 3 inserts: %ld\n", lv3_balls(table));*/
@@ -437,7 +437,7 @@ static bool iceberg_setup_resize(iceberg_table * table) {
   memset(table->metadata.lv2_resize_marker, 0, resize_marker_size);
   memset(table->metadata.lv3_resize_marker, 0, resize_marker_size);
 
-  printf("Setting up finished\n");
+  /*printf("Setting up finished\n");*/
   write_unlock(&table->metadata.rw_lock);
   return true;
 }
@@ -494,7 +494,7 @@ void iceberg_end(iceberg_table * table) {
     }
   }
 
-  printf("Final resize done.\n");
+  /*printf("Final resize done.\n");*/
   /*printf("Final resize done. Table load: %ld\n", iceberg_table_load(table));*/
 }
 #endif

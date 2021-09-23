@@ -58,7 +58,7 @@ typedef struct thread_data {
 /////////////////////////////////////////////////////////////////////////////////
 
 static uint64_t LOAD_SIZE = 64000000;
-static uint64_t RUN_SIZE = 64000000;
+static uint64_t RUN_SIZE = 1280000000;
 
 void ycsb_load_run_randint(int index_type, int wl, int kt, int ap, int num_thread,
         std::vector<uint64_t> &init_keys,
@@ -71,37 +71,37 @@ void ycsb_load_run_randint(int index_type, int wl, int kt, int ap, int num_threa
 
     if (ap == UNIFORM) {
         if (kt == RANDINT_KEY && wl == WORKLOAD_A) {
-            init_file = "./index-microbench/workloads/loada_unif_int.dat";
-            txn_file = "./index-microbench/workloads/txnsa_unif_int.dat";
+            init_file = "/mnt/nvme3/RECIPE/index-microbench/workloads/loada_unif_int.dat";
+            txn_file = "/mnt/nvme3/RECIPE/index-microbench/workloads/txnsa_unif_int.dat";
         } else if (kt == RANDINT_KEY && wl == WORKLOAD_B) {
-            init_file = "./index-microbench/workloads/loadb_unif_int.dat";
-            txn_file = "./index-microbench/workloads/txnsb_unif_int.dat";
+            init_file = "/mnt/nvme3/RECIPE/index-microbench/workloads/loadb_unif_int.dat";
+            txn_file = "/mnt/nvme3/RECIPE/index-microbench/workloads/txnsb_unif_int.dat";
         } else if (kt == RANDINT_KEY && wl == WORKLOAD_C) {
-            init_file = "./index-microbench/workloads/loadc_unif_int.dat";
-            txn_file = "./index-microbench/workloads/txnsc_unif_int.dat";
+            init_file = "/mnt/nvme3/RECIPE/index-microbench/workloads/loadc_unif_int.dat";
+            txn_file = "/mnt/nvme3/RECIPE/index-microbench/workloads/txnsc_unif_int.dat";
         } else if (kt == RANDINT_KEY && wl == WORKLOAD_D) {
-            init_file = "./index-microbench/workloads/loadd_unif_int.dat";
-            txn_file = "./index-microbench/workloads/txnsd_unif_int.dat";
+            init_file = "/mnt/nvme3/RECIPE/index-microbench/workloads/loadd_unif_int.dat";
+            txn_file = "/mnt/nvme3/RECIPE/index-microbench/workloads/txnsd_unif_int.dat";
         } else if (kt == RANDINT_KEY && wl == WORKLOAD_E) {
-            init_file = "./index-microbench/workloads/loade_unif_int.dat";
-            txn_file = "./index-microbench/workloads/txnse_unif_int.dat";
+            init_file = "/mnt/nvme3/RECIPE/index-microbench/workloads/loade_unif_int.dat";
+            txn_file = "/mnt/nvme3/RECIPE/index-microbench/workloads/txnse_unif_int.dat";
         }
     } else {
         if (kt == RANDINT_KEY && wl == WORKLOAD_A) {
-            init_file = "./index-microbench/workloads/loada_unif_int.dat";
-            txn_file = "./index-microbench/workloads/txnsa_unif_int.dat";
+            init_file = "/mnt/nvme3/RECIPE/index-microbench/workloads/loada_unif_int.dat";
+            txn_file = "/mnt/nvme3/RECIPE/index-microbench/workloads/txnsa_unif_int.dat";
         } else if (kt == RANDINT_KEY && wl == WORKLOAD_B) {
-            init_file = "./index-microbench/workloads/loadb_unif_int.dat";
-            txn_file = "./index-microbench/workloads/txnsb_unif_int.dat";
+            init_file = "/mnt/nvme3/RECIPE/index-microbench/workloads/loadb_unif_int.dat";
+            txn_file = "/mnt/nvme3/RECIPE/index-microbench/workloads/txnsb_unif_int.dat";
         } else if (kt == RANDINT_KEY && wl == WORKLOAD_C) {
-            init_file = "./index-microbench/workloads/loadc_unif_int.dat";
-            txn_file = "./index-microbench/workloads/txnsc_unif_int.dat";
+            init_file = "/mnt/nvme3/RECIPE/index-microbench/workloads/loadc_unif_int.dat";
+            txn_file = "/mnt/nvme3/RECIPE/index-microbench/workloads/txnsc_unif_int.dat";
         } else if (kt == RANDINT_KEY && wl == WORKLOAD_D) {
-            init_file = "./index-microbench/workloads/loadd_unif_int.dat";
-            txn_file = "./index-microbench/workloads/txnsd_unif_int.dat";
+            init_file = "/mnt/nvme3/RECIPE/index-microbench/workloads/loadd_unif_int.dat";
+            txn_file = "/mnt/nvme3/RECIPE/index-microbench/workloads/txnsd_unif_int.dat";
         } else if (kt == RANDINT_KEY && wl == WORKLOAD_E) {
-            init_file = "./index-microbench/workloads/loade_unif_int.dat";
-            txn_file = "./index-microbench/workloads/txnse_unif_int.dat";
+            init_file = "/mnt/nvme3/RECIPE/index-microbench/workloads/loade_unif_int.dat";
+            txn_file = "/mnt/nvme3/RECIPE/index-microbench/workloads/txnse_unif_int.dat";
         }
     }
 
@@ -117,7 +117,7 @@ void ycsb_load_run_randint(int index_type, int wl, int kt, int ap, int num_threa
     std::string scan("SCAN");
 
     int count = 0;
-    while ((count < LOAD_SIZE) && infile_load.good()) {
+    while (infile_load.good()) {
         infile_load >> op >> key;
         if (op.compare(insert) != 0) {
             std::cout << "READING LOAD FILE FAIL!\n";
@@ -126,13 +126,14 @@ void ycsb_load_run_randint(int index_type, int wl, int kt, int ap, int num_threa
         init_keys.push_back(key);
         count++;
     }
+    count--;
 
     fprintf(stderr, "Loaded %d keys\n", count);
 
     std::ifstream infile_txn(txn_file);
 
-    count = 0;
-    while ((count < RUN_SIZE) && infile_txn.good()) {
+    uint64_t txn_count = 0;
+    while (infile_txn.good()) {
         infile_txn >> op >> key;
         if (op.compare(insert) == 0) {
             ops.push_back(OP_INSERT);
@@ -155,8 +156,10 @@ void ycsb_load_run_randint(int index_type, int wl, int kt, int ap, int num_threa
             std::cout << "UNRECOGNIZED CMD!\n";
             return;
         }
-        count++;
+        txn_count++;
     }
+    txn_count--;
+    fprintf(stderr, "Loaded %d txn keys\n", txn_count);
 
     std::atomic<int> range_complete, range_incomplete;
     range_complete.store(0);
@@ -214,8 +217,8 @@ void ycsb_load_run_randint(int index_type, int wl, int kt, int ap, int num_threa
                 tds[thread_id].id = thread_id;
                 tds[thread_id].ht = &hashtable;
 
-                uint64_t start_key = RUN_SIZE / num_thread * (uint64_t)thread_id;
-                uint64_t end_key = start_key + RUN_SIZE / num_thread;
+                uint64_t start_key = txn_count / num_thread * (uint64_t)thread_id;
+                uint64_t end_key = start_key + txn_count / num_thread;
 
                 for (uint64_t i = start_key; i < end_key; i++) {
                     if (ops[i] == OP_INSERT) {
@@ -250,7 +253,7 @@ void ycsb_load_run_randint(int index_type, int wl, int kt, int ap, int num_threa
                 thread_group[i].join();
             auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
                     std::chrono::system_clock::now() - starttime);
-            printf("Throughput: run, %f ,ops/us\n", (RUN_SIZE * 1.0) / duration.count());
+            printf("Throughput: run, %f ,ops/us\n", (txn_count * 1.0) / duration.count());
         }
         // TODO: Add a iceberg destroy function
     }
