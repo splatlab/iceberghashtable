@@ -13,6 +13,8 @@
 #include <iostream>
 #include <fstream>
 
+#define LATENCY 0
+
 using namespace std::chrono;
 
 //vectors of key/value pairs in the table and not in the table
@@ -26,15 +28,21 @@ double elapsed(high_resolution_clock::time_point t1, high_resolution_clock::time
 
 void do_inserts(uint8_t id, uint64_t *keys, uint64_t *values, uint64_t start, uint64_t n) {
 
+#ifdef LATENCY
    std::vector<double> times;
+#endif
   for(uint64_t i = start; i < start + n; ++i) {
+#ifdef LATENCY
    high_resolution_clock::time_point t1 = high_resolution_clock::now();
+#endif
     if(!iceberg_insert(&table, keys[i], values[i], id)) {
       printf("Failed insert\n");
       exit(0);
    }
+#ifdef LATENCY
    high_resolution_clock::time_point t2 = high_resolution_clock::now();
    times.emplace_back(duration_cast<nanoseconds>(t2-t1).count());
+#endif
 
     /*
        uint64_t *val;
@@ -46,20 +54,26 @@ void do_inserts(uint8_t id, uint64_t *keys, uint64_t *values, uint64_t start, ui
        }
        */
   }
+#ifdef LATENCY
   std::ofstream f;
   f.open("insert_times_" + std::to_string(id) + ".log");
   for (auto time : times) {
      f << time << '\n';
   }
   f.close();
+#endif
 }
 
 void do_queries(uint8_t id, uint64_t *keys, uint64_t start, uint64_t n, bool positive) {
 
   uint64_t *val;
+#ifdef LATENCY
    std::vector<double> times;
+#endif
   for(uint64_t i = start; i < start + n; ++i) {
+#ifdef LATENCY
    high_resolution_clock::time_point t1 = high_resolution_clock::now();
+#endif
     if (iceberg_get_value(&table, keys[i], &val, id) != positive) {
 
       if(positive)
@@ -68,15 +82,19 @@ void do_queries(uint8_t id, uint64_t *keys, uint64_t start, uint64_t n, bool pos
         printf("False positive query\n");
       exit(0);
     }
+#ifdef LATENCY
    high_resolution_clock::time_point t2 = high_resolution_clock::now();
    times.emplace_back(duration_cast<nanoseconds>(t2-t1).count());
+#endif
   }
+#ifdef LATENCY
   std::ofstream f;
   f.open("query_times_" + std::to_string(positive) + "_" + std::to_string(id) + ".log");
   for (auto time : times) {
      f << time << '\n';
   }
   f.close();
+#endif
 }
 
 void do_removals(uint8_t id, uint64_t *keys, uint64_t start, uint64_t n) {

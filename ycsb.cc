@@ -12,6 +12,8 @@
 
 #include "iceberg_table.h"
 
+#define LATENCY 0
+
 using namespace std;
 
 // index types
@@ -213,35 +215,69 @@ void ycsb_load_run_randint(int index_type, int wl, int kt, int ap, int num_threa
             auto starttime = std::chrono::system_clock::now();
             next_thread_id.store(0);
             auto func = [&]() {
-                int thread_id = next_thread_id.fetch_add(1);
-                tds[thread_id].id = thread_id;
-                tds[thread_id].ht = &hashtable;
+              int thread_id = next_thread_id.fetch_add(1);
+              tds[thread_id].id = thread_id;
+              tds[thread_id].ht = &hashtable;
 
-                uint64_t start_key = txn_count / num_thread * (uint64_t)thread_id;
-                uint64_t end_key = start_key + txn_count / num_thread;
+              uint64_t start_key = txn_count / num_thread * (uint64_t)thread_id;
+              uint64_t end_key = start_key + txn_count / num_thread;
 
-                for (uint64_t i = start_key; i < end_key; i++) {
-                    if (ops[i] == OP_INSERT) {
-                      if(!iceberg_insert(tds[thread_id].ht, keys[i],
-                            keys[i], thread_id)) {
-                        printf("Failed insert\n");
-                        exit(0);
-                      }
-                    } else if (ops[i] == OP_READ) {
-                        uintptr_t *val;
-                        auto ret = iceberg_get_value(tds[thread_id].ht, keys[i], &val, thread_id);
-                        if (*val != keys[i]) {
-                            std::cout << "[ICEBERG] wrong key read: " << *val << " expected: " << keys[i] << " ret: " << ret << std::endl;
-                            exit(1);
-                        }
-                    } else if (ops[i] == OP_SCAN) {
-                        std::cout << "NOT SUPPORTED CMD!\n";
-                        exit(0);
-                    } else if (ops[i] == OP_UPDATE) {
-                        std::cout << "NOT SUPPORTED CMD!\n";
-                        exit(0);
-                    }
+#ifdef LATENCY
+              std::vector<double> insert_times;
+              std::vector<double> query_times;
+#endif
+              for (uint64_t i = start_key; i < end_key; i++) {
+                if (ops[i] == OP_INSERT) {
+#ifdef LATENCY
+                  std::chrono::high_resolution_clock::time_point t1 = std::chrono::high_resolution_clock::now();
+#endif
+                  if(!iceberg_insert(tds[thread_id].ht, keys[i],
+                        keys[i], thread_id)) {
+                    printf("Failed insert\n");
+                    exit(0);
+                  }
+#ifdef LATENCY
+                  std::chrono::high_resolution_clock::time_point t2 = std::chrono::high_resolution_clock::now();
+                  insert_times.emplace_back(std::chrono::duration_cast<std::chrono::nanoseconds>(t2-t1).count());
+#endif
+                } else if (ops[i] == OP_READ) {
+                  uintptr_t *val;
+#ifdef LATENCY
+                  std::chrono::high_resolution_clock::time_point t1 = std::chrono::high_resolution_clock::now();
+#endif
+                  auto ret = iceberg_get_value(tds[thread_id].ht, keys[i], &val, thread_id);
+                  if (*val != keys[i]) {
+                    std::cout << "[ICEBERG] wrong key read: " << *val << " expected: " << keys[i] << " ret: " << ret << std::endl;
+                    exit(1);
+                  }
+#ifdef LATENCY
+                  std::chrono::high_resolution_clock::time_point t2 = std::chrono::high_resolution_clock::now();
+                  query_times.emplace_back(std::chrono::duration_cast<std::chrono::nanoseconds>(t2-t1).count());
+#endif
+                } else if (ops[i] == OP_SCAN) {
+                  std::cout << "NOT SUPPORTED CMD!\n";
+                  exit(0);
+                } else if (ops[i] == OP_UPDATE) {
+                  std::cout << "NOT SUPPORTED CMD!\n";
+                  exit(0);
                 }
+              }
+              
+#ifdef LATENCY
+              std::ofstream f;
+              f.open("ycsb_insert_times_" + std::to_string(thread_id) + ".log");
+              for (auto time : insert_times) {
+                f << time << '\n';
+              }
+              f.close();
+              
+              std::ofstream g;
+              g.open("ycsb_query_times_" + std::to_string(thread_id) + ".log");
+              for (auto time : query_times) {
+                g << time << '\n';
+              }
+              g.close();
+#endif
             };
 
             std::vector<std::thread> thread_group;
