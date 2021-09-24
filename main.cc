@@ -10,6 +10,8 @@
 #include <algorithm>
 #include <string.h>
 #include <assert.h>
+#include <iostream>
+#include <fstream>
 
 using namespace std::chrono;
 
@@ -24,11 +26,16 @@ double elapsed(high_resolution_clock::time_point t1, high_resolution_clock::time
 
 void do_inserts(uint8_t id, uint64_t *keys, uint64_t *values, uint64_t start, uint64_t n) {
 
+   std::vector<double> times;
   for(uint64_t i = start; i < start + n; ++i) {
+   high_resolution_clock::time_point t1 = high_resolution_clock::now();
     if(!iceberg_insert(&table, keys[i], values[i], id)) {
       printf("Failed insert\n");
       exit(0);
-    }
+   }
+   high_resolution_clock::time_point t2 = high_resolution_clock::now();
+   times.emplace_back(duration_cast<nanoseconds>(t2-t1).count());
+
     /*
        uint64_t *val;
        for(uint64_t j = start; j < i; ++j) {
@@ -39,12 +46,20 @@ void do_inserts(uint8_t id, uint64_t *keys, uint64_t *values, uint64_t start, ui
        }
        */
   }
+  std::ofstream f;
+  f.open("insert_times_" + std::to_string(id) + ".log");
+  for (auto time : times) {
+     f << time << '\n';
+  }
+  f.close();
 }
 
 void do_queries(uint8_t id, uint64_t *keys, uint64_t start, uint64_t n, bool positive) {
 
   uint64_t *val;
-  for(uint64_t i = start; i < start + n; ++i)
+   std::vector<double> times;
+  for(uint64_t i = start; i < start + n; ++i) {
+   high_resolution_clock::time_point t1 = high_resolution_clock::now();
     if (iceberg_get_value(&table, keys[i], &val, id) != positive) {
 
       if(positive)
@@ -53,6 +68,15 @@ void do_queries(uint8_t id, uint64_t *keys, uint64_t start, uint64_t n, bool pos
         printf("False positive query\n");
       exit(0);
     }
+   high_resolution_clock::time_point t2 = high_resolution_clock::now();
+   times.emplace_back(duration_cast<nanoseconds>(t2-t1).count());
+  }
+  std::ofstream f;
+  f.open("query_times_" + std::to_string(positive) + "_" + std::to_string(id) + ".log");
+  for (auto time : times) {
+     f << time << '\n';
+  }
+  f.close();
 }
 
 void do_removals(uint8_t id, uint64_t *keys, uint64_t start, uint64_t n) {
