@@ -98,11 +98,31 @@ extern "C" {
 
   double iceberg_load_factor(iceberg_table * table);
 
-  bool iceberg_insert(iceberg_table * table, KeyType key, ValueType value, uint8_t thread_id);
+  typedef enum {
+    LEVEL1,
+    LEVEL1_RESIZE,
+    LEVEL2,
+    LEVEL2_RESIZE,
+    LEVEL3,
+    LEVEL3_RESIZE,
+    FAILED,
+  } iceberg_insert_rc;
+  iceberg_insert_rc iceberg_insert(iceberg_table * table, KeyType key, ValueType value, uint8_t thread_id);
 
   bool iceberg_remove(iceberg_table * table, KeyType key, uint8_t thread_id);
 
-  bool iceberg_get_value(iceberg_table * table, KeyType key, ValueType **value, uint8_t thread_id);
+  typedef enum {
+    Q_LEVEL1,
+    Q_LEVEL1_OLD,
+    Q_LEVEL21,
+    Q_LEVEL21_OLD,
+    Q_LEVEL22,
+    Q_LEVEL22_OLD,
+    Q_LEVEL3,
+    Q_LEVEL3_OLD,
+    Q_NOT_FOUND,
+  } iceberg_query_rc;
+  iceberg_query_rc iceberg_get_value(iceberg_table * table, KeyType key, ValueType **value, uint8_t thread_id);
 
 #ifdef ENABLE_RESIZE
   void iceberg_end(iceberg_table * table);

@@ -13,7 +13,7 @@
 #include <iostream>
 #include <fstream>
 
-#define LATENCY 0
+#define LATENCY 1
 
 using namespace std::chrono;
 
@@ -30,18 +30,21 @@ void do_inserts(uint8_t id, uint64_t *keys, uint64_t *values, uint64_t start, ui
 
 #ifdef LATENCY
    std::vector<double> times;
+   std::vector<iceberg_insert_rc> types;
 #endif
   for(uint64_t i = start; i < start + n; ++i) {
 #ifdef LATENCY
    high_resolution_clock::time_point t1 = high_resolution_clock::now();
 #endif
-    if(!iceberg_insert(&table, keys[i], values[i], id)) {
+   iceberg_insert_rc rc = iceberg_insert(&table, keys[i], values[i], id);
+   if (rc == FAILED) {
       printf("Failed insert\n");
       exit(0);
    }
 #ifdef LATENCY
    high_resolution_clock::time_point t2 = high_resolution_clock::now();
    times.emplace_back(duration_cast<nanoseconds>(t2-t1).count());
+   types.emplace_back(rc);
 #endif
 
     /*
@@ -57,8 +60,8 @@ void do_inserts(uint8_t id, uint64_t *keys, uint64_t *values, uint64_t start, ui
 #ifdef LATENCY
   std::ofstream f;
   f.open("insert_times_" + std::to_string(id) + ".log");
-  for (auto time : times) {
-     f << time << '\n';
+  for (uint64_t i = 0; i < times.size(); i++) {
+     f << times[i] << " " << types[i] << '\n';
   }
   f.close();
 #endif
@@ -69,13 +72,14 @@ void do_queries(uint8_t id, uint64_t *keys, uint64_t start, uint64_t n, bool pos
   uint64_t *val;
 #ifdef LATENCY
    std::vector<double> times;
+   std::vector<iceberg_query_rc> types;
 #endif
   for(uint64_t i = start; i < start + n; ++i) {
 #ifdef LATENCY
    high_resolution_clock::time_point t1 = high_resolution_clock::now();
 #endif
-    if (iceberg_get_value(&table, keys[i], &val, id) != positive) {
-
+   iceberg_query_rc rc = iceberg_get_value(&table, keys[i], &val, id);
+   if (((rc == Q_NOT_FOUND) && positive) || (rc != Q_NOT_FOUND && !positive)) {
       if(positive)
         printf("False negative query key: " "%" PRIu64 "\n", keys[i]);
       else
@@ -85,13 +89,14 @@ void do_queries(uint8_t id, uint64_t *keys, uint64_t start, uint64_t n, bool pos
 #ifdef LATENCY
    high_resolution_clock::time_point t2 = high_resolution_clock::now();
    times.emplace_back(duration_cast<nanoseconds>(t2-t1).count());
+   types.emplace_back(rc);
 #endif
   }
 #ifdef LATENCY
   std::ofstream f;
   f.open("query_times_" + std::to_string(positive) + "_" + std::to_string(id) + ".log");
-  for (auto time : times) {
-     f << time << '\n';
+  for (uint64_t i = 0; i < times.size(); i++) {
+     f << times[i] << " " << types[i] << '\n';
   }
   f.close();
 #endif
@@ -148,8 +153,8 @@ int main (int argc, char** argv) {
 
   uint64_t tbits = atoi(argv[1]);
   uint64_t threads = atoi(argv[2]);
-  //uint64_t N = (1ULL << tbits) * 1.07;
-  uint64_t N = (1ULL << tbits) * 1.07 * 1.90;
+  //uint64_t N = (1ULL << tbits) * 0.95;
+  uint64_t N = (1ULL << tbits) * 1 * 1.90;
 
   high_resolution_clock::time_point t1 = high_resolution_clock::now();
 

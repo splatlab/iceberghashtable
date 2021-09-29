@@ -499,10 +499,12 @@ void iceberg_end(iceberg_table * table) {
 }
 #endif
 
-static inline bool iceberg_lv3_insert(iceberg_table * table, KeyType key, ValueType value, uint64_t lv3_index, uint8_t thread_id) {
+static inline iceberg_insert_rc iceberg_lv3_insert(iceberg_table * table, KeyType key, ValueType value, uint64_t lv3_index, uint8_t thread_id) {
 
+  iceberg_insert_rc rc = LEVEL3;
 #ifdef ENABLE_RESIZE
   if (unlikely(lv3_index < (table->metadata.nblocks >> 1) && is_lv3_resize_active(table))) {
+    rc = LEVEL3_RESIZE;
     uint64_t chunk_idx = lv3_index / 8;
     // if fixing is needed set the marker
     if (!__sync_lock_test_and_set(&table->metadata.lv3_resize_marker[chunk_idx], 1)) {
@@ -534,7 +536,7 @@ static inline bool iceberg_lv3_insert(iceberg_table * table, KeyType key, ValueT
   pc_add(&metadata->lv3_balls, 1, thread_id);
   metadata->lv3_locks[lv3_index] = 0;
 
-  return true;
+  return rc;
 }
 
 static inline bool iceberg_lv2_insert_internal(iceberg_table * table, KeyType key, ValueType value, uint8_t fprint, uint64_t index, uint8_t thread_id) {
@@ -561,8 +563,9 @@ static inline bool iceberg_lv2_insert_internal(iceberg_table * table, KeyType ke
   return false;
 }
 
-static inline bool iceberg_lv2_insert(iceberg_table * table, KeyType key, ValueType value, uint64_t lv3_index, uint8_t thread_id) {
+static inline iceberg_insert_rc iceberg_lv2_insert(iceberg_table * table, KeyType key, ValueType value, uint64_t lv3_index, uint8_t thread_id) {
 
+  iceberg_insert_rc rc = FAILED;
   iceberg_metadata * metadata = &table->metadata;
 
   if (metadata->lv2_ctr == (int64_t)(C_LV2 * metadata->nblocks))
@@ -586,13 +589,14 @@ static inline bool iceberg_lv2_insert(iceberg_table * table, KeyType key, ValueT
     md_mask1 = md_mask2;
     popct1 = popct2;
   }
-  
+
 #ifdef ENABLE_RESIZE
   // move blocks if resize is active and not already moved.
   if (unlikely(index1 < (table->metadata.nblocks >> 1) && is_lv2_resize_active(table))) {
     uint64_t chunk_idx = index1 / 8;
     // if fixing is needed set the marker
     if (!__sync_lock_test_and_set(&table->metadata.lv2_resize_marker[chunk_idx], 1)) {
+      rc = LEVEL2_RESIZE;
       for (uint8_t i = 0; i < 8; ++i) {
         uint64_t idx = chunk_idx * 8 + i;
         /*printf("LV2 Before: Moving block: %ld load: %f\n", idx, iceberg_block_load(table, idx, 2));*/
@@ -606,8 +610,12 @@ static inline bool iceberg_lv2_insert(iceberg_table * table, KeyType key, ValueT
   }
 #endif
 
-  if (iceberg_lv2_insert_internal(table, key, value, fprint1, index1, thread_id))
-    return true;
+  if (iceberg_lv2_insert_internal(table, key, value, fprint1, index1, thread_id)) {
+    if (rc != LEVEL2_RESIZE) {
+      return LEVEL2;
+    }
+    return rc;
+  }
 
   return iceberg_lv3_insert(table, key, value, lv3_index, thread_id);
 }
@@ -638,8 +646,9 @@ static bool iceberg_insert_internal(iceberg_table * table, KeyType key, ValueTyp
   return false;
 }
 
-bool iceberg_insert(iceberg_table * table, KeyType key, ValueType value, uint8_t thread_id) {
+iceberg_insert_rc iceberg_insert(iceberg_table * table, KeyType key, ValueType value, uint8_t thread_id) {
 
+  iceberg_insert_rc rc = FAILED;
 #ifdef ENABLE_RESIZE
   if (unlikely(need_resize(table))) {
     iceberg_setup_resize(table);
@@ -661,6 +670,7 @@ bool iceberg_insert(iceberg_table * table, KeyType key, ValueType value, uint8_t
     uint64_t chunk_idx = index / 8;
     // if fixing is needed set the marker
     if (!__sync_lock_test_and_set(&table->metadata.lv1_resize_marker[chunk_idx], 1)) {
+      rc = LEVEL1_RESIZE;
       for (uint8_t i = 0; i < 8; ++i) {
         uint64_t idx = chunk_idx * 8 + i;
         /*printf("LV1 Before: Moving block: %ld load: %f\n", idx, iceberg_block_load(table, idx, 1));*/
@@ -675,14 +685,17 @@ bool iceberg_insert(iceberg_table * table, KeyType key, ValueType value, uint8_t
 #endif
 
   bool ret = iceberg_insert_internal(table, key, value, fprint, index, thread_id);
-  if (!ret)
-    ret = iceberg_lv2_insert(table, key, value, index, thread_id);
+  if (!ret) {
+    rc = iceberg_lv2_insert(table, key, value, index, thread_id);
+  } else if (rc != LEVEL1_RESIZE) {
+    rc = LEVEL1;
+  }
 
 #ifdef ENABLE_RESIZE
   read_unlock(&table->metadata.rw_lock, thread_id);
 #endif
 
-  return ret;
+  return rc;
 }
 
 static inline bool iceberg_lv3_remove_internal(iceberg_table * table, KeyType key, uint64_t lv3_index, uint8_t thread_id) {
@@ -928,7 +941,7 @@ static inline bool iceberg_lv3_get_value_internal(iceberg_table * table, KeyType
   return false;
 }
 
-static inline bool iceberg_lv3_get_value(iceberg_table * table, KeyType key, ValueType **value, uint64_t lv3_index) {
+static inline iceberg_query_rc iceberg_lv3_get_value(iceberg_table * table, KeyType key, ValueType **value, uint64_t lv3_index) {
 #ifdef ENABLE_RESIZE
   // check if there's an active resize and block isn't fixed yet
   if (unlikely(lv3_index >= (table->metadata.nblocks >> 1) && is_lv3_resize_active(table))) {
@@ -936,7 +949,11 @@ static inline bool iceberg_lv3_get_value(iceberg_table * table, KeyType key, Val
     uint64_t old_index = lv3_index & mask;
     uint64_t chunk_idx = old_index / 8;
     if (__atomic_load_n(&table->metadata.lv3_resize_marker[chunk_idx], __ATOMIC_SEQ_CST) == 0) { // not fixed yet
-      return iceberg_lv3_get_value_internal(table, key, value, old_index);
+      if (iceberg_lv3_get_value_internal(table, key, value, old_index)) {
+        return Q_LEVEL3_OLD;
+      } else {
+        return Q_NOT_FOUND;
+      }
     } else {
       // wait for the old block to be fixed
       uint64_t dest_chunk_idx = lv3_index / 8;
@@ -946,10 +963,14 @@ static inline bool iceberg_lv3_get_value(iceberg_table * table, KeyType key, Val
   }
 #endif
 
-  return iceberg_lv3_get_value_internal(table, key, value, lv3_index);
+  if (iceberg_lv3_get_value_internal(table, key, value, lv3_index)) {
+    return Q_LEVEL3;
+  } else {
+    return Q_NOT_FOUND;
+  }
 }
 
-static inline bool iceberg_lv2_get_value(iceberg_table * table, KeyType key, ValueType **value, uint64_t lv3_index) {
+static inline iceberg_query_rc iceberg_lv2_get_value(iceberg_table * table, KeyType key, ValueType **value, uint64_t lv3_index) {
 
   iceberg_metadata * metadata = &table->metadata;
   iceberg_lv2_block * blocks = table->level2;
@@ -976,7 +997,11 @@ static inline bool iceberg_lv2_get_value(iceberg_table * table, KeyType key, Val
 
           if (blocks[old_index].slots[slot].key == key) {
             *value = &blocks[old_index].slots[slot].val;
-            return true;
+            if (i == 0) {
+              return Q_LEVEL21_OLD;
+            } else {
+              return Q_LEVEL22_OLD;
+            }
           }
         }
       } else {
@@ -996,7 +1021,11 @@ static inline bool iceberg_lv2_get_value(iceberg_table * table, KeyType key, Val
 
       if (blocks[index].slots[slot].key == key) {
         *value = &blocks[index].slots[slot].val;
-        return true;
+        if (i == 0) {
+          return Q_LEVEL21;
+        } else {
+          return Q_LEVEL22;
+        }
       }
     }
 
@@ -1005,11 +1034,11 @@ static inline bool iceberg_lv2_get_value(iceberg_table * table, KeyType key, Val
   return iceberg_lv3_get_value(table, key, value, lv3_index);
 }
 
-bool iceberg_get_value(iceberg_table * table, KeyType key, ValueType **value, uint8_t thread_id) {
+iceberg_query_rc iceberg_get_value(iceberg_table * table, KeyType key, ValueType **value, uint8_t thread_id) {
 
 #ifdef ENABLE_RESIZE
   if (unlikely(!read_lock(&table->metadata.rw_lock, WAIT_FOR_LOCK, thread_id)))
-    return false;
+    return Q_NOT_FOUND;
 #endif
 
   iceberg_metadata * metadata = &table->metadata;
@@ -1036,7 +1065,7 @@ bool iceberg_get_value(iceberg_table * table, KeyType key, ValueType **value, ui
         if (blocks[old_index].slots[slot].key == key) {
           *value = &blocks[old_index].slots[slot].val;
           read_unlock(&table->metadata.rw_lock, thread_id);
-          return true;
+          return Q_LEVEL1_OLD;
         }
       }
     } else {
@@ -1059,17 +1088,17 @@ bool iceberg_get_value(iceberg_table * table, KeyType key, ValueType **value, ui
 #ifdef ENABLE_RESIZE
       read_unlock(&table->metadata.rw_lock, thread_id);
 #endif
-      return true;
+      return Q_LEVEL1;
     }
   }
 
-  bool ret = iceberg_lv2_get_value(table, key, value, index);
+  iceberg_query_rc rc = iceberg_lv2_get_value(table, key, value, index);
 
 #ifdef ENABLE_RESIZE
   read_unlock(&table->metadata.rw_lock, thread_id);
 #endif
 
-  return ret;
+  return rc;
 }
 
 #ifdef ENABLE_RESIZE
