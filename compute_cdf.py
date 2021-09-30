@@ -10,6 +10,13 @@ num_bins = 100
 mn = min(data)
 mx = max(data)
 
+print(np.percentile(data,50))
+print(np.percentile(data,95))
+print(np.percentile(data,99))
+print(np.percentile(data,99.9))
+print(np.percentile(data,99.99))
+
+"""
 # Use the histogram function to bin the data
 counts, bin_edges = np.histogram(data, bins=np.logspace(np.log10(mn),np.log10(mx), num_bins))
 
@@ -42,3 +49,6 @@ np.savetxt(sys.argv[1] + '_cdf.csv', l, fmt='%f %f', header='Latency_nsec CDF')
 # plt.savefig(sys.argv[1] + '_scatter.png', dpi=300)
 
 # plt.show()
+
+"""
+
