@@ -12,10 +12,9 @@ extern "C" {
 
 #define SLOT_BITS       6
 #define FPRINT_BITS     8
-#define D_CHOICES       2
-#define MAX_LG_LG_N     4
-#define C_LV2           6
+#define LV2_SLOTS       8
 #define MAX_GENERATIONS 8
+#define CACHE_LINE_SIZE 64
 
 typedef uint64_t KeyType;
 typedef uint64_t ValueType;
@@ -34,11 +33,11 @@ typedef struct __attribute__((__packed__)) iceberg_lv1_block_md {
 } iceberg_lv1_block_md;
 
 typedef struct __attribute__((__packed__)) iceberg_lv2_block {
-   kv_pair slots[C_LV2 + MAX_LG_LG_N / D_CHOICES];
+   kv_pair slots[LV2_SLOTS];
 } iceberg_lv2_block;
 
 typedef struct __attribute__((__packed__)) iceberg_lv2_block_md {
-   uint8_t block_md[C_LV2 + MAX_LG_LG_N / D_CHOICES];
+   uint8_t block_md[LV2_SLOTS];
 } iceberg_lv2_block_md;
 
 typedef struct iceberg_lv3_node {
@@ -86,7 +85,10 @@ uint64_t
 tot_balls(iceberg_table *table);
 
 void
-iceberg_init(iceberg_table *table, uint64_t log_slots, uint64_t final_log_slots, bool use_hugepages);
+iceberg_init(iceberg_table *table,
+             uint64_t       log_slots,
+             uint64_t       final_log_slots,
+             bool           use_hugepages);
 
 double
 iceberg_load_factor(iceberg_table *table);

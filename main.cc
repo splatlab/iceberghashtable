@@ -19,17 +19,17 @@ std::vector<std::pair<uint64_t, uint64_t>> in_table, not_in_table;
 iceberg_table *table;
 
 #define THOUSAND (1000UL)
-#define MILLION (THOUSAND * THOUSAND)
-#define BILLION (THOUSAND * MILLION)
+#define MILLION  (THOUSAND * THOUSAND)
+#define BILLION  (THOUSAND * MILLION)
 
-#define USEC_TO_SEC(x) ((x) / MILLION)
-#define USEC_TO_NSEC(x) ((x) * THOUSAND)
-#define NSEC_TO_SEC(x) ((x) / BILLION)
+#define USEC_TO_SEC(x)  ((x) / MILLION)
+#define USEC_TO_NSEC(x) ((x)*THOUSAND)
+#define NSEC_TO_SEC(x)  ((x) / BILLION)
 #define NSEC_TO_MSEC(x) ((x) / MILLION)
 #define NSEC_TO_USEC(x) ((x) / THOUSAND)
-#define SEC_TO_MSEC(x) ((x) * THOUSAND)
-#define SEC_TO_USEC(x) ((x) * MILLION)
-#define SEC_TO_NSEC(x) ((x) * BILLION)
+#define SEC_TO_MSEC(x)  ((x)*THOUSAND)
+#define SEC_TO_USEC(x)  ((x)*MILLION)
+#define SEC_TO_NSEC(x)  ((x)*BILLION)
 
 typedef uint64_t timestamp;
 
@@ -63,12 +63,15 @@ do_inserts(uint8_t   id,
            uint64_t  start,
            uint64_t  n)
 {
-
-   for (uint64_t i = start; i < start + n; ++i)
+   for (uint64_t i = start; i < start + n; ++i) {
+      if (i == 34021647) {
+         printf("inserting the key\n");
+      }
       if (!iceberg_insert(table, keys[i], values[i], id)) {
          printf("Failed insert\n");
          exit(0);
       }
+   }
 }
 
 void
@@ -76,15 +79,13 @@ do_queries(uint64_t *keys, uint64_t start, uint64_t n, bool positive)
 {
 
    uint64_t *val;
-   for (uint64_t i = start; i < start + n; ++i)
-      if (iceberg_get_value(table, keys[i], &val) != positive) {
-
-         if (positive)
-            printf("False negative query\n");
-         else
-            printf("False positive query\n");
-         exit(0);
+   for (uint64_t i = start; i < start + n; ++i) {
+      if (positive && i == 34021647) {
+         printf("inserting the key\n");
       }
+      bool found = iceberg_get_value(table, keys[i], &val);
+      assert(found == positive);
+   }
 }
 
 void
@@ -143,10 +144,10 @@ main(int argc, char **argv)
 
    uint64_t tbits     = atoi(argv[1]);
    uint64_t inittbits = tbits - atoi(argv[2]);
-   uint64_t threads = atoi(argv[3]);
-   uint64_t N       = (1ULL << tbits) * 1.05;
+   uint64_t threads   = atoi(argv[3]);
+   uint64_t N         = (1ULL << tbits) * 1;
 
-   bool is_benchmark = false;
+   bool is_benchmark  = false;
    bool use_hugepages = false;
    for (uint64_t arg_i = 4; arg_i < argc; arg_i++) {
       if (strcmp(argv[arg_i], "-b") == 0) {
@@ -233,8 +234,8 @@ main(int argc, char **argv)
    }
    thread_list.clear();
 
-   uint64_t insert_time_ns = timestamp_elapsed(insert_start);
-   double insert_throughput_mil = N / (double)NSEC_TO_USEC(insert_time_ns);
+   uint64_t insert_time_ns        = timestamp_elapsed(insert_start);
+   double   insert_throughput_mil = N / (double)NSEC_TO_USEC(insert_time_ns);
 
    if (!is_benchmark) {
       printf("Time elapsed: %luus\n", NSEC_TO_USEC(insert_time_ns));
@@ -263,8 +264,8 @@ main(int argc, char **argv)
       printf("\nQUERIES\n");
    }
 
-   std::mt19937 g(__builtin_ia32_rdtsc());
-   std::shuffle(&in_keys[0], &in_keys[N], g);
+   //std::mt19937 g(__builtin_ia32_rdtsc());
+   //std::shuffle(&in_keys[0], &in_keys[N], g);
 
    //	exit(0);
 
@@ -276,8 +277,8 @@ main(int argc, char **argv)
    for (uint64_t i = 0; i < threads; ++i)
       thread_list[i].join();
 
-   uint64_t negative_time_ns = timestamp_elapsed(negative_start);
-   double negative_throughput_mil = N / (double)NSEC_TO_SEC(negative_time_ns);
+   uint64_t negative_time_ns        = timestamp_elapsed(negative_start);
+   double   negative_throughput_mil = N / (double)NSEC_TO_USEC(negative_time_ns);
    if (!is_benchmark) {
       printf("Negative queries: %fM/sec\n", negative_throughput_mil);
    }
@@ -296,8 +297,8 @@ main(int argc, char **argv)
    }
    thread_list.clear();
 
-   uint64_t positive_time_ns = timestamp_elapsed(positive_start);
-   double positive_throughput_mil = N / (double)NSEC_TO_SEC(positive_time_ns);
+   uint64_t positive_time_ns        = timestamp_elapsed(positive_start);
+   double   positive_throughput_mil = N / (double)NSEC_TO_USEC(positive_time_ns);
    if (!is_benchmark) {
       printf("Positive queries: %fM/sec\n", positive_throughput_mil);
    }
@@ -312,8 +313,8 @@ main(int argc, char **argv)
    uint64_t *removed     = in_keys;
    uint64_t *non_removed = in_keys + num_removed;
 
-   shuffle(&removed[0], &removed[num_removed], g);
-   shuffle(&non_removed[0], &non_removed[N - num_removed], g);
+   //shuffle(&removed[0], &removed[num_removed], g);
+   //shuffle(&non_removed[0], &non_removed[N - num_removed], g);
 
    timestamp removal_start = get_timestamp();
    for (uint64_t i = 0; i < threads; ++i) {
@@ -325,14 +326,14 @@ main(int argc, char **argv)
    }
    thread_list.clear();
 
-   uint64_t removal_time_ns = timestamp_elapsed(removal_start);
-   double removal_throughput_mil = N / (double)NSEC_TO_SEC(removal_time_ns);
+   uint64_t removal_time_ns        = timestamp_elapsed(removal_start);
+   double   removal_throughput_mil = N / (double)NSEC_TO_USEC(removal_time_ns);
    if (!is_benchmark) {
       printf("Removals: %fM/sec\n", removal_throughput_mil);
       printf("Load factor: %f\n", iceberg_load_factor(table));
    }
 
-   shuffle(&removed[0], &removed[num_removed], g);
+   //shuffle(&removed[0], &removed[num_removed], g);
 
    if (is_benchmark) {
       printf("%f %f %f %f\n",
@@ -354,10 +355,13 @@ main(int argc, char **argv)
    }
    thread_list.clear();
 
-   uint64_t negative_after_removal_time_ns = timestamp_elapsed(negative_after_removal_start);
-   double negative_after_removal_throughput_mil = N / (double)NSEC_TO_SEC(negative_after_removal_time_ns);
+   uint64_t negative_after_removal_time_ns =
+      timestamp_elapsed(negative_after_removal_start);
+   double negative_after_removal_throughput_mil =
+      N / (double)NSEC_TO_USEC(negative_after_removal_time_ns);
    if (!is_benchmark) {
-      printf("Negative queries after removals: %fM/sec\n", negative_after_removal_throughput_mil);
+      printf("Negative queries after removals: %fM/sec\n",
+             negative_after_removal_throughput_mil);
       printf("Load factor: %f\n", iceberg_load_factor(table));
    }
 
@@ -372,8 +376,10 @@ main(int argc, char **argv)
    }
    thread_list.clear();
 
-   uint64_t positive_after_removal_time_ns = timestamp_elapsed(positive_after_removal_start);
-   double positive_after_removal_throughput_mil = N / (double)NSEC_TO_SEC(positive_after_removal_time_ns);
+   uint64_t positive_after_removal_time_ns =
+      timestamp_elapsed(positive_after_removal_start);
+   double positive_after_removal_throughput_mil =
+      N / (double)NSEC_TO_USEC(positive_after_removal_time_ns);
    printf("Positive queries after removals: %fM/sec\n",
           positive_after_removal_throughput_mil);
 
