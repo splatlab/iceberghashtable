@@ -217,7 +217,7 @@ round_up(size_t n, size_t k)
 static inline uint8_t
 iceberg_log_nblocks(iceberg_table *table)
 {
-   return table->metadata->log_nblocks;
+   return __atomic_load_n(&table->metadata->log_nblocks, __ATOMIC_SEQ_CST);
 }
 
 static inline uint8_t
@@ -538,10 +538,10 @@ static inline uint8_t
 iceberg_maybe_split(iceberg_table *table,
                     uint64_t       index,
                     kv_pair       *block,
-                    uint8_t       *md)
+                    uint8_t       *md,
+                    uint8_t        log_nblocks)
 {
-   uint8_t log_nblocks = iceberg_log_nblocks(table);
-   uint8_t index_gen   = iceberg_index_generation(md);
+   uint8_t index_gen = iceberg_index_generation(md);
    if (index_gen == iceberg_generation(table, log_nblocks)) {
       return index_gen;
    }
@@ -553,6 +553,9 @@ iceberg_maybe_split(iceberg_table *table,
    uint8_t *from_md, *to_md;
    iceberg_lv1_get_md_and_block(table, split_from, &from_block, &from_md);
    iceberg_lv1_get_md_and_block(table, split_to, &to_block, &to_md);
+
+   uint8_t from_gen = iceberg_index_generation(from_md);
+   assert(from_gen >= iceberg_generation(table, log_nblocks) - 1);
 
    if (!iceberg_try_start_split(
           table, log_nblocks, index_gen, from_md, to_md)) {
@@ -662,7 +665,7 @@ restart:
    uint8_t *md;
    iceberg_lv1_get_md_and_block(table, index, &block, &md);
 
-   uint8_t gen = iceberg_maybe_split(table, index, block, md);
+   uint8_t gen = iceberg_maybe_split(table, index, block, md, log_nblocks);
 
    __mmask64 md_mask = slot_mask_64(md, 0);
    md_mask &= ~1;
