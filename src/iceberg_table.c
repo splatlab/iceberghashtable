@@ -225,7 +225,7 @@ iceberg_generation(iceberg_table *table, uint8_t log_nblocks)
 static inline uint8_t
 iceberg_index_generation(uint8_t *md)
 {
-   return md[0];
+   return __atomic_load_n(&md[0], __ATOMIC_SEQ_CST);
 }
 
 static inline uint64_t
@@ -620,7 +620,8 @@ iceberg_lv2_maybe_split(iceberg_table *table,
       uint64_t from_subindex = split_from + blk;
       uint64_t to_subindex   = split_to + blk;
       for (uint64_t from_idx = from_start; from_idx < from_end; from_idx++) {
-         while (from_md[from_idx] == SLOT_RESERVED) {
+         while (__atomic_load_n(&from_md[from_idx], __ATOMIC_SEQ_CST) ==
+                SLOT_RESERVED) {
             __builtin_ia32_pause();
          }
 
@@ -683,10 +684,6 @@ iceberg_lv2_insert(iceberg_table *table,
    uint8_t  fprint1, fprint2;
    uint64_t index1, index2;
 
-   if (key == 12975883523318311837ULL) {
-      printf("inserting the weird key\n");
-   }
-
    split_hash(lv2_hash(key, 0), &fprint1, &index1, log_nblocks);
    split_hash(lv2_hash(key, 1), &fprint2, &index2, log_nblocks);
 
@@ -694,6 +691,10 @@ iceberg_lv2_insert(iceberg_table *table,
    uint8_t *md1;
    iceberg_lv2_get_md_and_block(table, index1, &block1, &md1);
    uint8_t gen1 = iceberg_lv2_maybe_split(table, index1, block1, md1);
+
+   if (unlikely(gen1 > iceberg_generation(table, log_nblocks))) {
+      return iceberg_insert(table, key, value, thread_id);
+   }
 
    __mmask64 md_mask1 = slot_mask_64(md1, 0);
    md_mask1 &= ~1;
@@ -703,6 +704,10 @@ iceberg_lv2_insert(iceberg_table *table,
    uint8_t *md2;
    iceberg_lv2_get_md_and_block(table, index2, &block2, &md2);
    uint8_t gen2 = iceberg_lv2_maybe_split(table, index2, block2, md2);
+
+   if (unlikely(gen2 > iceberg_generation(table, log_nblocks))) {
+      return iceberg_insert(table, key, value, thread_id);
+   }
 
    __mmask64 md_mask2 = slot_mask_64(md2, 0);
    md_mask2 &= ~1;
@@ -740,6 +745,7 @@ iceberg_lv2_insert(iceberg_table *table,
          lv2_counter_inc(table, thread_id);
          block1[slot].key = key;
          block1[slot].val = value;
+         //printf("insert %lx into block %lu slot %u\n", key, index1, slot);
          md1[slot]        = fprint1;
          // iceberg_lv2_print(table, super1);
          return true;
