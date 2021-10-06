@@ -62,7 +62,7 @@ typedef struct iceberg_metadata {
    pc_t                 *lv2_balls;
    pc_t                 *lv3_balls;
    iceberg_lv1_block_md *lv1_md[MAX_GENERATIONS];
-   iceberg_lv2_block_md *lv2_md;
+   iceberg_lv2_block_md *lv2_md[MAX_GENERATIONS];
    uint64_t             *lv3_sizes;
    uint8_t              *lv3_locks;
    int                   mmap_flags;
@@ -71,7 +71,7 @@ typedef struct iceberg_metadata {
 typedef struct iceberg_table {
    iceberg_metadata  *metadata;
    iceberg_lv1_block *level1[MAX_GENERATIONS];
-   iceberg_lv2_block *level2;
+   iceberg_lv2_block *level2[MAX_GENERATIONS];
    iceberg_lv3_list  *level3;
 } iceberg_table;
 

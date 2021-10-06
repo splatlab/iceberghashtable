@@ -64,9 +64,6 @@ do_inserts(uint8_t   id,
            uint64_t  n)
 {
    for (uint64_t i = start; i < start + n; ++i) {
-      if (i == 34021647) {
-         printf("inserting the key\n");
-      }
       if (!iceberg_insert(table, keys[i], values[i], id)) {
          printf("Failed insert\n");
          exit(0);
@@ -80,9 +77,6 @@ do_queries(uint64_t *keys, uint64_t start, uint64_t n, bool positive)
 
    uint64_t *val;
    for (uint64_t i = start; i < start + n; ++i) {
-      if (positive && i == 34021647) {
-         printf("inserting the key\n");
-      }
       bool found = iceberg_get_value(table, keys[i], &val);
       assert(found == positive);
    }
