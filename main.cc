@@ -25,17 +25,21 @@ double elapsed(high_resolution_clock::time_point t1, high_resolution_clock::time
 }
 
 void do_inserts(uint8_t id, uint64_t *keys, uint64_t *values, uint64_t start, uint64_t n) {
-
+#ifdef LATENCY
   std::vector<double> times;
+#endif
   for(uint64_t i = start; i < start + n; ++i) {
+#ifdef LATENCY
     high_resolution_clock::time_point t1 = high_resolution_clock::now();
+#endif
     if(!iceberg_insert(&table, keys[i], values[i], id)) {
       printf("Failed insert\n");
       exit(0);
     }
+#ifdef LATENCY
     high_resolution_clock::time_point t2 = high_resolution_clock::now();
     times.emplace_back(duration_cast<nanoseconds>(t2-t1).count());
-
+#endif
     /*
        uint64_t *val;
        for(uint64_t j = start; j < i; ++j) {
@@ -46,43 +50,50 @@ void do_inserts(uint8_t id, uint64_t *keys, uint64_t *values, uint64_t start, ui
        }
        */
   }
+#ifdef LATENCY
   std::ofstream f;
   f.open("insert_times_" + std::to_string(id) + ".log");
   for (auto time : times) {
     f << time << '\n';
   }
   f.close();
+#endif
 }
 
 void do_queries(uint8_t id, uint64_t *keys, uint64_t start, uint64_t n, bool positive) {
 
   uint64_t *val;
+#ifdef LATENCY
   std::vector<double> times;
+#endif
   for(uint64_t i = start; i < start + n; ++i) {
+#ifdef LATENCY
     high_resolution_clock::time_point t1 = high_resolution_clock::now();
+#endif
     if (iceberg_get_value(&table, keys[i], &val, id) != positive) {
-
       if(positive)
         printf("False negative query key: " "%" PRIu64 "\n", keys[i]);
       else
         printf("False positive query\n");
       exit(0);
     }
+#ifdef LATENCY
     high_resolution_clock::time_point t2 = high_resolution_clock::now();
     times.emplace_back(duration_cast<nanoseconds>(t2-t1).count());
+#endif
   }
+#ifdef LATENCY
   std::ofstream f;
   f.open("query_times_" + std::to_string(positive) + "_" + std::to_string(id) + ".log");
   for (auto time : times) {
     f << time << '\n';
   }
   f.close();
+#endif
 }
 
 void do_removals(uint8_t id, uint64_t *keys, uint64_t start, uint64_t n) {
-
   //uint64_t val;
-
   for(uint64_t i = start; i < start + n; ++i)
     if(!iceberg_remove(&table, keys[i], id)) {
       printf("Failed removal\n");
@@ -91,7 +102,6 @@ void do_removals(uint8_t id, uint64_t *keys, uint64_t start, uint64_t n) {
 }
 
 void safe_rand_bytes(unsigned char *v, size_t n) {
-
   while (n > 0) {
     size_t round_size = n >= INT_MAX ? INT_MAX - 1 : n;
     RAND_bytes(v, round_size);
@@ -106,7 +116,6 @@ void safe_rand_bytes(unsigned char *v, size_t n) {
 }
 
 void do_mixed(uint8_t id, std::vector<std::pair<uint64_t, uint64_t>>& v, uint64_t start, uint64_t n) {
-
   uint64_t *val;
   for(uint64_t i = start; i < start + n; ++i)
     if(iceberg_get_value(&table, v[i].first, &val, id)) {
@@ -116,7 +125,6 @@ void do_mixed(uint8_t id, std::vector<std::pair<uint64_t, uint64_t>>& v, uint64_
 }
 
 int main (int argc, char** argv) {
-
   if (argc != 3 && argc != 4) {
     fprintf(stderr, "Specify the log of the number of slots in the table and the number of threads to use.\n");
     exit(1);
@@ -130,8 +138,8 @@ int main (int argc, char** argv) {
 
   uint64_t tbits = atoi(argv[1]);
   uint64_t threads = atoi(argv[2]);
-  //uint64_t N = (1ULL << tbits) * 1.07;
-  uint64_t N = (1ULL << tbits) * 1.07 * 1.90;
+  uint64_t N = (1ULL << tbits) * 1.07;
+  //uint64_t N = (1ULL << tbits) * 1.07 * 1.90;
 
   high_resolution_clock::time_point t1 = high_resolution_clock::now();
 
@@ -149,8 +157,10 @@ int main (int argc, char** argv) {
   //srand(0);
 
   //Generating vectors of size N for data contained and not contained in the tablea
-  //
   uint64_t splits = 1;
+#ifdef INSTAN_THRPT
+  splits = 19;
+#endif
 
   uint64_t size = N / splits / threads;
 
@@ -198,21 +208,25 @@ int main (int argc, char** argv) {
 
   std::vector<std::thread> thread_list;
   for(uint64_t i = 0; i < splits; ++i) {
-
-    //t1 = high_resolution_clock::now();
-
+#ifdef INSTAN_THRPT
+    high_resolution_clock::time_point t1, t2;
+    t1 = high_resolution_clock::now();
+#endif
     for(uint64_t j = 0; j < threads; j++)
       thread_list.emplace_back(do_inserts, j, in_keys, in_values, (i * threads + j) * size, size);
     for(uint64_t j = 0; j < threads; j++)
       thread_list[j].join();
 
-    //t2 = high_resolution_clock::now();
-
-    //printf("%f\n", size * threads / elapsed(t1, t2));
+#ifdef INSTAN_THRPT
+    t2 = high_resolution_clock::now();
+    printf("%f\n", size * threads / elapsed(t1, t2));
+#endif
     thread_list.clear();
   }
 
+#ifdef ENABLE_RESIZE
   iceberg_end(&table);
+#endif
   t2 = high_resolution_clock::now();
 
   double insert_throughput = N / elapsed(t1, t2);

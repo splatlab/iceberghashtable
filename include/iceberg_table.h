@@ -10,12 +10,6 @@
 extern "C" {
 #endif
 
-#if 1
-#define ENABLE_RESIZE 1
-#else
-#undef ENABLE_RESIZE
-#endif
-
 #define SLOT_BITS 6
 #define FPRINT_BITS 8
 #define D_CHOICES 2
