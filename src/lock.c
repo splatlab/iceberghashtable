@@ -21,6 +21,32 @@ void rw_lock_init(ReaderWriterLock *rwlock) {
   pc_init(&rwlock->pc_counter, &rwlock->readers, NUM_COUNTERS, NUM_COUNTERS);
 }
 
+
+#if 0
+/**
+* Try to acquire a lock and spin until the lock is available.
+*/
+bool read_lock(ReaderWriterLock *rwlock, uint8_t flag, uint8_t thread_id) {
+  __sync_lock_test_and_set(&rwlock->pc_counter.local_counters[thread_id].counter, 1);
+
+  while (rwlock->writer) {
+    __sync_lock_release(&rwlock->pc_counter.local_counters[thread_id].counter);
+    //rwlock->pc_counter.local_counters[thread_id].counter = 0;
+    while (rwlock->writer) {
+      __builtin_ia32_pause();
+    }
+    __sync_lock_test_and_set(&rwlock->pc_counter.local_counters[thread_id].counter, 1);
+  }
+
+  return true;
+}
+
+void read_unlock(ReaderWriterLock *rwlock, uint8_t thread_id) {
+  __sync_lock_release(&rwlock->pc_counter.local_counters[thread_id].counter);
+  //rwlock->pc_counter.local_counters[thread_id].counter = 0;
+  return;
+}
+#else
 /**
  * Try to acquire a lock and spin until the lock is available.
  */
@@ -49,6 +75,7 @@ void read_unlock(ReaderWriterLock *rwlock, uint8_t thread_id) {
   __atomic_add_fetch(&rwlock->pc_counter.local_counters[thread_id].counter, -1, __ATOMIC_SEQ_CST);
   return;
 }
+#endif
 
 /**
  * Try to acquire a write lock and spin until the lock is available.
