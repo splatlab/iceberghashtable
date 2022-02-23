@@ -15,6 +15,7 @@ extern "C" {
 #define D_CHOICES 2
 #define MAX_LG_LG_N 4
 #define C_LV2 6
+#define MAX_RESIZES 8
 
   typedef uint64_t KeyType;
   typedef uint64_t ValueType;
@@ -55,32 +56,33 @@ extern "C" {
     uint64_t nblocks;
     uint64_t nslots;
     uint64_t block_bits;
+    uint64_t log_init_size;
     int64_t lv1_ctr;
     int64_t lv2_ctr;
     int64_t lv3_ctr;
     pc_t lv1_balls;
     pc_t lv2_balls;
     pc_t lv3_balls;
-    iceberg_lv1_block_md * lv1_md;
-    iceberg_lv2_block_md * lv2_md;
-    uint64_t * lv3_sizes;
-    uint8_t * lv3_locks;
+    iceberg_lv1_block_md * lv1_md[MAX_RESIZES];
+    iceberg_lv2_block_md * lv2_md[MAX_RESIZES];
+    uint64_t * lv3_sizes[MAX_RESIZES];
+    uint8_t * lv3_locks[MAX_RESIZES];
 #ifdef ENABLE_RESIZE
     ReaderWriterLock rw_lock;
     uint64_t lv1_resize_ctr;
     uint64_t lv2_resize_ctr;
     uint64_t lv3_resize_ctr;
-    uint8_t * lv1_resize_marker;
-    uint8_t * lv2_resize_marker;
-    uint8_t * lv3_resize_marker;
+    uint8_t * lv1_resize_marker[MAX_RESIZES];
+    uint8_t * lv2_resize_marker[MAX_RESIZES];
+    uint8_t * lv3_resize_marker[MAX_RESIZES];
 #endif
   } iceberg_metadata;
 
   typedef struct iceberg_table {
     iceberg_metadata metadata;
-    iceberg_lv1_block * level1;
-    iceberg_lv2_block * level2;
-    iceberg_lv3_list * level3;
+    iceberg_lv1_block * level1[MAX_RESIZES];
+    iceberg_lv2_block * level2[MAX_RESIZES];
+    iceberg_lv3_list * level3[MAX_RESIZES];
   } iceberg_table;
 
   uint64_t lv1_balls(iceberg_table * table);

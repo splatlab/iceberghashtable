@@ -8,6 +8,7 @@
 #include <tmmintrin.h>
 #include <sys/mman.h>
 #include <sys/sysinfo.h>
+#include <math.h>
 
 #include "hashutil.h"
 #include "iceberg_precompute.h"
@@ -18,9 +19,6 @@
 
 uint64_t seed[5] = { 12351327692179052ll, 23246347347385899ll, 35236262354132235ll, 13604702930934770ll, 57439820692984798ll };
 
-pthread_cond_t resize_cond = PTHREAD_COND_INITIALIZER;
-pthread_mutex_t resize_mutex = PTHREAD_MUTEX_INITIALIZER;
-
 static inline uint64_t nonzero_fprint(uint64_t hash) {
   return hash & ((1 << FPRINT_BITS) - 2) ? hash : hash | 2;
 }
@@ -29,16 +27,8 @@ static inline uint64_t lv1_hash(KeyType key) {
   return nonzero_fprint(MurmurHash64A(&key, FPRINT_BITS, seed[0]));
 }
 
-static inline uint64_t lv1_hash_inline(KeyType key) {
-  return nonzero_fprint(MurmurHash64A_inline(&key, FPRINT_BITS, seed[0]));
-}
-
 static inline uint64_t lv2_hash(KeyType key, uint8_t i) {
   return nonzero_fprint(MurmurHash64A(&key, FPRINT_BITS, seed[i + 1]));
-}
-
-static inline uint64_t lv2_hash_inline(KeyType key, uint8_t i) {
-  return nonzero_fprint(MurmurHash64A_inline(&key, FPRINT_BITS, seed[i + 1]));
 }
 
 static inline uint8_t word_select(uint64_t val, int rank) {
@@ -106,6 +96,10 @@ bool need_resize(iceberg_table * table) {
 }
 #endif
 
+static inline uint64_t get_block_index(iceberg_table * table, uint64_t index) {
+  return std::floor(std::log2(index) - table->metadata->log_init_size;
+}
+ 
 static inline void split_hash(uint64_t hash, uint8_t *fprint, uint64_t *index, iceberg_metadata * metadata) {	
   *fprint = hash & ((1 << FPRINT_BITS) - 1);
   *index = (hash >> FPRINT_BITS) & ((1 << metadata->block_bits) - 1);
@@ -959,7 +953,7 @@ static inline bool iceberg_lv2_get_value(iceberg_table * table, KeyType key, Val
     uint8_t fprint;
     uint64_t index;
 
-    split_hash(lv2_hash_inline(key, i), &fprint, &index, metadata);
+    split_hash(lv2_hash(key, i), &fprint, &index, metadata);
 
 #ifdef ENABLE_RESIZE
     // check if there's an active resize and block isn't fixed yet
@@ -1018,7 +1012,7 @@ bool iceberg_get_value(iceberg_table * table, KeyType key, ValueType **value, ui
   uint8_t fprint;
   uint64_t index;
 
-  split_hash(lv1_hash_inline(key), &fprint, &index, metadata);
+  split_hash(lv1_hash(key), &fprint, &index, metadata);
 
 #ifdef ENABLE_RESIZE
   // check if there's an active resize and block isn't fixed yet
