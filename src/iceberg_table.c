@@ -96,8 +96,26 @@ bool need_resize(iceberg_table * table) {
 }
 #endif
 
-static inline uint64_t get_block_index(iceberg_table * table, uint64_t index) {
-  return std::floor(std::log2(index) - table->metadata->log_init_size;
+unsigned int prevPowerOf2(unsigned int n) 
+{
+    n--;
+    n |= n >> 1;
+    n |= n >> 2;
+    n |= n >> 4;
+    n |= n >> 8;
+    n |= n >> 16;
+    n++;
+    return n>>1;
+}
+
+static inline void get_block_index_offset(iceberg_table * table, uint64_t index, uint64_t *bindex, uint64_t *boffset) {
+  if (index < table->metadata.init_size) {
+    *bindex = 0;
+    *boffset = index;
+    return;
+  }
+  *bindex = std::floor(std::log2(index)) - table->metadata.log_init_size + 1;
+  *boffset = index - prevPowerOf2(index);
 }
  
 static inline void split_hash(uint64_t hash, uint8_t *fprint, uint64_t *index, iceberg_metadata * metadata) {	
@@ -118,14 +136,16 @@ static inline uint64_t slot_mask_64(uint8_t * metadata, uint8_t fprint) {
 }
 
 static uint64_t iceberg_block_load(iceberg_table * table, uint64_t index, uint8_t level) {
+  uint64_t bindex, boffset;
+  get_block_index_offset(table, index, &bindex, &boffset);
   if (level == 1) {
-      __mmask64 mask64 = slot_mask_64(table->metadata.lv1_md[index].block_md, 0);
+      __mmask64 mask64 = slot_mask_64(table->metadata.lv1_md[bindex][boffset].block_md, 0);
       return (1ULL << SLOT_BITS) - __builtin_popcountll(mask64); 
   } else if (level == 2) {
-      __mmask32 mask32 = slot_mask_32(table->metadata.lv2_md[index].block_md, 0) & ((1 << (C_LV2 + MAX_LG_LG_N / D_CHOICES)) - 1);
+      __mmask32 mask32 = slot_mask_32(table->metadata.lv2_md[bindex][boffset].block_md, 0) & ((1 << (C_LV2 + MAX_LG_LG_N / D_CHOICES)) - 1);
       return (C_LV2 + MAX_LG_LG_N / D_CHOICES) - __builtin_popcountll(mask32);
   } else
-      return table->metadata.lv3_sizes[index];
+      return table->metadata.lv3_sizes[bindex][boffset];
 }
 
 static uint64_t iceberg_table_load(iceberg_table * table) {
@@ -173,20 +193,20 @@ int iceberg_init(iceberg_table *table, uint64_t log_slots) {
 #endif
   size_t level1_size = sizeof(iceberg_lv1_block) * total_blocks;
   //table->level1 = (iceberg_lv1_block *)malloc(level1_size);
-  table->level1 = (iceberg_lv1_block *)mmap(NULL, level1_size, PROT_READ | PROT_WRITE, mmap_flags, 0, 0);
+  table->level1[0] = (iceberg_lv1_block *)mmap(NULL, level1_size, PROT_READ | PROT_WRITE, mmap_flags, 0, 0);
   if (!table->level1) {
     perror("level1 malloc failed");
     exit(1);
   }
   size_t level2_size = sizeof(iceberg_lv2_block) * total_blocks;
   //table->level2 = (iceberg_lv2_block *)malloc(level2_size);
-  table->level2 = (iceberg_lv2_block *)mmap(NULL, level2_size, PROT_READ | PROT_WRITE, mmap_flags, 0, 0);
+  table->level2[0] = (iceberg_lv2_block *)mmap(NULL, level2_size, PROT_READ | PROT_WRITE, mmap_flags, 0, 0);
   if (!table->level2) {
     perror("level2 malloc failed");
     exit(1);
   }
   size_t level3_size = sizeof(iceberg_lv3_list) * total_blocks;
-  table->level3 = (iceberg_lv3_list *)mmap(NULL, level3_size, PROT_READ | PROT_WRITE, mmap_flags, 0, 0);
+  table->level3[0] = (iceberg_lv3_list *)mmap(NULL, level3_size, PROT_READ | PROT_WRITE, mmap_flags, 0, 0);
   if (!table->level3) {
     perror("level3 malloc failed");
     exit(1);
@@ -196,6 +216,8 @@ int iceberg_init(iceberg_table *table, uint64_t log_slots) {
   table->metadata.nslots = 1 << log_slots;
   table->metadata.nblocks = total_blocks;
   table->metadata.block_bits = log_slots - SLOT_BITS;
+  table->metadata.init_size = total_blocks;
+  table->metadata.log_init_size = std::log2(total_blocks);
 
   uint32_t procs = get_nprocs();
   pc_init(&table->metadata.lv1_balls, &table->metadata.lv1_ctr, procs, 1000);
@@ -204,24 +226,24 @@ int iceberg_init(iceberg_table *table, uint64_t log_slots) {
 
   size_t lv1_md_size = sizeof(iceberg_lv1_block_md) * total_blocks + 64;
   //table->metadata.lv1_md = (iceberg_lv1_block_md *)malloc(sizeof(iceberg_lv1_block_md) * total_blocks);
-  table->metadata.lv1_md = (iceberg_lv1_block_md *)mmap(NULL, lv1_md_size, PROT_READ | PROT_WRITE, mmap_flags, 0, 0);
+  table->metadata.lv1_md[0] = (iceberg_lv1_block_md *)mmap(NULL, lv1_md_size, PROT_READ | PROT_WRITE, mmap_flags, 0, 0);
   if (!table->metadata.lv1_md) {
     perror("lv1_md malloc failed");
     exit(1);
   }
   //table->metadata.lv2_md = (iceberg_lv2_block_md *)malloc(sizeof(iceberg_lv2_block_md) * total_blocks);
   size_t lv2_md_size = sizeof(iceberg_lv2_block_md) * total_blocks + 32;
-  table->metadata.lv2_md = (iceberg_lv2_block_md *)mmap(NULL, lv2_md_size, PROT_READ | PROT_WRITE, mmap_flags, 0, 0);
+  table->metadata.lv2_md[0] = (iceberg_lv2_block_md *)mmap(NULL, lv2_md_size, PROT_READ | PROT_WRITE, mmap_flags, 0, 0);
   if (!table->metadata.lv2_md) {
     perror("lv2_md malloc failed");
     exit(1);
   }
-  table->metadata.lv3_sizes = (uint64_t *)mmap(NULL, sizeof(uint64_t) * total_blocks, PROT_READ | PROT_WRITE, mmap_flags, 0, 0);
+  table->metadata.lv3_sizes[0] = (uint64_t *)mmap(NULL, sizeof(uint64_t) * total_blocks, PROT_READ | PROT_WRITE, mmap_flags, 0, 0);
   if (!table->metadata.lv3_sizes) {
     perror("lv3_sizes malloc failed");
     exit(1);
   }
-  table->metadata.lv3_locks = (uint8_t *)mmap(NULL, sizeof(uint8_t) * total_blocks, PROT_READ | PROT_WRITE, mmap_flags, 0, 0);
+  table->metadata.lv3_locks[0] = (uint8_t *)mmap(NULL, sizeof(uint8_t) * total_blocks, PROT_READ | PROT_WRITE, mmap_flags, 0, 0);
   if (!table->metadata.lv3_locks) {
     perror("lv3_locks malloc failed");
     exit(1);
@@ -259,17 +281,17 @@ int iceberg_init(iceberg_table *table, uint64_t log_slots) {
   for (uint64_t i = 0; i < total_blocks; ++i) {
 
     for (uint64_t j = 0; j < (1 << SLOT_BITS); ++j) {
-      table->metadata.lv1_md[i].block_md[j] = 0;
-      table->level1[i].slots[j].key = table->level1[i].slots[j].val = 0;
+      table->metadata.lv1_md[0][i].block_md[j] = 0;
+      table->level1[0][i].slots[j].key = table->level1[0][i].slots[j].val = 0;
     }
 
     for (uint64_t j = 0; j < C_LV2 + MAX_LG_LG_N / D_CHOICES; ++j) {
-      table->metadata.lv2_md[i].block_md[j] = 0;
-      table->level2[i].slots[j].key = table->level2[i].slots[j].val = 0;
+      table->metadata.lv2_md[0][i].block_md[j] = 0;
+      table->level2[0][i].slots[j].key = table->level2[0][i].slots[j].val = 0;
     }
 
-    table->level3->head = NULL;
-    table->metadata.lv3_sizes[i] = table->metadata.lv3_locks[i] = 0;
+    table->level3[0]->head = NULL;
+    table->metadata.lv3_sizes[0][i] = table->metadata.lv3_locks[0][i] = 0;
   }
 
   return 0;

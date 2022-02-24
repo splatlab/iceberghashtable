@@ -56,6 +56,7 @@ extern "C" {
     uint64_t nblocks;
     uint64_t nslots;
     uint64_t block_bits;
+    uint64_t init_size;
     uint64_t log_init_size;
     int64_t lv1_ctr;
     int64_t lv2_ctr;
