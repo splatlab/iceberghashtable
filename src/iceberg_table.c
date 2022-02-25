@@ -114,7 +114,7 @@ static inline void get_block_index_offset(iceberg_table * table, uint64_t index,
     *boffset = index;
     return;
   }
-  *bindex = std::floor(std::log2(index)) - table->metadata.log_init_size + 1;
+  *bindex = floor(log2(index)) - table->metadata.log_init_size + 1;
   *boffset = index - prevPowerOf2(index);
 }
 
@@ -124,7 +124,7 @@ static inline void get_marker_index_offset(iceberg_table * table, uint64_t index
     *moffset = index;
     return;
   }
-  *mindex = std::floor(std::log2(index)) - (table->metadata.log_init_size - 3) + 1;
+  *mindex = floor(log2(index)) - (table->metadata.log_init_size - 3) + 1;
   *moffset = index - prevPowerOf2(index);
 }
 
@@ -227,7 +227,7 @@ int iceberg_init(iceberg_table *table, uint64_t log_slots) {
   table->metadata.nblocks = total_blocks;
   table->metadata.block_bits = log_slots - SLOT_BITS;
   table->metadata.init_size = total_blocks;
-  table->metadata.log_init_size = std::log2(total_blocks);
+  table->metadata.log_init_size = log2(total_blocks);
 
   uint32_t procs = get_nprocs();
   pc_init(&table->metadata.lv1_balls, &table->metadata.lv1_ctr, procs, 1000);
@@ -1032,44 +1032,47 @@ static inline bool iceberg_lv2_get_value(iceberg_table * table, KeyType key, Val
     get_block_index_offset(table, index, &bindex, &boffset);
     iceberg_lv2_block * blocks = table->level2[bindex];
 
-
-    ///// done until here....
-    //
 #ifdef ENABLE_RESIZE
     // check if there's an active resize and block isn't fixed yet
     if (unlikely(index >= (table->metadata.nblocks >> 1) && is_lv2_resize_active(table))) {
       uint64_t mask = ~(1ULL << (table->metadata.block_bits - 1));
       uint64_t old_index = index & mask;
+      uint64_t old_bindex, old_boffset;
+      get_block_index_offset(table, old_index, &old_bindex, &old_boffset);
       uint64_t chunk_idx = old_index / 8;
-      if (__atomic_load_n(&table->metadata.lv2_resize_marker[chunk_idx], __ATOMIC_SEQ_CST) == 0) { // not fixed yet
-        __mmask32 md_mask = slot_mask_32(metadata->lv2_md[old_index].block_md, fprint) & ((1 << (C_LV2 + MAX_LG_LG_N / D_CHOICES)) - 1);
+      uint64_t mindex, moffset;
+      get_marker_index_offset(table, chunk_idx, &mindex, &moffset);
+      if (__atomic_load_n(&table->metadata.lv2_resize_marker[mindex][moffset], __ATOMIC_SEQ_CST) == 0) { // not fixed yet
+        __mmask32 md_mask = slot_mask_32(metadata->lv2_md[old_bindex][old_boffset].block_md, fprint) & ((1 << (C_LV2 + MAX_LG_LG_N / D_CHOICES)) - 1);
 
+        iceberg_lv2_block * blocks = table->level2[old_bindex];
         while (md_mask != 0) {
           int slot = __builtin_ctz(md_mask);
           md_mask = md_mask & ~(1U << slot);
 
-          if (blocks[old_index].slots[slot].key == key) {
-            *value = &blocks[old_index].slots[slot].val;
+          if (blocks[old_boffset].slots[slot].key == key) {
+            *value = &blocks[old_boffset].slots[slot].val;
             return true;
           }
         }
       } else {
         // wait for the old block to be fixed
         uint64_t dest_chunk_idx = index / 8;
-        while (__atomic_load_n(&table->metadata.lv2_resize_marker[dest_chunk_idx], __ATOMIC_SEQ_CST) == 0)
+        get_marker_index_offset(table, dest_chunk_idx, &mindex, &moffset);
+        while (__atomic_load_n(&table->metadata.lv2_resize_marker[mindex][moffset], __ATOMIC_SEQ_CST) == 0)
           ;
       }
     }
 #endif
 
-    __mmask32 md_mask = slot_mask_32(metadata->lv2_md[index].block_md, fprint) & ((1 << (C_LV2 + MAX_LG_LG_N / D_CHOICES)) - 1);
+    __mmask32 md_mask = slot_mask_32(metadata->lv2_md[bindex][boffset].block_md, fprint) & ((1 << (C_LV2 + MAX_LG_LG_N / D_CHOICES)) - 1);
 
     while (md_mask != 0) {
       int slot = __builtin_ctz(md_mask);
       md_mask = md_mask & ~(1U << slot);
 
-      if (blocks[index].slots[slot].key == key) {
-        *value = &blocks[index].slots[slot].val;
+      if (blocks[boffset].slots[slot].key == key) {
+        *value = &blocks[boffset].slots[slot].val;
         return true;
       }
     }
@@ -1087,28 +1090,36 @@ bool iceberg_get_value(iceberg_table * table, KeyType key, ValueType **value, ui
 #endif
 
   iceberg_metadata * metadata = &table->metadata;
-  iceberg_lv1_block * blocks = table->level1;
-
+  
   uint8_t fprint;
   uint64_t index;
 
   split_hash(lv1_hash(key), &fprint, &index, metadata);
+
+  uint64_t bindex, boffset;
+  get_block_index_offset(table, index, &bindex, &boffset);
+  iceberg_lv1_block * blocks = table->level1[bindex];
 
 #ifdef ENABLE_RESIZE
   // check if there's an active resize and block isn't fixed yet
   if (unlikely(index >= (table->metadata.nblocks >> 1) && is_lv1_resize_active(table))) {
     uint64_t mask = ~(1ULL << (table->metadata.block_bits - 1));
     uint64_t old_index = index & mask;
+    uint64_t old_bindex, old_boffset;
+    get_block_index_offset(table, old_index, &old_bindex, &old_boffset);
     uint64_t chunk_idx = old_index / 8;
-    if (__atomic_load_n(&table->metadata.lv1_resize_marker[chunk_idx], __ATOMIC_SEQ_CST) == 0) { // not fixed yet
-      __mmask64 md_mask = slot_mask_64(metadata->lv1_md[old_index].block_md, fprint);
+    uint64_t mindex, moffset;
+    get_marker_index_offset(table, chunk_idx, &mindex, &moffset);
+    if (__atomic_load_n(&table->metadata.lv1_resize_marker[mindex][moffset], __ATOMIC_SEQ_CST) == 0) { // not fixed yet
+      __mmask64 md_mask = slot_mask_64(metadata->lv1_md[old_bindex][old_boffset].block_md, fprint);
 
+      iceberg_lv2_block * blocks = table->level2[old_bindex];
       while (md_mask != 0) {
         int slot = __builtin_ctzll(md_mask);
         md_mask = md_mask & ~(1ULL << slot);
 
-        if (blocks[old_index].slots[slot].key == key) {
-          *value = &blocks[old_index].slots[slot].val;
+        if (blocks[old_boffset].slots[slot].key == key) {
+          *value = &blocks[old_boffset].slots[slot].val;
           read_unlock(&table->metadata.rw_lock, thread_id);
           return true;
         }
@@ -1116,20 +1127,21 @@ bool iceberg_get_value(iceberg_table * table, KeyType key, ValueType **value, ui
     } else {
       // wait for the old block to be fixed
       uint64_t dest_chunk_idx = index / 8;
-      while (__atomic_load_n(&table->metadata.lv1_resize_marker[dest_chunk_idx], __ATOMIC_SEQ_CST) == 0)
+      get_marker_index_offset(table, dest_chunk_idx, &mindex, &moffset);
+      while (__atomic_load_n(&table->metadata.lv1_resize_marker[mindex][moffset], __ATOMIC_SEQ_CST) == 0)
         ;
     }
   }
 #endif
 
-  __mmask64 md_mask = slot_mask_64(metadata->lv1_md[index].block_md, fprint);
+  __mmask64 md_mask = slot_mask_64(metadata->lv1_md[bindex][boffset].block_md, fprint);
 
   while (md_mask != 0) {
     int slot = __builtin_ctzll(md_mask);
     md_mask = md_mask & ~(1ULL << slot);
 
-    if (blocks[index].slots[slot].key == key) {
-      *value = &blocks[index].slots[slot].val;
+    if (blocks[boffset].slots[slot].key == key) {
+      *value = &blocks[boffset].slots[slot].val;
 #ifdef ENABLE_RESIZE
       read_unlock(&table->metadata.rw_lock, thread_id);
 #endif
@@ -1148,18 +1160,19 @@ bool iceberg_get_value(iceberg_table * table, KeyType key, ValueType **value, ui
 
 #ifdef ENABLE_RESIZE
 static bool iceberg_nuke_key(iceberg_table * table, uint64_t level, uint64_t index, uint64_t slot, uint64_t thread_id) {
-
+  uint64_t bindex, boffset;
+  get_block_index_offset(table, index, &bindex, &boffset);
   iceberg_metadata * metadata = &table->metadata;
 
   if (level == 1) {
-    iceberg_lv1_block * blocks = table->level1;
-    metadata->lv1_md[index].block_md[slot] = 0;
-    blocks[index].slots[slot].key = blocks[index].slots[slot].val = 0;
+    iceberg_lv1_block * blocks = table->level1[bindex];
+    metadata->lv1_md[bindex][boffset].block_md[slot] = 0;
+    blocks[boffset].slots[slot].key = blocks[boffset].slots[slot].val = 0;
     pc_add(&metadata->lv1_balls, -1, thread_id);
   } else if (level == 2) {
-    iceberg_lv2_block * blocks = table->level2;
-    metadata->lv2_md[index].block_md[slot] = 0;
-    blocks[index].slots[slot].key = blocks[index].slots[slot].val = 0;
+    iceberg_lv2_block * blocks = table->level2[bindex];
+    metadata->lv2_md[bindex][boffset].block_md[slot] = 0;
+    blocks[boffset].slots[slot].key = blocks[boffset].slots[slot].val = 0;
     pc_add(&metadata->lv2_balls, -1, thread_id);
   }
 
@@ -1172,12 +1185,14 @@ static bool iceberg_lv1_move_block(iceberg_table * table, uint64_t bnum, uint8_t
   if (bctr >= (table->metadata.nblocks >> 1))
     return true;
 
+  uint64_t bindex, boffset;
+  get_block_index_offset(table, bnum, &bindex, &boffset);
   // relocate items in level1
   for (uint64_t j = 0; j < (1 << SLOT_BITS); ++j) {
-    KeyType key = table->level1[bnum].slots[j].key;
+    KeyType key = table->level1[bindex][boffset].slots[j].key;
     if (key == 0)
       continue;
-    ValueType value = table->level1[bnum].slots[j].val;
+    ValueType value = table->level1[bindex][boffset].slots[j].val;
     uint8_t fprint;
     uint64_t index;
 
@@ -1209,13 +1224,15 @@ static bool iceberg_lv2_move_block(iceberg_table * table, uint64_t bnum, uint8_t
   if (bctr >= (table->metadata.nblocks >> 1))
     return true;
 
+  uint64_t bindex, boffset;
+  get_block_index_offset(table, bnum, &bindex, &boffset);
   uint64_t mask = ~(1ULL << (table->metadata.block_bits - 1));
   // relocate items in level2
   for (uint64_t j = 0; j < C_LV2 + MAX_LG_LG_N / D_CHOICES; ++j) {
-    KeyType key = table->level2[bnum].slots[j].key;
+    KeyType key = table->level2[bindex][boffset].slots[j].key;
     if (key == 0)
       continue;
-    ValueType value = table->level2[bnum].slots[j].val;
+    ValueType value = table->level2[bindex][boffset].slots[j].val;
     uint8_t fprint;
     uint64_t index;
 
@@ -1258,9 +1275,11 @@ static bool iceberg_lv3_move_block(iceberg_table * table, uint64_t bnum, uint8_t
   if (bctr >= (table->metadata.nblocks >> 1))
     return true;
 
+  uint64_t bindex, boffset;
+  get_block_index_offset(table, bnum, &bindex, &boffset);
   // relocate items in level3
   if(unlikely(table->metadata.lv3_sizes[bnum])) {
-    iceberg_lv3_node * current_node = table->level3[bnum].head;
+    iceberg_lv3_node * current_node = table->level3[bindex][boffset].head;
 
     while (current_node != NULL) {
       KeyType key = current_node->key;
