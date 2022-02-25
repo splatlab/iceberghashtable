@@ -70,6 +70,7 @@ extern "C" {
     uint8_t * lv3_locks[MAX_RESIZES];
 #ifdef ENABLE_RESIZE
     ReaderWriterLock rw_lock;
+    uint64_t resize_cnt;
     uint64_t lv1_resize_ctr;
     uint64_t lv2_resize_ctr;
     uint64_t lv3_resize_ctr;

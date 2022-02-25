@@ -117,7 +117,17 @@ static inline void get_block_index_offset(iceberg_table * table, uint64_t index,
   *bindex = std::floor(std::log2(index)) - table->metadata.log_init_size + 1;
   *boffset = index - prevPowerOf2(index);
 }
- 
+
+static inline void get_marker_index_offset(iceberg_table * table, uint64_t index, uint64_t *mindex, uint64_t *moffset) {
+  if (index < table->metadata.init_size / 8) {
+    *mindex = 0;
+    *moffset = index;
+    return;
+  }
+  *mindex = std::floor(std::log2(index)) - (table->metadata.log_init_size - 3) + 1;
+  *moffset = index - prevPowerOf2(index);
+}
+
 static inline void split_hash(uint64_t hash, uint8_t *fprint, uint64_t *index, iceberg_metadata * metadata) {	
   *fprint = hash & ((1 << FPRINT_BITS) - 1);
   *index = (hash >> FPRINT_BITS) & ((1 << metadata->block_bits) - 1);
@@ -250,6 +260,7 @@ int iceberg_init(iceberg_table *table, uint64_t log_slots) {
   }
 
 #ifdef ENABLE_RESIZE
+  table->metadata.resize_cnt = 0;
   table->metadata.lv1_resize_ctr = total_blocks;
   table->metadata.lv2_resize_ctr = total_blocks;
   table->metadata.lv3_resize_ctr = total_blocks;
@@ -344,114 +355,113 @@ static bool iceberg_setup_resize(iceberg_table * table) {
   /*printf("Number level 3 inserts: %ld\n", lv3_balls(table));*/
   /*printf("Total inserts: %ld\n", tot_balls(table));*/
 
+  // increment resize cnt
+  table->metadata.resize_cnt += 1;
+
   // reset the block ctr 
   table->metadata.lv1_resize_ctr = 0;
   table->metadata.lv2_resize_ctr = 0;
   table->metadata.lv3_resize_ctr = 0;
 
+#if defined(HUGE_TLB)
+  int mmap_flags = MAP_PRIVATE | MAP_ANONYMOUS | MAP_POPULATE | MAP_HUGETLB;
+#else
+  int mmap_flags = MAP_PRIVATE | MAP_ANONYMOUS | MAP_POPULATE;
+#endif
+
   // compute new sizes
-  uint64_t total_blocks = table->metadata.nblocks * 2;
-  uint64_t total_size_in_bytes = (sizeof(iceberg_lv1_block) + sizeof(iceberg_lv2_block) + sizeof(iceberg_lv1_block_md) + sizeof(iceberg_lv2_block_md)) * total_blocks;
+  uint64_t cur_blocks = table->metadata.nblocks;
 
   // remap level1
-  size_t level1_size = sizeof(iceberg_lv1_block) * total_blocks;
-  void * l1temp = mremap(table->level1, level1_size/2, level1_size, MREMAP_MAYMOVE);
-  if (l1temp == (void *)-1) {
-    perror("level1 remap failed");
+  size_t level1_size = sizeof(iceberg_lv1_block) * cur_blocks;
+  table->level1[resize_cnt] = (iceberg_lv1_block *)mmap(NULL, level1_size, PROT_READ | PROT_WRITE, mmap_flags, 0, 0);
+  if (table->level1[resize_cnt] == (void *)-1) {
+    perror("level1 resize failed");
     exit(1);
   }
-  table->level1 = l1temp;
 
   // remap level2
-  size_t level2_size = sizeof(iceberg_lv2_block) * total_blocks;
-  void * l2temp = mremap(table->level2, level2_size/2, level2_size, MREMAP_MAYMOVE);
-  if (l2temp == (void *)-1) {
-    perror("level2 remap failed");
+  size_t level2_size = sizeof(iceberg_lv2_block) * cur_blocks;
+  table->level2[resize_cnt] = (iceberg_lv2_block *)mmap(NULL, level2_size, PROT_READ | PROT_WRITE, mmap_flags, 0, 0);
+  if (table->level2[resize_cnt] == (void *)-1) {
+    perror("level2 resize failed");
     exit(1);
   }
-  table->level2 = l2temp;
 
   // remap level3
-  size_t level3_size = sizeof(iceberg_lv3_list) * total_blocks;
-  void * l3temp = mremap(table->level3, level3_size/2, level3_size, MREMAP_MAYMOVE);
-  if (l3temp == (void *)-1) {
-    perror("level3 remap failed");
+  size_t level3_size = sizeof(iceberg_lv3_list) * cur_blocks;
+  table->level3[resize_cnt] = (iceberg_lv3_list *)mmap(NULL, level3_size, PROT_READ | PROT_WRITE, mmap_flags, 0, 0);
+  if (table->level3[resize_cnt] == (void *)-1) {
+    perror("level3 resize failed");
     exit(1);
   }
-  table->level3 = l3temp;
 
+  // remap level1 metadata
+  size_t lv1_md_size = sizeof(iceberg_lv1_block_md) * cur_blocks + 64;
+  table->metadata.lv1_md[resize_cnt] = (iceberg_lv1_block_md *)mmap(NULL, lv1_md_size, PROT_READ | PROT_WRITE, mmap_flags, 0, 0);
+  if (table->metadata.lv1_md[resize_cnt] == (void *)-1) {
+    perror("lv1_md resize failed");
+    exit(1);
+  }
+
+  // remap level2 metadata
+  size_t lv2_md_size = sizeof(iceberg_lv2_block_md) * cur_blocks + 32;
+  table->metadata.lv2_md[resize_cnt] = (iceberg_lv2_block_md *)mmap(NULL, lv2_md_size, PROT_READ | PROT_WRITE, mmap_flags, 0, 0);
+  if (table->metadata.lv2_md[resize_cnt] == (void *)-1) {
+    perror("lv2_md resize failed");
+    exit(1);
+  }
+
+  // re alloc level3 metadata (sizes, locks)
+  size_t lv3_sizes_size = sizeof(uint64_t) * cur_blocks;
+  table->metadata.lv3_sizes[resize_cnt] = (uint64_t *)mmap(NULL, lv3_sizes_size, PROT_READ | PROT_WRITE, mmap_flags, 0, 0);
+  if (table->metadata.lv3_sizes[resize_cnt] == (void *)-1) {
+    perror("lv3_sizes resize failed");
+    exit(1);
+  }
+
+  size_t lv3_locks_size = sizeof(uint8_t) * cur_blocks;
+  table->metadata.lv3_locks[resize_cnt] = (uint8_t *)mmap(NULL, lv3_locks_size, PROT_READ | PROT_WRITE, mmap_flags, 0, 0);
+  if (lv3ltemp == (void *)-1) {
+    perror("lv3_locks remap failed");
+    exit(1);
+  }
+
+  // remap resize markers
+  // resize_marker_size
+  size_t resize_marker_size = sizeof(uint8_t) * cur_blocks / 8;
+  table->metadata.lv1_resize_marker[resize_cnt] = (uint8_t *)mmap(NULL, resize_marker_size, PROT_READ | PROT_WRITE, mmap_flags, 0, 0);
+  if (table->metadata.lv1_resize_marker[resize_cnt] == (void *)-1) {
+    perror("level1 resize failed");
+    exit(1);
+  }
+
+  table->metadata.lv2_resize_marker[resize_cnt] = (uint8_t *)mmap(NULL, resize_marker_size, PROT_READ | PROT_WRITE, mmap_flags, 0, 0);
+  if (table->metadata.lv2_resize_marker[resize_cnt] == (void *)-1) {
+    perror("level1 resize failed");
+    exit(1);
+  }
+
+  table->metadata.lv3_resize_marker[resize_cnt] = (uint8_t *)mmap(NULL, resize_marker_size, PROT_READ | PROT_WRITE, mmap_flags, 0, 0);
+  if (table->metadata.lv3_resize_marker[resize_cnt] == (void *)-1) {
+    perror("level1 resize failed");
+    exit(1);
+  }
+
+  // resetting the resize markers. First half of the table needs resizing.
+  // Assuming a new resize won't be invoked while another resize is active.
+  memset(table->metadata.lv1_resize_marker[resize_cnt], 0, resize_marker_size);
+  memset(table->metadata.lv2_resize_marker[resize_cnt], 0, resize_marker_size);
+  memset(table->metadata.lv3_resize_marker[resize_cnt], 0, resize_marker_size);
+
+  uint64_t total_blocks = table->metadata.nblocks * 2;
+  uint64_t total_size_in_bytes = (sizeof(iceberg_lv1_block) + sizeof(iceberg_lv2_block) + sizeof(iceberg_lv1_block_md) + sizeof(iceberg_lv2_block_md)) * total_blocks;
+  
   // update metadata
   table->metadata.total_size_in_bytes = total_size_in_bytes;
   table->metadata.nslots *= 2;
   table->metadata.nblocks = total_blocks;
   table->metadata.block_bits += 1;
-
-  // remap level1 metadata
-  size_t lv1_md_size = sizeof(iceberg_lv1_block_md) * total_blocks + 64;
-  size_t old_lv1_md_size = sizeof(iceberg_lv1_block_md) * total_blocks/2 + 64;
-  void * lm1temp = mremap(table->metadata.lv1_md, old_lv1_md_size, lv1_md_size, MREMAP_MAYMOVE);
-  if (lm1temp == (void *)-1) {
-    perror("lv1_md remap failed");
-    exit(1);
-  }
-  table->metadata.lv1_md = lm1temp;
-
-  // remap level2 metadata
-  size_t lv2_md_size = sizeof(iceberg_lv2_block_md) * total_blocks + 32;
-  size_t old_lv2_md_size = sizeof(iceberg_lv2_block_md) * total_blocks/2 + 32;
-  void * lm2temp = mremap(table->metadata.lv2_md, old_lv2_md_size, lv2_md_size, MREMAP_MAYMOVE);
-  if (lm2temp == (void *)-1) {
-    perror("lv2_md remap failed");
-    exit(1);
-  }
-  table->metadata.lv2_md = lm2temp;
-
-  // re alloc level3 metadata (sizes, locks)
-  size_t lv3_sizes_size = sizeof(uint64_t) * total_blocks;
-  void * lv3stemp = mremap(table->metadata.lv3_sizes, lv3_sizes_size/2, lv3_sizes_size, MREMAP_MAYMOVE);
-  if (lv3stemp == (void *)-1) {
-    perror("lv3_sizes remap failed");
-    exit(1);
-  }
-  table->metadata.lv3_sizes = lv3stemp;
-
-  size_t lv3_locks_size = sizeof(uint8_t) * total_blocks;
-  void * lv3ltemp = mremap(table->metadata.lv3_locks, lv3_locks_size/2, lv3_locks_size, MREMAP_MAYMOVE);
-  if (lv3ltemp == (void *)-1) {
-    perror("lv3_locks remap failed");
-    exit(1);
-  }
-  table->metadata.lv3_locks = lv3ltemp;
-
-  // remap resize markers
-  // resize_marker_size
-  size_t resize_marker_size = sizeof(uint8_t) * total_blocks / 8;
-  void * l1mtemp = mremap(table->metadata.lv1_resize_marker, resize_marker_size/2, resize_marker_size, MREMAP_MAYMOVE);
-  if (l1mtemp == (void *)-1) {
-    perror("level1 remap failed");
-    exit(1);
-  }
-  table->metadata.lv1_resize_marker = l1mtemp;
-
-  void * l2mtemp = mremap(table->metadata.lv2_resize_marker, resize_marker_size/2, resize_marker_size, MREMAP_MAYMOVE);
-  if (l2mtemp == (void *)-1) {
-    perror("level1 remap failed");
-    exit(1);
-  }
-  table->metadata.lv2_resize_marker = l2mtemp;
-
-  void * l3mtemp = mremap(table->metadata.lv3_resize_marker, resize_marker_size/2, resize_marker_size, MREMAP_MAYMOVE);
-  if (l3mtemp == (void *)-1) {
-    perror("level1 remap failed");
-    exit(1);
-  }
-  table->metadata.lv3_resize_marker = l3mtemp;
-
-  // resetting the resize markers. First half of the table needs resizing.
-  // Assuming a new resize won't be invoked while another resize is active.
-  memset(table->metadata.lv1_resize_marker, 0, resize_marker_size);
-  memset(table->metadata.lv2_resize_marker, 0, resize_marker_size);
-  memset(table->metadata.lv3_resize_marker, 0, resize_marker_size);
 
   /*printf("Setting up finished\n");*/
   write_unlock(&table->metadata.rw_lock);
@@ -467,45 +477,54 @@ void iceberg_end(iceberg_table * table) {
   if (is_lv1_resize_active(table)) {
     for (uint64_t j = 0; j < table->metadata.nblocks / 8; ++j) {
       uint64_t chunk_idx = j;
+      uint64_t mindex, moffset;
+      get_marker_index_offset(table, chunk_idx, &mindex, &moffset);
       // if fixing is needed set the marker
-      if (!__sync_lock_test_and_set(&table->metadata.lv1_resize_marker[chunk_idx], 1)) {
+      if (!__sync_lock_test_and_set(&table->metadata.lv1_resize_marker[mindex][moffset], 1)) {
         for (uint8_t i = 0; i < 8; ++i) {
           uint64_t idx = chunk_idx * 8 + i;
           iceberg_lv1_move_block(table, idx, 0);
         }
         // set the marker for the dest block
         uint64_t dest_chunk_idx = chunk_idx + table->metadata.nblocks / 8 / 2;
-        __sync_lock_test_and_set(&table->metadata.lv1_resize_marker[dest_chunk_idx], 1);
+        get_marker_index_offset(table, dest_chunk_idx, &mindex, &moffset);
+        __sync_lock_test_and_set(&table->metadata.lv1_resize_marker[mindex][moffset], 1);
       }
     }
   }
   if (is_lv2_resize_active(table)) {
     for (uint64_t j = 0; j < table->metadata.nblocks / 8; ++j) {
       uint64_t chunk_idx = j;
+      uint64_t mindex, moffset;
+      get_marker_index_offset(table, chunk_idx, &mindex, &moffset);
       // if fixing is needed set the marker
-      if (!__sync_lock_test_and_set(&table->metadata.lv2_resize_marker[chunk_idx], 1)) {
+      if (!__sync_lock_test_and_set(&table->metadata.lv2_resize_marker[mindex][moffset], 1)) {
         for (uint8_t i = 0; i < 8; ++i) {
           uint64_t idx = chunk_idx * 8 + i;
           iceberg_lv2_move_block(table, idx, 0);
         }
         // set the marker for the dest block
         uint64_t dest_chunk_idx = chunk_idx + table->metadata.nblocks / 8 / 2;
-        __sync_lock_test_and_set(&table->metadata.lv2_resize_marker[dest_chunk_idx], 1);
+        get_marker_index_offset(table, dest_chunk_idx, &mindex, &moffset);
+        __sync_lock_test_and_set(&table->metadata.lv2_resize_marker[mindex][moffset], 1);
       }
     }
   }
   if (is_lv3_resize_active(table)) {
     for (uint64_t j = 0; j < table->metadata.nblocks / 8; ++j) {
       uint64_t chunk_idx = j;
+      uint64_t mindex, moffset;
+      get_marker_index_offset(table, chunk_idx, &mindex, &moffset);
       // if fixing is needed set the marker
-      if (!__sync_lock_test_and_set(&table->metadata.lv3_resize_marker[chunk_idx], 1)) {
+      if (!__sync_lock_test_and_set(&table->metadata.lv3_resize_marker[mindex][moffset], 1)) {
         for (uint8_t i = 0; i < 8; ++i) {
           uint64_t idx = chunk_idx * 8 + i;
           iceberg_lv3_move_block(table, idx, 0);
         }
         // set the marker for the dest block
         uint64_t dest_chunk_idx = chunk_idx + table->metadata.nblocks / 8 / 2;
-        __sync_lock_test_and_set(&table->metadata.lv3_resize_marker[dest_chunk_idx], 1);
+        get_marker_index_offset(table, dest_chunk_idx, &mindex, &moffset);
+        __sync_lock_test_and_set(&table->metadata.lv3_resize_marker[mindex][moffset], 1);
       }
     }
   }
@@ -520,8 +539,10 @@ static inline bool iceberg_lv3_insert(iceberg_table * table, KeyType key, ValueT
 #ifdef ENABLE_RESIZE
   if (unlikely(lv3_index < (table->metadata.nblocks >> 1) && is_lv3_resize_active(table))) {
     uint64_t chunk_idx = lv3_index / 8;
+    uint64_t mindex, moffset;
+    get_marker_index_offset(table, chunk_idx, &mindex, &moffset);
     // if fixing is needed set the marker
-    if (!__sync_lock_test_and_set(&table->metadata.lv3_resize_marker[chunk_idx], 1)) {
+    if (!__sync_lock_test_and_set(&table->metadata.lv3_resize_marker[mindex][moffset], 1)) {
       for (uint8_t i = 0; i < 8; ++i) {
         uint64_t idx = chunk_idx * 8 + i;
         /*printf("LV3 Before: Moving block: %ld load: %f\n", idx, iceberg_block_load(table, idx, 3));*/
@@ -530,46 +551,51 @@ static inline bool iceberg_lv3_insert(iceberg_table * table, KeyType key, ValueT
       }
       // set the marker for the dest block
       uint64_t dest_chunk_idx = chunk_idx + table->metadata.nblocks / 8 / 2;
-      __sync_lock_test_and_set(&table->metadata.lv3_resize_marker[dest_chunk_idx], 1);
+      get_marker_index_offset(table, dest_chunk_idx, &mindex, &moffset);
+      __sync_lock_test_and_set(&table->metadata.lv3_resize_marker[mindex][moffset], 1);
     }
   }
 #endif
 
+  uint64_t bindex, boffset;
+  get_block_index_offset(table, lv3_index, &bindex, &boffset);
   iceberg_metadata * metadata = &table->metadata;
-  iceberg_lv3_list * lists = table->level3;
+  iceberg_lv3_list * lists = table->level3[bindex];
 
-  while(__sync_lock_test_and_set(metadata->lv3_locks + lv3_index, 1));
+  while(__sync_lock_test_and_set(metadata->lv3_locks[bindex] + boffset, 1));
 
   iceberg_lv3_node * new_node = (iceberg_lv3_node *)malloc(sizeof(iceberg_lv3_node));
   new_node->key = key;
   new_node->val = value;
-  new_node->next_node = lists[lv3_index].head;
-  lists[lv3_index].head = new_node;
+  new_node->next_node = lists[boffset].head;
+  lists[boffset].head = new_node;
 
-  metadata->lv3_sizes[lv3_index]++;
+  metadata->lv3_sizes[bindex][boffset]++;
   pc_add(&metadata->lv3_balls, 1, thread_id);
-  metadata->lv3_locks[lv3_index] = 0;
+  metadata->lv3_locks[bindex][boffset] = 0;
 
   return true;
 }
 
 static inline bool iceberg_lv2_insert_internal(iceberg_table * table, KeyType key, ValueType value, uint8_t fprint, uint64_t index, uint8_t thread_id) {
+  uint64_t bindex, boffset;
+  get_block_index_offset(table, index, &bindex, &boffset);
+
   iceberg_metadata * metadata = &table->metadata;
-  iceberg_lv2_block * blocks = table->level2;
-  __mmask32 md_mask = slot_mask_32(metadata->lv2_md[index].block_md, 0) & ((1 << (C_LV2 + MAX_LG_LG_N / D_CHOICES)) - 1);
+  iceberg_lv2_block * blocks = table->level2[bindex];
+
+  __mmask32 md_mask = slot_mask_32(metadata->lv2_md[bindex][boffset].block_md, 0) & ((1 << (C_LV2 + MAX_LG_LG_N / D_CHOICES)) - 1);
   uint8_t popct = __builtin_popcountll(md_mask);
 
   for(uint8_t i = 0; i < popct; ++i) {
-
     uint8_t slot = word_select(md_mask, i);
 
-    if(__sync_bool_compare_and_swap(metadata->lv2_md[index].block_md + slot, 0, 1)) {
-
+    if(__sync_bool_compare_and_swap(metadata->lv2_md[bindex][boffset].block_md + slot, 0, 1)) {
       pc_add(&metadata->lv2_balls, 1, thread_id);
-      blocks[index].slots[slot].key = key;
-      blocks[index].slots[slot].val = value;
+      blocks[boffset].slots[slot].key = key;
+      blocks[boffset].slots[slot].val = value;
 
-      metadata->lv2_md[index].block_md[slot] = fprint;
+      metadata->lv2_md[bindex][boffset].block_md[slot] = fprint;
       return true;
     }
   }
@@ -590,8 +616,12 @@ static inline bool iceberg_lv2_insert(iceberg_table * table, KeyType key, ValueT
   split_hash(lv2_hash(key, 0), &fprint1, &index1, metadata);
   split_hash(lv2_hash(key, 1), &fprint2, &index2, metadata);
 
-  __mmask32 md_mask1 = slot_mask_32(metadata->lv2_md[index1].block_md, 0) & ((1 << (C_LV2 + MAX_LG_LG_N / D_CHOICES)) - 1);
-  __mmask32 md_mask2 = slot_mask_32(metadata->lv2_md[index2].block_md, 0) & ((1 << (C_LV2 + MAX_LG_LG_N / D_CHOICES)) - 1);
+  uint64_t bindex1, boffset1, bindex2, boffset2;
+  get_block_index_offset(table, index1, &bindex1, &boffset1);
+  get_block_index_offset(table, index2, &bindex2, &boffset2);
+
+  __mmask32 md_mask1 = slot_mask_32(metadata->lv2_md[bindex1][boffset1].block_md, 0) & ((1 << (C_LV2 + MAX_LG_LG_N / D_CHOICES)) - 1);
+  __mmask32 md_mask2 = slot_mask_32(metadata->lv2_md[bindex2][boffset2].block_md, 0) & ((1 << (C_LV2 + MAX_LG_LG_N / D_CHOICES)) - 1);
 
   uint8_t popct1 = __builtin_popcountll(md_mask1);
   uint8_t popct2 = __builtin_popcountll(md_mask2);
@@ -599,6 +629,8 @@ static inline bool iceberg_lv2_insert(iceberg_table * table, KeyType key, ValueT
   if(popct2 > popct1) {
     fprint1 = fprint2;
     index1 = index2;
+    bindex1 = bindex2;
+    boffset1 = boffset2;
     md_mask1 = md_mask2;
     popct1 = popct2;
   }
@@ -607,8 +639,10 @@ static inline bool iceberg_lv2_insert(iceberg_table * table, KeyType key, ValueT
   // move blocks if resize is active and not already moved.
   if (unlikely(index1 < (table->metadata.nblocks >> 1) && is_lv2_resize_active(table))) {
     uint64_t chunk_idx = index1 / 8;
+    uint64_t mindex, moffset;
+    get_marker_index_offset(table, chunk_idx, &mindex, &moffset);
     // if fixing is needed set the marker
-    if (!__sync_lock_test_and_set(&table->metadata.lv2_resize_marker[chunk_idx], 1)) {
+    if (!__sync_lock_test_and_set(&table->metadata.lv2_resize_marker[mindex][moffset], 1)) {
       for (uint8_t i = 0; i < 8; ++i) {
         uint64_t idx = chunk_idx * 8 + i;
         /*printf("LV2 Before: Moving block: %ld load: %f\n", idx, iceberg_block_load(table, idx, 2));*/
@@ -617,7 +651,8 @@ static inline bool iceberg_lv2_insert(iceberg_table * table, KeyType key, ValueT
       }
       // set the marker for the dest block
       uint64_t dest_chunk_idx = chunk_idx + table->metadata.nblocks / 8 / 2;
-      __sync_lock_test_and_set(&table->metadata.lv2_resize_marker[dest_chunk_idx], 1);
+      get_marker_index_offset(table, dest_chunk_idx, &mindex, &moffset);
+      __sync_lock_test_and_set(&table->metadata.lv2_resize_marker[mindex][moffset], 1);
     }
   }
 #endif
@@ -629,24 +664,25 @@ static inline bool iceberg_lv2_insert(iceberg_table * table, KeyType key, ValueT
 }
 
 static bool iceberg_insert_internal(iceberg_table * table, KeyType key, ValueType value, uint8_t fprint, uint64_t index, uint8_t thread_id) {
+  uint64_t bindex, boffset;
+  get_block_index_offset(table, index, &bindex, &boffset);
+  
   iceberg_metadata * metadata = &table->metadata;
-  iceberg_lv1_block * blocks = table->level1;	
+  iceberg_lv1_block * blocks = table->level1[bindex];	
 
-    __mmask64 md_mask = slot_mask_64(metadata->lv1_md[index].block_md, 0);
+  __mmask64 md_mask = slot_mask_64(metadata->lv1_md[bindex][boffset].block_md, 0);
 
   uint8_t popct = __builtin_popcountll(md_mask);
 
   for(uint8_t i = 0; i < popct; ++i) {
-
     uint8_t slot = word_select(md_mask, i);
 
-    if(__sync_bool_compare_and_swap(metadata->lv1_md[index].block_md + slot, 0, 1)) {
-
+    if(__sync_bool_compare_and_swap(metadata->lv1_md[bindex][boffset].block_md + slot, 0, 1)) {
       pc_add(&metadata->lv1_balls, 1, thread_id);
-      blocks[index].slots[slot].key = key;
-      blocks[index].slots[slot].val = value;
+      blocks[boffset].slots[slot].key = key;
+      blocks[boffset].slots[slot].val = value;
 
-      metadata->lv1_md[index].block_md[slot] = fprint;
+      metadata->lv1_md[bindex][boffset].block_md[slot] = fprint;
       return true;
     }
   }
@@ -671,12 +707,17 @@ bool iceberg_insert(iceberg_table * table, KeyType key, ValueType value, uint8_t
 
   split_hash(lv1_hash(key), &fprint, &index, metadata);
 
+  uint64_t bindex, boffset;
+  get_block_index_offset(table, index, &bindex, &boffset);
+
 #ifdef ENABLE_RESIZE
   // move blocks if resize is active and not already moved.
   if (unlikely(index < (table->metadata.nblocks >> 1) && is_lv1_resize_active(table))) {
     uint64_t chunk_idx = index / 8;
+    uint64_t mindex, moffset;
+    get_marker_index_offset(table, chunk_idx, &mindex, &moffset);
     // if fixing is needed set the marker
-    if (!__sync_lock_test_and_set(&table->metadata.lv1_resize_marker[chunk_idx], 1)) {
+    if (!__sync_lock_test_and_set(&table->metadata.lv1_resize_marker[mindex][moffset], 1)) {
       for (uint8_t i = 0; i < 8; ++i) {
         uint64_t idx = chunk_idx * 8 + i;
         /*printf("LV1 Before: Moving block: %ld load: %f\n", idx, iceberg_block_load(table, idx, 1));*/
@@ -685,7 +726,8 @@ bool iceberg_insert(iceberg_table * table, KeyType key, ValueType value, uint8_t
       }
       // set the marker for the dest block
       uint64_t dest_chunk_idx = chunk_idx + table->metadata.nblocks / 8 / 2;
-      __sync_lock_test_and_set(&table->metadata.lv1_resize_marker[dest_chunk_idx], 1);
+      get_marker_index_offset(table, dest_chunk_idx, &mindex, &moffset);
+      __sync_lock_test_and_set(&table->metadata.lv1_resize_marker[mindex][moffset], 1);
     }
   }
 #endif
@@ -702,40 +744,39 @@ bool iceberg_insert(iceberg_table * table, KeyType key, ValueType value, uint8_t
 }
 
 static inline bool iceberg_lv3_remove_internal(iceberg_table * table, KeyType key, uint64_t lv3_index, uint8_t thread_id) {
+  uint64_t bindex, boffset;
+  get_block_index_offset(table, lv3_index, &bindex, &boffset);
 
   iceberg_metadata * metadata = &table->metadata;
-  iceberg_lv3_list * lists = table->level3;
+  iceberg_lv3_list * lists = table->level3[bindex];
 
-  while(__sync_lock_test_and_set(metadata->lv3_locks + lv3_index, 1));
+  while(__sync_lock_test_and_set(metadata->lv3_locks[bindex] + boffset, 1));
 
-  if(metadata->lv3_sizes[lv3_index] == 0) return false;
+  if(metadata->lv3_sizes[bindex][boffset] == 0) return false;
 
-  if(lists[lv3_index].head->key == key) {
-
-    iceberg_lv3_node * old_head = lists[lv3_index].head;
-    lists[lv3_index].head = lists[lv3_index].head->next_node;
+  if(lists[boffset].head->key == key) {
+    iceberg_lv3_node * old_head = lists[boffset].head;
+    lists[boffset].head = lists[boffset].head->next_node;
     free(old_head);
 
-    metadata->lv3_sizes[lv3_index]--;
+    metadata->lv3_sizes[bindex][boffset]--;
     pc_add(&metadata->lv3_balls, -1, thread_id);
-    metadata->lv3_locks[lv3_index] = 0;
+    metadata->lv3_locks[bindex][boffset] = 0;
 
     return true;
   }
 
-  iceberg_lv3_node * current_node = lists[lv3_index].head;
+  iceberg_lv3_node * current_node = lists[boffset].head;
 
-  for(uint64_t i = 0; i < metadata->lv3_sizes[lv3_index] - 1; ++i) {
-
+  for(uint64_t i = 0; i < metadata->lv3_sizes[bindex][boffset] - 1; ++i) {
     if(current_node->next_node->key == key) {
-
       iceberg_lv3_node * old_node = current_node->next_node;
       current_node->next_node = current_node->next_node->next_node;
       free(old_node);
 
-      metadata->lv3_sizes[lv3_index]--;
+      metadata->lv3_sizes[bindex][boffset]--;
       pc_add(&metadata->lv3_balls, -1, thread_id);
-      metadata->lv3_locks[lv3_index] = 0;
+      metadata->lv3_locks[bindex][boffset] = 0;
 
       return true;
     }
@@ -743,7 +784,7 @@ static inline bool iceberg_lv3_remove_internal(iceberg_table * table, KeyType ke
     current_node = current_node->next_node;
   }
 
-  metadata->lv3_locks[lv3_index] = 0;
+  metadata->lv3_locks[bindex][boffset] = 0;
   return false;
 }
 
@@ -760,13 +801,15 @@ static inline bool iceberg_lv3_remove(iceberg_table * table, KeyType key, uint64
     uint64_t mask = ~(1ULL << (table->metadata.block_bits - 1));
     uint64_t old_index = lv3_index & mask;
     uint64_t chunk_idx = old_index / 8;
-    if (__atomic_load_n(&table->metadata.lv3_resize_marker[chunk_idx], __ATOMIC_SEQ_CST) == 0) { // not fixed yet
+    uint64_t mindex, moffset;
+    get_marker_index_offset(table, chunk_idx, &mindex, &moffset);
+    if (__atomic_load_n(&table->metadata.lv3_resize_marker[mindex][moffset], __ATOMIC_SEQ_CST) == 0) { // not fixed yet
       return iceberg_lv3_remove_internal(table, key, old_index, thread_id);
-
     } else {
       // wait for the old block to be fixed
       uint64_t dest_chunk_idx = lv3_index / 8;
-      while (__atomic_load_n(&table->metadata.lv3_resize_marker[dest_chunk_idx], __ATOMIC_SEQ_CST) == 0)
+      get_marker_index_offset(table, dest_chunk_idx, &mindex, &moffset);
+      while (__atomic_load_n(&table->metadata.lv3_resize_marker[mindex][moffset], __ATOMIC_SEQ_CST) == 0)
         ;
     }
   }
@@ -776,35 +819,37 @@ static inline bool iceberg_lv3_remove(iceberg_table * table, KeyType key, uint64
 }
 
 static inline bool iceberg_lv2_remove(iceberg_table * table, KeyType key, uint64_t lv3_index, uint8_t thread_id) {
-
   iceberg_metadata * metadata = &table->metadata;
-  iceberg_lv2_block * blocks = table->level2;
 
   for(int i = 0; i < D_CHOICES; ++i) {
-
     uint8_t fprint;
     uint64_t index;
 
     split_hash(lv2_hash(key, i), &fprint, &index, metadata);
+
+    uint64_t bindex, boffset;
+    get_block_index_offset(table, index, &bindex, &boffset);
+    iceberg_lv2_block * blocks = table->level2[bindex];
 
 #ifdef ENABLE_RESIZE
     // check if there's an active resize and block isn't fixed yet
     if (unlikely(index >= (table->metadata.nblocks >> 1) && is_lv2_resize_active(table))) {
       uint64_t mask = ~(1ULL << (table->metadata.block_bits - 1));
       uint64_t old_index = index & mask;
+      uint64_t old_bindex, old_boffset;
+      get_marker_index_offset(table, old_idx, &old_bindex, &old_boffset);
       uint64_t chunk_idx = old_index / 8;
-      if (__atomic_load_n(&table->metadata.lv2_resize_marker[chunk_idx], __ATOMIC_SEQ_CST) == 0) { // not fixed yet
-        __mmask32 md_mask = slot_mask_32(metadata->lv2_md[old_index].block_md, fprint) & ((1 << (C_LV2 + MAX_LG_LG_N / D_CHOICES)) - 1);
+      uint64_t mindex, moffset;
+      get_marker_index_offset(table, chunk_idx, &mindex, &moffset);
+      if (__atomic_load_n(&table->metadata.lv2_resize_marker[mindex][moffset], __ATOMIC_SEQ_CST) == 0) { // not fixed yet
+        __mmask32 md_mask = slot_mask_32(metadata->lv2_md[old_bindex][old_boffset].block_md, fprint) & ((1 << (C_LV2 + MAX_LG_LG_N / D_CHOICES)) - 1);
         uint8_t popct = __builtin_popcount(md_mask);
-
         for(uint8_t i = 0; i < popct; ++i) {
-
           uint8_t slot = word_select(md_mask, i);
 
-          if (blocks[old_index].slots[slot].key == key) {
-
-            metadata->lv2_md[old_index].block_md[slot] = 0;
-            blocks[old_index].slots[slot].key = blocks[old_index].slots[slot].val = 0;
+          if (blocks[old_boffset].slots[slot].key == key) {
+            metadata->lv2_md[old_bindex][old_boffset].block_md[slot] = 0;
+            blocks[old_boffset].slots[slot].key = blocks[old_boffset].slots[slot].val = 0;
             pc_add(&metadata->lv2_balls, -1, thread_id);
             return true;
           }
@@ -812,23 +857,22 @@ static inline bool iceberg_lv2_remove(iceberg_table * table, KeyType key, uint64
       } else {
         // wait for the old block to be fixed
         uint64_t dest_chunk_idx = index / 8;
-        while (__atomic_load_n(&table->metadata.lv2_resize_marker[dest_chunk_idx], __ATOMIC_SEQ_CST) == 0)
+        get_marker_index_offset(table, dest_chunk_idx, &mindex, &moffset);
+        while (__atomic_load_n(&table->metadata.lv2_resize_marker[mindex][moffset], __ATOMIC_SEQ_CST) == 0)
           ;
       }
     }
 #endif
 
-    __mmask32 md_mask = slot_mask_32(metadata->lv2_md[index].block_md, fprint) & ((1 << (C_LV2 + MAX_LG_LG_N / D_CHOICES)) - 1);
+    __mmask32 md_mask = slot_mask_32(metadata->lv2_md[bindex][boffset].block_md, fprint) & ((1 << (C_LV2 + MAX_LG_LG_N / D_CHOICES)) - 1);
     uint8_t popct = __builtin_popcount(md_mask);
 
     for(uint8_t i = 0; i < popct; ++i) {
-
       uint8_t slot = word_select(md_mask, i);
 
-      if (blocks[index].slots[slot].key == key) {
-
-        metadata->lv2_md[index].block_md[slot] = 0;
-        blocks[index].slots[slot].key = blocks[index].slots[slot].val = 0;
+      if (blocks[boffset].slots[slot].key == key) {
+        metadata->lv2_md[bindex][boffset].block_md[slot] = 0;
+        blocks[boffset].slots[slot].key = blocks[boffset].slots[slot].val = 0;
         pc_add(&metadata->lv2_balls, -1, thread_id);
         return true;
       }
@@ -846,31 +890,35 @@ bool iceberg_remove(iceberg_table * table, KeyType key, uint8_t thread_id) {
 #endif
 
   iceberg_metadata * metadata = &table->metadata;
-  iceberg_lv1_block * blocks = table->level1;
-
   uint8_t fprint;
   uint64_t index;
 
   split_hash(lv1_hash(key), &fprint, &index, metadata);
+ 
+  uint64_t bindex, boffset;
+  get_block_index_offset(table, index, &bindex, &boffset);
+  iceberg_lv1_block * blocks = table->level1[bindex];
 
 #ifdef ENABLE_RESIZE
   // check if there's an active resize and block isn't fixed yet
   if (unlikely(index >= (table->metadata.nblocks >> 1) && is_lv1_resize_active(table))) {
     uint64_t mask = ~(1ULL << (table->metadata.block_bits - 1));
     uint64_t old_index = index & mask;
+    uint64_t old_bindex, old_boffset;
+    get_block_index_offset(table, old_index, &old_bindex, &old_boffset);
     uint64_t chunk_idx = old_index / 8;
-    if (__atomic_load_n(&table->metadata.lv1_resize_marker[chunk_idx], __ATOMIC_SEQ_CST) == 0) { // not fixed yet
-      __mmask64 md_mask = slot_mask_64(metadata->lv1_md[old_index].block_md, fprint);
+    uint64_t mindex, moffset;
+    get_marker_index_offset(table, chunk_idx, &mindex, &moffset);
+    if (__atomic_load_n(&table->metadata.lv1_resize_marker[mindex][moffset], __ATOMIC_SEQ_CST) == 0) { // not fixed yet
+      __mmask64 md_mask = slot_mask_64(metadata->lv1_md[old_bindex][old_boffset].block_md, fprint);
       uint8_t popct = __builtin_popcountll(md_mask);
 
       for(uint8_t i = 0; i < popct; ++i) {
-
         uint8_t slot = word_select(md_mask, i);
 
         if (blocks[old_index].slots[slot].key == key) {
-
-          metadata->lv1_md[old_index].block_md[slot] = 0;
-          blocks[old_index].slots[slot].key = blocks[old_index].slots[slot].val = 0;
+          metadata->lv1_md[old_bindex][old_boffset].block_md[slot] = 0;
+          blocks[old_boffset].slots[slot].key = blocks[old_boffset].slots[slot].val = 0;
           pc_add(&metadata->lv1_balls, -1, thread_id);
           read_unlock(&table->metadata.rw_lock, thread_id);
           return true;
@@ -879,23 +927,22 @@ bool iceberg_remove(iceberg_table * table, KeyType key, uint8_t thread_id) {
     } else {
       // wait for the old block to be fixed
       uint64_t dest_chunk_idx = index / 8;
-      while (__atomic_load_n(&table->metadata.lv1_resize_marker[dest_chunk_idx], __ATOMIC_SEQ_CST) == 0)
+      get_marker_index_offset(table, dest_chunk_idx, &mindex, &moffset);
+      while (__atomic_load_n(&table->metadata.lv1_resize_marker[mindex][moffset], __ATOMIC_SEQ_CST) == 0)
         ;
     }
   }
 #endif
 
-  __mmask64 md_mask = slot_mask_64(metadata->lv1_md[index].block_md, fprint);
+  __mmask64 md_mask = slot_mask_64(metadata->lv1_md[bindex][boffset].block_md, fprint);
   uint8_t popct = __builtin_popcountll(md_mask);
 
   for(uint8_t i = 0; i < popct; ++i) {
-
     uint8_t slot = word_select(md_mask, i);
 
-    if (blocks[index].slots[slot].key == key) {
-
-      metadata->lv1_md[index].block_md[slot] = 0;
-      blocks[index].slots[slot].key = blocks[index].slots[slot].val = 0;
+    if (blocks[boffset].slots[slot].key == key) {
+      metadata->lv1_md[bindex][boffset].block_md[slot] = 0;
+      blocks[boffset].slots[slot].key = blocks[index].slots[slot].val = 0;
       pc_add(&metadata->lv1_balls, -1, thread_id);
 #ifdef ENABLE_RESIZE
       read_unlock(&table->metadata.rw_lock, thread_id);
@@ -914,32 +961,33 @@ bool iceberg_remove(iceberg_table * table, KeyType key, uint8_t thread_id) {
 }
 
 static inline bool iceberg_lv3_get_value_internal(iceberg_table * table, KeyType key, ValueType **value, uint64_t lv3_index) {
+  uint64_t bindex, boffset;
+  get_block_index_offset(table, lv3_index, &bindex, &boffset);
 
   iceberg_metadata * metadata = &table->metadata;
-  iceberg_lv3_list * lists = table->level3;
+  iceberg_lv3_list * lists = table->level3[boffset];
 
-  while(__sync_lock_test_and_set(metadata->lv3_locks + lv3_index, 1));
+  while(__sync_lock_test_and_set(metadata->lv3_locks[bindex] + boffset, 1));
 
-  if(likely(!metadata->lv3_sizes[lv3_index])) {
-    metadata->lv3_locks[lv3_index] = 0;
+  if(likely(!metadata->lv3_sizes[bindex][boffset])) {
+    metadata->lv3_locks[bindex][boffset] = 0;
     return false;
   }
 
-  iceberg_lv3_node * current_node = lists[lv3_index].head;
+  iceberg_lv3_node * current_node = lists[boffset].head;
 
-  for(uint8_t i = 0; i < metadata->lv3_sizes[lv3_index]; ++i) {
+  for(uint8_t i = 0; i < metadata->lv3_sizes[bindex][boffset]; ++i) {
 
     if(current_node->key == key) {
-
       *value = &current_node->val;
-      metadata->lv3_locks[lv3_index] = 0;
+      metadata->lv3_locks[bindex][boffset] = 0;
       return true;
     }
 
     current_node = current_node->next_node;
   }
 
-  metadata->lv3_locks[lv3_index] = 0;
+  metadata->lv3_locks[bindex][boffset] = 0;
 
   return false;
 }
@@ -950,13 +998,18 @@ static inline bool iceberg_lv3_get_value(iceberg_table * table, KeyType key, Val
   if (unlikely(lv3_index >= (table->metadata.nblocks >> 1) && is_lv3_resize_active(table))) {
     uint64_t mask = ~(1ULL << (table->metadata.block_bits - 1));
     uint64_t old_index = lv3_index & mask;
+    uint64_t old_bindex, old_boffset;
+    get_block_index_offset(table, old_index, &old_bindex, &old_boffset);
     uint64_t chunk_idx = old_index / 8;
-    if (__atomic_load_n(&table->metadata.lv3_resize_marker[chunk_idx], __ATOMIC_SEQ_CST) == 0) { // not fixed yet
+    uint64_t mindex, moffset;
+    get_marker_index_offset(table, chunk_idx, &mindex, &moffset);
+    if (__atomic_load_n(&table->metadata.lv3_resize_marker[mindex][moffset], __ATOMIC_SEQ_CST) == 0) { // not fixed yet
       return iceberg_lv3_get_value_internal(table, key, value, old_index);
     } else {
       // wait for the old block to be fixed
       uint64_t dest_chunk_idx = lv3_index / 8;
-      while (__atomic_load_n(&table->metadata.lv3_resize_marker[dest_chunk_idx], __ATOMIC_SEQ_CST) == 0)
+      get_marker_index_offset(table, dest_chunk_idx, &mindex, &moffset);
+      while (__atomic_load_n(&table->metadata.lv3_resize_marker[mindex][moffset], __ATOMIC_SEQ_CST) == 0)
         ;
     }
   }
@@ -968,15 +1021,20 @@ static inline bool iceberg_lv3_get_value(iceberg_table * table, KeyType key, Val
 static inline bool iceberg_lv2_get_value(iceberg_table * table, KeyType key, ValueType **value, uint64_t lv3_index) {
 
   iceberg_metadata * metadata = &table->metadata;
-  iceberg_lv2_block * blocks = table->level2;
 
   for(uint8_t i = 0; i < D_CHOICES; ++i) {
-
     uint8_t fprint;
     uint64_t index;
 
     split_hash(lv2_hash(key, i), &fprint, &index, metadata);
 
+    uint64_t bindex, boffset;
+    get_block_index_offset(table, index, &bindex, &boffset);
+    iceberg_lv2_block * blocks = table->level2[bindex];
+
+
+    ///// done until here....
+    //
 #ifdef ENABLE_RESIZE
     // check if there's an active resize and block isn't fixed yet
     if (unlikely(index >= (table->metadata.nblocks >> 1) && is_lv2_resize_active(table))) {
