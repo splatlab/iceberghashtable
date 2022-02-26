@@ -90,7 +90,7 @@ static inline double iceberg_load_factor_aprox(iceberg_table * table) {
 #ifdef ENABLE_RESIZE
 bool need_resize(iceberg_table * table) {
   double lf = iceberg_load_factor_aprox(table);
-  if (lf >= 0.45)
+  if (lf >= 0.96)
     return true;
   return false;
 }
