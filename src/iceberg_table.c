@@ -90,22 +90,26 @@ static inline double iceberg_load_factor_aprox(iceberg_table * table) {
 #ifdef ENABLE_RESIZE
 bool need_resize(iceberg_table * table) {
   double lf = iceberg_load_factor_aprox(table);
-  if (lf >= 0.40)
+  if (lf >= 0.45)
     return true;
   return false;
 }
 #endif
 
-unsigned int prevPowerOf2(unsigned int n) 
+unsigned highestPowerof2(unsigned x)
 {
-    n--;
-    n |= n >> 1;
-    n |= n >> 2;
-    n |= n >> 4;
-    n |= n >> 8;
-    n |= n >> 16;
-    n++;
-    return n>>1;
+    // check for the set bits
+    x |= x >> 1;
+    x |= x >> 2;
+    x |= x >> 4;
+    x |= x >> 8;
+    x |= x >> 16;
+
+    // Then we remove all but the top bit by xor'ing the
+    // string of 1's with that string of 1's shifted one to
+    // the left, and we end up with just the one top bit
+    // followed by 0's.
+    return x ^ (x >> 1);
 }
 
 static inline void get_block_index_offset(iceberg_table * table, uint64_t index, uint64_t *bindex, uint64_t *boffset) {
@@ -115,7 +119,7 @@ static inline void get_block_index_offset(iceberg_table * table, uint64_t index,
     return;
   }
   *bindex = floor(log2(index)) - table->metadata.log_init_size + 1;
-  *boffset = index - prevPowerOf2(index);
+  *boffset = index - highestPowerof2(index);
 }
 
 static inline void get_marker_index_offset(iceberg_table * table, uint64_t index, uint64_t *mindex, uint64_t *moffset) {
@@ -125,7 +129,7 @@ static inline void get_marker_index_offset(iceberg_table * table, uint64_t index
     return;
   }
   *mindex = floor(log2(index)) - (table->metadata.log_init_size - 3) + 1;
-  *moffset = index - prevPowerOf2(index);
+  *moffset = index - highestPowerof2(index);
 }
 
 static inline void split_hash(uint64_t hash, uint8_t *fprint, uint64_t *index, iceberg_metadata * metadata) {	
@@ -489,6 +493,7 @@ void iceberg_end(iceberg_table * table) {
         }
         // set the marker for the dest block
         uint64_t dest_chunk_idx = chunk_idx + table->metadata.nblocks / 8 / 2;
+        uint64_t mindex, moffset;
         get_marker_index_offset(table, dest_chunk_idx, &mindex, &moffset);
         __sync_lock_test_and_set(&table->metadata.lv1_resize_marker[mindex][moffset], 1);
       }
@@ -507,6 +512,7 @@ void iceberg_end(iceberg_table * table) {
         }
         // set the marker for the dest block
         uint64_t dest_chunk_idx = chunk_idx + table->metadata.nblocks / 8 / 2;
+        uint64_t mindex, moffset;
         get_marker_index_offset(table, dest_chunk_idx, &mindex, &moffset);
         __sync_lock_test_and_set(&table->metadata.lv2_resize_marker[mindex][moffset], 1);
       }
@@ -525,6 +531,7 @@ void iceberg_end(iceberg_table * table) {
         }
         // set the marker for the dest block
         uint64_t dest_chunk_idx = chunk_idx + table->metadata.nblocks / 8 / 2;
+        uint64_t mindex, moffset;
         get_marker_index_offset(table, dest_chunk_idx, &mindex, &moffset);
         __sync_lock_test_and_set(&table->metadata.lv3_resize_marker[mindex][moffset], 1);
       }
@@ -553,6 +560,7 @@ static inline bool iceberg_lv3_insert(iceberg_table * table, KeyType key, ValueT
       }
       // set the marker for the dest block
       uint64_t dest_chunk_idx = chunk_idx + table->metadata.nblocks / 8 / 2;
+      uint64_t mindex, moffset;
       get_marker_index_offset(table, dest_chunk_idx, &mindex, &moffset);
       __sync_lock_test_and_set(&table->metadata.lv3_resize_marker[mindex][moffset], 1);
     }
@@ -653,6 +661,7 @@ static inline bool iceberg_lv2_insert(iceberg_table * table, KeyType key, ValueT
       }
       // set the marker for the dest block
       uint64_t dest_chunk_idx = chunk_idx + table->metadata.nblocks / 8 / 2;
+      uint64_t mindex, moffset;
       get_marker_index_offset(table, dest_chunk_idx, &mindex, &moffset);
       __sync_lock_test_and_set(&table->metadata.lv2_resize_marker[mindex][moffset], 1);
     }
@@ -728,6 +737,7 @@ bool iceberg_insert(iceberg_table * table, KeyType key, ValueType value, uint8_t
       }
       // set the marker for the dest block
       uint64_t dest_chunk_idx = chunk_idx + table->metadata.nblocks / 8 / 2;
+      uint64_t mindex, moffset;
       get_marker_index_offset(table, dest_chunk_idx, &mindex, &moffset);
       __sync_lock_test_and_set(&table->metadata.lv1_resize_marker[mindex][moffset], 1);
     }
