@@ -350,7 +350,7 @@ static bool iceberg_setup_resize(iceberg_table * table) {
     /*return false;*/
   }
 
-  printf("Setting up resize\nCurrent stats: \n");
+  /*printf("Setting up resize\nCurrent stats: \n");*/
   
   /*printf("Load factor: %f\n", iceberg_load_factor(table));*/
   /*printf("Number level 1 inserts: %ld\n", lv1_balls(table));*/
@@ -469,7 +469,7 @@ static bool iceberg_setup_resize(iceberg_table * table) {
   table->metadata.nblocks = total_blocks;
   table->metadata.block_bits += 1;
 
-  printf("Setting up finished\n");
+  /*printf("Setting up finished\n");*/
   write_unlock(&table->metadata.rw_lock);
   return true;
 }
