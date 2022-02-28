@@ -90,7 +90,7 @@ static inline double iceberg_load_factor_aprox(iceberg_table * table) {
 #ifdef ENABLE_RESIZE
 bool need_resize(iceberg_table * table) {
   double lf = iceberg_load_factor_aprox(table);
-  if (lf >= 0.96)
+  if (lf >= 0.85)
     return true;
   return false;
 }
@@ -311,6 +311,8 @@ int iceberg_init(iceberg_table *table, uint64_t log_slots) {
   memset(table->metadata.lv2_resize_marker[0], 1, resize_marker_size);
   memset(table->metadata.lv3_resize_marker[0], 1, resize_marker_size);
 
+  table->metadata.marker_sizes[0] = resize_marker_size;
+
   rw_lock_init(&table->metadata.rw_lock);
 #endif
 
@@ -357,21 +359,22 @@ static bool is_resize_active(iceberg_table * table) {
 
 static bool iceberg_setup_resize(iceberg_table * table) {
   // grab write lock
-  /*if (!write_lock(&table->metadata.rw_lock, TRY_ONCE_LOCK))*/
-    /*return false;*/
+  if (!write_lock(&table->metadata.rw_lock, TRY_ONCE_LOCK))
+    return false;
 
   if (unlikely(!need_resize(table))) {
-    /*write_unlock(&table->metadata.rw_lock);*/
+    write_unlock(&table->metadata.rw_lock);
     return false;
   }
   if (is_resize_active(table)) {
     // finish the current resize
     iceberg_end(table);
-    /*write_unlock(&table->metadata.rw_lock);*/
-    /*return false;*/
+    write_unlock(&table->metadata.rw_lock);
+    return false;
   }
 
-  /*printf("Setting up resize\nCurrent stats: \n");*/
+  printf("Setting up resize\n");
+  /*printf("Current stats: \n");*/
   
   /*printf("Load factor: %f\n", iceberg_load_factor(table));*/
   /*printf("Number level 1 inserts: %ld\n", lv1_balls(table));*/
@@ -387,9 +390,11 @@ static bool iceberg_setup_resize(iceberg_table * table) {
 
   // compute new sizes
   uint64_t cur_blocks = table->metadata.nblocks;
-
   uint64_t resize_cnt = table->metadata.resize_cnt + 1;
-  // remap level1
+
+  // Allocate new table and metadata
+
+  // alloc level1
   size_t level1_size = sizeof(iceberg_lv1_block) * cur_blocks;
   table->level1[resize_cnt] = (iceberg_lv1_block *)mmap(NULL, level1_size, PROT_READ | PROT_WRITE, mmap_flags, 0, 0);
   if (table->level1[resize_cnt] == (void *)-1) {
@@ -397,7 +402,7 @@ static bool iceberg_setup_resize(iceberg_table * table) {
     exit(1);
   }
 
-  // remap level2
+  // alloc level2
   size_t level2_size = sizeof(iceberg_lv2_block) * cur_blocks;
   table->level2[resize_cnt] = (iceberg_lv2_block *)mmap(NULL, level2_size, PROT_READ | PROT_WRITE, mmap_flags, 0, 0);
   if (table->level2[resize_cnt] == (void *)-1) {
@@ -405,7 +410,7 @@ static bool iceberg_setup_resize(iceberg_table * table) {
     exit(1);
   }
 
-  // remap level3
+  // alloc level3
   size_t level3_size = sizeof(iceberg_lv3_list) * cur_blocks;
   table->level3[resize_cnt] = (iceberg_lv3_list *)mmap(NULL, level3_size, PROT_READ | PROT_WRITE, mmap_flags, 0, 0);
   if (table->level3[resize_cnt] == (void *)-1) {
@@ -413,7 +418,7 @@ static bool iceberg_setup_resize(iceberg_table * table) {
     exit(1);
   }
 
-  // remap level1 metadata
+  // alloc level1 metadata
   size_t lv1_md_size = sizeof(iceberg_lv1_block_md) * cur_blocks + 64;
   table->metadata.lv1_md[resize_cnt] = (iceberg_lv1_block_md *)mmap(NULL, lv1_md_size, PROT_READ | PROT_WRITE, mmap_flags, 0, 0);
   if (table->metadata.lv1_md[resize_cnt] == (void *)-1) {
@@ -421,7 +426,7 @@ static bool iceberg_setup_resize(iceberg_table * table) {
     exit(1);
   }
 
-  // remap level2 metadata
+  // alloc level2 metadata
   size_t lv2_md_size = sizeof(iceberg_lv2_block_md) * cur_blocks + 32;
   table->metadata.lv2_md[resize_cnt] = (iceberg_lv2_block_md *)mmap(NULL, lv2_md_size, PROT_READ | PROT_WRITE, mmap_flags, 0, 0);
   if (table->metadata.lv2_md[resize_cnt] == (void *)-1) {
@@ -429,7 +434,7 @@ static bool iceberg_setup_resize(iceberg_table * table) {
     exit(1);
   }
 
-  // re alloc level3 metadata (sizes, locks)
+  // alloc level3 metadata (sizes, locks)
   size_t lv3_sizes_size = sizeof(uint64_t) * cur_blocks;
   table->metadata.lv3_sizes[resize_cnt] = (uint64_t *)mmap(NULL, lv3_sizes_size, PROT_READ | PROT_WRITE, mmap_flags, 0, 0);
   if (table->metadata.lv3_sizes[resize_cnt] == (void *)-1) {
@@ -444,7 +449,7 @@ static bool iceberg_setup_resize(iceberg_table * table) {
     exit(1);
   }
 
-  // remap resize markers
+  // alloc resize markers
   // resize_marker_size
   size_t resize_marker_size = sizeof(uint8_t) * cur_blocks / 8;
   table->metadata.lv1_resize_marker[resize_cnt] = (uint8_t *)mmap(NULL, resize_marker_size, PROT_READ | PROT_WRITE, mmap_flags, 0, 0);
@@ -465,12 +470,12 @@ static bool iceberg_setup_resize(iceberg_table * table) {
     exit(1);
   }
 
-  // resetting the resize markers. First half of the table needs resizing.
-  // Assuming a new resize won't be invoked while another resize is active.
+  table->metadata.marker_sizes[resize_cnt] = resize_marker_size;
+  // resetting the resize markers.
   for (uint64_t i = 0;  i <= resize_cnt; ++i) {
-    memset(table->metadata.lv1_resize_marker[i], 0, resize_marker_size);
-    memset(table->metadata.lv2_resize_marker[i], 0, resize_marker_size);
-    memset(table->metadata.lv3_resize_marker[i], 0, resize_marker_size);
+    memset(table->metadata.lv1_resize_marker[i], 0, table->metadata.marker_sizes[i]);
+    memset(table->metadata.lv2_resize_marker[i], 0, table->metadata.marker_sizes[i]);
+    memset(table->metadata.lv3_resize_marker[i], 0, table->metadata.marker_sizes[i]);
   }
 
   uint64_t total_blocks = table->metadata.nblocks * 2;
@@ -490,8 +495,8 @@ static bool iceberg_setup_resize(iceberg_table * table) {
   table->metadata.lv2_resize_ctr = 0;
   table->metadata.lv3_resize_ctr = 0;
 
-  /*printf("Setting up finished\n");*/
-  /*write_unlock(&table->metadata.rw_lock);*/
+  printf("Setting up finished\n");
+  write_unlock(&table->metadata.rw_lock);
   return true;
 }
 
@@ -729,8 +734,8 @@ bool iceberg_insert(iceberg_table * table, KeyType key, ValueType value, uint8_t
     iceberg_setup_resize(table);
   }
 
-  /*if (unlikely(!read_lock(&table->metadata.rw_lock, WAIT_FOR_LOCK, thread_id)))*/
-    /*return false;*/
+  if (unlikely(!read_lock(&table->metadata.rw_lock, WAIT_FOR_LOCK, thread_id)))
+    return false;
 #endif
 
   iceberg_metadata * metadata = &table->metadata;
@@ -770,7 +775,7 @@ bool iceberg_insert(iceberg_table * table, KeyType key, ValueType value, uint8_t
     ret = iceberg_lv2_insert(table, key, value, index, thread_id);
 
 #ifdef ENABLE_RESIZE
-  /*read_unlock(&table->metadata.rw_lock, thread_id);*/
+  read_unlock(&table->metadata.rw_lock, thread_id);
 #endif
 
   return ret;
@@ -918,8 +923,8 @@ static inline bool iceberg_lv2_remove(iceberg_table * table, KeyType key, uint64
 bool iceberg_remove(iceberg_table * table, KeyType key, uint8_t thread_id) {
 
 #ifdef ENABLE_RESIZE
-  /*if (unlikely(!read_lock(&table->metadata.rw_lock, WAIT_FOR_LOCK, thread_id)))*/
-    /*return false;*/
+  if (unlikely(!read_lock(&table->metadata.rw_lock, WAIT_FOR_LOCK, thread_id)))
+    return false;
 #endif
 
   iceberg_metadata * metadata = &table->metadata;
@@ -953,7 +958,7 @@ bool iceberg_remove(iceberg_table * table, KeyType key, uint8_t thread_id) {
           metadata->lv1_md[old_bindex][old_boffset].block_md[slot] = 0;
           blocks[old_boffset].slots[slot].key = blocks[old_boffset].slots[slot].val = 0;
           pc_add(&metadata->lv1_balls, -1, thread_id);
-          /*read_unlock(&table->metadata.rw_lock, thread_id);*/
+          read_unlock(&table->metadata.rw_lock, thread_id);
           return true;
         }
       }
@@ -978,7 +983,7 @@ bool iceberg_remove(iceberg_table * table, KeyType key, uint8_t thread_id) {
       blocks[boffset].slots[slot].key = blocks[boffset].slots[slot].val = 0;
       pc_add(&metadata->lv1_balls, -1, thread_id);
 #ifdef ENABLE_RESIZE
-      /*read_unlock(&table->metadata.rw_lock, thread_id);*/
+      read_unlock(&table->metadata.rw_lock, thread_id);
 #endif
       return true;
     }
@@ -987,7 +992,7 @@ bool iceberg_remove(iceberg_table * table, KeyType key, uint8_t thread_id) {
   bool ret = iceberg_lv2_remove(table, key, index, thread_id);
 
 #ifdef ENABLE_RESIZE
-  /*read_unlock(&table->metadata.rw_lock, thread_id);*/
+  read_unlock(&table->metadata.rw_lock, thread_id);
 #endif
 
   return ret;
@@ -1118,8 +1123,8 @@ static inline bool iceberg_lv2_get_value(iceberg_table * table, KeyType key, Val
 bool iceberg_get_value(iceberg_table * table, KeyType key, ValueType **value, uint8_t thread_id) {
 
 #ifdef ENABLE_RESIZE
-  /*if (unlikely(!read_lock(&table->metadata.rw_lock, WAIT_FOR_LOCK, thread_id)))*/
-    /*return false;*/
+  if (unlikely(!read_lock(&table->metadata.rw_lock, WAIT_FOR_LOCK, thread_id)))
+    return false;
 #endif
 
   iceberg_metadata * metadata = &table->metadata;
@@ -1153,7 +1158,7 @@ bool iceberg_get_value(iceberg_table * table, KeyType key, ValueType **value, ui
 
         if (blocks[old_boffset].slots[slot].key == key) {
           *value = &blocks[old_boffset].slots[slot].val;
-          /*read_unlock(&table->metadata.rw_lock, thread_id);*/
+          read_unlock(&table->metadata.rw_lock, thread_id);
           return true;
         }
       }
@@ -1176,7 +1181,7 @@ bool iceberg_get_value(iceberg_table * table, KeyType key, ValueType **value, ui
     if (blocks[boffset].slots[slot].key == key) {
       *value = &blocks[boffset].slots[slot].val;
 #ifdef ENABLE_RESIZE
-      /*read_unlock(&table->metadata.rw_lock, thread_id);*/
+      read_unlock(&table->metadata.rw_lock, thread_id);
 #endif
       return true;
     }
@@ -1185,7 +1190,7 @@ bool iceberg_get_value(iceberg_table * table, KeyType key, ValueType **value, ui
   bool ret = iceberg_lv2_get_value(table, key, value, index);
 
 #ifdef ENABLE_RESIZE
-  /*read_unlock(&table->metadata.rw_lock, thread_id);*/
+  read_unlock(&table->metadata.rw_lock, thread_id);
 #endif
 
   return ret;
