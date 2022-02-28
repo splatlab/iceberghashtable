@@ -1090,6 +1090,8 @@ static inline bool iceberg_lv2_get_value(iceberg_table * table, KeyType key, Val
 
           if (blocks[old_boffset].slots[slot].key == key) {
             *value = blocks[old_boffset].slots[slot].val;
+            if (key != *value)
+              printf("Resize Index: %ld NBlocks: %ld Level: %ld\n", index, table->metadata.nblocks, 2);
             return true;
           }
         }
@@ -1111,6 +1113,8 @@ static inline bool iceberg_lv2_get_value(iceberg_table * table, KeyType key, Val
 
       if (blocks[boffset].slots[slot].key == key) {
         *value = blocks[boffset].slots[slot].val;
+        if (key != *value)
+          printf("Index: %ld NBlocks: %ld Level: %ld\n", index, table->metadata.nblocks, 2);
         return true;
       }
     }
@@ -1151,13 +1155,15 @@ bool iceberg_get_value(iceberg_table * table, KeyType key, ValueType *value, uin
     if (__atomic_load_n(&table->metadata.lv1_resize_marker[mindex][moffset], __ATOMIC_SEQ_CST) == 0) { // not fixed yet
       __mmask64 md_mask = slot_mask_64(metadata->lv1_md[old_bindex][old_boffset].block_md, fprint);
 
-      iceberg_lv2_block * blocks = table->level2[old_bindex];
+      iceberg_lv1_block * blocks = table->level1[old_bindex];
       while (md_mask != 0) {
         int slot = __builtin_ctzll(md_mask);
         md_mask = md_mask & ~(1ULL << slot);
 
         if (blocks[old_boffset].slots[slot].key == key) {
           *value = blocks[old_boffset].slots[slot].val;
+          if (key != *value)
+            printf("Resize Index: %ld NBlocks: %ld Level: %ld\n", index, table->metadata.nblocks, 1);
           read_unlock(&table->metadata.rw_lock, thread_id);
           return true;
         }
@@ -1180,6 +1186,8 @@ bool iceberg_get_value(iceberg_table * table, KeyType key, ValueType *value, uin
 
     if (blocks[boffset].slots[slot].key == key) {
       *value = blocks[boffset].slots[slot].val;
+      if (key != *value)
+        printf("Index: %ld NBlocks: %ld Level: %ld\n", index, table->metadata.nblocks, 1);
 #ifdef ENABLE_RESIZE
       read_unlock(&table->metadata.rw_lock, thread_id);
 #endif
