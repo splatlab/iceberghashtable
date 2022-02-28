@@ -998,7 +998,7 @@ bool iceberg_remove(iceberg_table * table, KeyType key, uint8_t thread_id) {
   return ret;
 }
 
-static inline bool iceberg_lv3_get_value_internal(iceberg_table * table, KeyType key, ValueType **value, uint64_t lv3_index) {
+static inline bool iceberg_lv3_get_value_internal(iceberg_table * table, KeyType key, ValueType *value, uint64_t lv3_index) {
   uint64_t bindex, boffset;
   get_block_index_offset(table, lv3_index, &bindex, &boffset);
 
@@ -1017,7 +1017,7 @@ static inline bool iceberg_lv3_get_value_internal(iceberg_table * table, KeyType
   for(uint8_t i = 0; i < metadata->lv3_sizes[bindex][boffset]; ++i) {
 
     if(current_node->key == key) {
-      *value = &current_node->val;
+      *value = current_node->val;
       metadata->lv3_locks[bindex][boffset] = 0;
       return true;
     }
@@ -1030,7 +1030,7 @@ static inline bool iceberg_lv3_get_value_internal(iceberg_table * table, KeyType
   return false;
 }
 
-static inline bool iceberg_lv3_get_value(iceberg_table * table, KeyType key, ValueType **value, uint64_t lv3_index) {
+static inline bool iceberg_lv3_get_value(iceberg_table * table, KeyType key, ValueType *value, uint64_t lv3_index) {
 #ifdef ENABLE_RESIZE
   // check if there's an active resize and block isn't fixed yet
   if (unlikely(lv3_index >= (table->metadata.nblocks >> 1) && is_lv3_resize_active(table))) {
@@ -1056,7 +1056,7 @@ static inline bool iceberg_lv3_get_value(iceberg_table * table, KeyType key, Val
   return iceberg_lv3_get_value_internal(table, key, value, lv3_index);
 }
 
-static inline bool iceberg_lv2_get_value(iceberg_table * table, KeyType key, ValueType **value, uint64_t lv3_index) {
+static inline bool iceberg_lv2_get_value(iceberg_table * table, KeyType key, ValueType *value, uint64_t lv3_index) {
 
   iceberg_metadata * metadata = &table->metadata;
 
@@ -1089,7 +1089,7 @@ static inline bool iceberg_lv2_get_value(iceberg_table * table, KeyType key, Val
           md_mask = md_mask & ~(1U << slot);
 
           if (blocks[old_boffset].slots[slot].key == key) {
-            *value = &blocks[old_boffset].slots[slot].val;
+            *value = blocks[old_boffset].slots[slot].val;
             return true;
           }
         }
@@ -1110,7 +1110,7 @@ static inline bool iceberg_lv2_get_value(iceberg_table * table, KeyType key, Val
       md_mask = md_mask & ~(1U << slot);
 
       if (blocks[boffset].slots[slot].key == key) {
-        *value = &blocks[boffset].slots[slot].val;
+        *value = blocks[boffset].slots[slot].val;
         return true;
       }
     }
@@ -1120,7 +1120,7 @@ static inline bool iceberg_lv2_get_value(iceberg_table * table, KeyType key, Val
   return iceberg_lv3_get_value(table, key, value, lv3_index);
 }
 
-bool iceberg_get_value(iceberg_table * table, KeyType key, ValueType **value, uint8_t thread_id) {
+bool iceberg_get_value(iceberg_table * table, KeyType key, ValueType *value, uint8_t thread_id) {
 
 #ifdef ENABLE_RESIZE
   if (unlikely(!read_lock(&table->metadata.rw_lock, WAIT_FOR_LOCK, thread_id)))
@@ -1157,7 +1157,7 @@ bool iceberg_get_value(iceberg_table * table, KeyType key, ValueType **value, ui
         md_mask = md_mask & ~(1ULL << slot);
 
         if (blocks[old_boffset].slots[slot].key == key) {
-          *value = &blocks[old_boffset].slots[slot].val;
+          *value = blocks[old_boffset].slots[slot].val;
           read_unlock(&table->metadata.rw_lock, thread_id);
           return true;
         }
@@ -1179,7 +1179,7 @@ bool iceberg_get_value(iceberg_table * table, KeyType key, ValueType **value, ui
     md_mask = md_mask & ~(1ULL << slot);
 
     if (blocks[boffset].slots[slot].key == key) {
-      *value = &blocks[boffset].slots[slot].val;
+      *value = blocks[boffset].slots[slot].val;
 #ifdef ENABLE_RESIZE
       read_unlock(&table->metadata.rw_lock, thread_id);
 #endif

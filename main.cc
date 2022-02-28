@@ -62,7 +62,7 @@ void do_inserts(uint8_t id, uint64_t *keys, uint64_t *values, uint64_t start, ui
 
 void do_queries(uint8_t id, uint64_t *keys, uint64_t start, uint64_t n, bool positive) {
 
-  uint64_t *val;
+  uint64_t val;
 #ifdef LATENCY
   std::vector<double> times;
 #endif
@@ -116,7 +116,7 @@ void safe_rand_bytes(unsigned char *v, size_t n) {
 }
 
 void do_mixed(uint8_t id, std::vector<std::pair<uint64_t, uint64_t>>& v, uint64_t start, uint64_t n) {
-  uint64_t *val;
+  uint64_t val;
   for(uint64_t i = start; i < start + n; ++i)
     if(iceberg_get_value(&table, v[i].first, &val, id)) {
 

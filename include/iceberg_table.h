@@ -101,7 +101,7 @@ extern "C" {
 
   bool iceberg_remove(iceberg_table * table, KeyType key, uint8_t thread_id);
 
-  bool iceberg_get_value(iceberg_table * table, KeyType key, ValueType **value, uint8_t thread_id);
+  bool iceberg_get_value(iceberg_table * table, KeyType key, ValueType *value, uint8_t thread_id);
 
 #ifdef ENABLE_RESIZE
   void iceberg_end(iceberg_table * table);
