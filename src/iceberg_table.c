@@ -744,9 +744,6 @@ bool iceberg_insert(iceberg_table * table, KeyType key, ValueType value, uint8_t
 
   split_hash(lv1_hash(key), &fprint, &index, metadata);
 
-  uint64_t bindex, boffset;
-  get_block_index_offset(table, index, &bindex, &boffset);
-
 #ifdef ENABLE_RESIZE
   // move blocks if resize is active and not already moved.
   if (unlikely(index < (table->metadata.nblocks >> 1) && is_lv1_resize_active(table))) {
@@ -874,14 +871,15 @@ static inline bool iceberg_lv2_remove(iceberg_table * table, KeyType key, uint64
     if (unlikely(index >= (table->metadata.nblocks >> 1) && is_lv2_resize_active(table))) {
       uint64_t mask = ~(1ULL << (table->metadata.block_bits - 1));
       uint64_t old_index = index & mask;
-      uint64_t old_bindex, old_boffset;
-      get_marker_index_offset(table, old_index, &old_bindex, &old_boffset);
       uint64_t chunk_idx = old_index / 8;
       uint64_t mindex, moffset;
       get_marker_index_offset(table, chunk_idx, &mindex, &moffset);
       if (__atomic_load_n(&table->metadata.lv2_resize_marker[mindex][moffset], __ATOMIC_SEQ_CST) == 0) { // not fixed yet
+        uint64_t old_bindex, old_boffset;
+        get_marker_index_offset(table, old_index, &old_bindex, &old_boffset);
         __mmask32 md_mask = slot_mask_32(metadata->lv2_md[old_bindex][old_boffset].block_md, fprint) & ((1 << (C_LV2 + MAX_LG_LG_N / D_CHOICES)) - 1);
         uint8_t popct = __builtin_popcount(md_mask);
+        iceberg_lv2_block * blocks = table->level2[old_bindex];
         for(uint8_t i = 0; i < popct; ++i) {
           uint8_t slot = word_select(md_mask, i);
 
@@ -942,15 +940,16 @@ bool iceberg_remove(iceberg_table * table, KeyType key, uint8_t thread_id) {
   if (unlikely(index >= (table->metadata.nblocks >> 1) && is_lv1_resize_active(table))) {
     uint64_t mask = ~(1ULL << (table->metadata.block_bits - 1));
     uint64_t old_index = index & mask;
-    uint64_t old_bindex, old_boffset;
-    get_block_index_offset(table, old_index, &old_bindex, &old_boffset);
     uint64_t chunk_idx = old_index / 8;
     uint64_t mindex, moffset;
     get_marker_index_offset(table, chunk_idx, &mindex, &moffset);
     if (__atomic_load_n(&table->metadata.lv1_resize_marker[mindex][moffset], __ATOMIC_SEQ_CST) == 0) { // not fixed yet
+      uint64_t old_bindex, old_boffset;
+      get_block_index_offset(table, old_index, &old_bindex, &old_boffset);
       __mmask64 md_mask = slot_mask_64(metadata->lv1_md[old_bindex][old_boffset].block_md, fprint);
       uint8_t popct = __builtin_popcountll(md_mask);
 
+      iceberg_lv1_block * blocks = table->level1[old_bindex];
       for(uint8_t i = 0; i < popct; ++i) {
         uint8_t slot = word_select(md_mask, i);
 
@@ -1036,8 +1035,6 @@ static inline bool iceberg_lv3_get_value(iceberg_table * table, KeyType key, Val
   if (unlikely(lv3_index >= (table->metadata.nblocks >> 1) && is_lv3_resize_active(table))) {
     uint64_t mask = ~(1ULL << (table->metadata.block_bits - 1));
     uint64_t old_index = lv3_index & mask;
-    uint64_t old_bindex, old_boffset;
-    get_block_index_offset(table, old_index, &old_bindex, &old_boffset);
     uint64_t chunk_idx = old_index / 8;
     uint64_t mindex, moffset;
     get_marker_index_offset(table, chunk_idx, &mindex, &moffset);
@@ -1075,12 +1072,12 @@ static inline bool iceberg_lv2_get_value(iceberg_table * table, KeyType key, Val
     if (unlikely(index >= (table->metadata.nblocks >> 1) && is_lv2_resize_active(table))) {
       uint64_t mask = ~(1ULL << (table->metadata.block_bits - 1));
       uint64_t old_index = index & mask;
-      uint64_t old_bindex, old_boffset;
-      get_block_index_offset(table, old_index, &old_bindex, &old_boffset);
       uint64_t chunk_idx = old_index / 8;
       uint64_t mindex, moffset;
       get_marker_index_offset(table, chunk_idx, &mindex, &moffset);
       if (__atomic_load_n(&table->metadata.lv2_resize_marker[mindex][moffset], __ATOMIC_SEQ_CST) == 0) { // not fixed yet
+        uint64_t old_bindex, old_boffset;
+        get_block_index_offset(table, old_index, &old_bindex, &old_boffset);
         __mmask32 md_mask = slot_mask_32(metadata->lv2_md[old_bindex][old_boffset].block_md, fprint) & ((1 << (C_LV2 + MAX_LG_LG_N / D_CHOICES)) - 1);
 
         iceberg_lv2_block * blocks = table->level2[old_bindex];
@@ -1143,12 +1140,12 @@ bool iceberg_get_value(iceberg_table * table, KeyType key, ValueType *value, uin
   if (unlikely(index >= (table->metadata.nblocks >> 1) && is_lv1_resize_active(table))) {
     uint64_t mask = ~(1ULL << (table->metadata.block_bits - 1));
     uint64_t old_index = index & mask;
-    uint64_t old_bindex, old_boffset;
-    get_block_index_offset(table, old_index, &old_bindex, &old_boffset);
     uint64_t chunk_idx = old_index / 8;
     uint64_t mindex, moffset;
     get_marker_index_offset(table, chunk_idx, &mindex, &moffset);
     if (__atomic_load_n(&table->metadata.lv1_resize_marker[mindex][moffset], __ATOMIC_SEQ_CST) == 0) { // not fixed yet
+      uint64_t old_bindex, old_boffset;
+      get_block_index_offset(table, old_index, &old_bindex, &old_boffset);
       __mmask64 md_mask = slot_mask_64(metadata->lv1_md[old_bindex][old_boffset].block_md, fprint);
 
       iceberg_lv1_block * blocks = table->level1[old_bindex];
