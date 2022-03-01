@@ -373,7 +373,7 @@ static bool iceberg_setup_resize(iceberg_table * table) {
     return false;
   }
 
-  printf("Setting up resize\n");
+  /*printf("Setting up resize\n");*/
   /*printf("Current stats: \n");*/
   
   /*printf("Load factor: %f\n", iceberg_load_factor(table));*/
@@ -495,7 +495,7 @@ static bool iceberg_setup_resize(iceberg_table * table) {
   table->metadata.lv2_resize_ctr = 0;
   table->metadata.lv3_resize_ctr = 0;
 
-  printf("Setting up finished\n");
+  /*printf("Setting up finished\n");*/
   write_unlock(&table->metadata.rw_lock);
   return true;
 }
