@@ -734,8 +734,8 @@ bool iceberg_insert(iceberg_table * table, KeyType key, ValueType value, uint8_t
     iceberg_setup_resize(table);
   }
 
-  if (unlikely(!read_lock(&table->metadata.rw_lock, WAIT_FOR_LOCK, thread_id)))
-    return false;
+  /*if (unlikely(!read_lock(&table->metadata.rw_lock, WAIT_FOR_LOCK, thread_id)))*/
+    /*return false;*/
 #endif
 
   iceberg_metadata * metadata = &table->metadata;
@@ -775,7 +775,7 @@ bool iceberg_insert(iceberg_table * table, KeyType key, ValueType value, uint8_t
     ret = iceberg_lv2_insert(table, key, value, index, thread_id);
 
 #ifdef ENABLE_RESIZE
-  read_unlock(&table->metadata.rw_lock, thread_id);
+  /*read_unlock(&table->metadata.rw_lock, thread_id);*/
 #endif
 
   return ret;
@@ -923,8 +923,8 @@ static inline bool iceberg_lv2_remove(iceberg_table * table, KeyType key, uint64
 bool iceberg_remove(iceberg_table * table, KeyType key, uint8_t thread_id) {
 
 #ifdef ENABLE_RESIZE
-  if (unlikely(!read_lock(&table->metadata.rw_lock, WAIT_FOR_LOCK, thread_id)))
-    return false;
+  /*if (unlikely(!read_lock(&table->metadata.rw_lock, WAIT_FOR_LOCK, thread_id)))*/
+    /*return false;*/
 #endif
 
   iceberg_metadata * metadata = &table->metadata;
@@ -958,7 +958,7 @@ bool iceberg_remove(iceberg_table * table, KeyType key, uint8_t thread_id) {
           metadata->lv1_md[old_bindex][old_boffset].block_md[slot] = 0;
           blocks[old_boffset].slots[slot].key = blocks[old_boffset].slots[slot].val = 0;
           pc_add(&metadata->lv1_balls, -1, thread_id);
-          read_unlock(&table->metadata.rw_lock, thread_id);
+          /*read_unlock(&table->metadata.rw_lock, thread_id);*/
           return true;
         }
       }
@@ -983,7 +983,7 @@ bool iceberg_remove(iceberg_table * table, KeyType key, uint8_t thread_id) {
       blocks[boffset].slots[slot].key = blocks[boffset].slots[slot].val = 0;
       pc_add(&metadata->lv1_balls, -1, thread_id);
 #ifdef ENABLE_RESIZE
-      read_unlock(&table->metadata.rw_lock, thread_id);
+      /*read_unlock(&table->metadata.rw_lock, thread_id);*/
 #endif
       return true;
     }
@@ -992,7 +992,7 @@ bool iceberg_remove(iceberg_table * table, KeyType key, uint8_t thread_id) {
   bool ret = iceberg_lv2_remove(table, key, index, thread_id);
 
 #ifdef ENABLE_RESIZE
-  read_unlock(&table->metadata.rw_lock, thread_id);
+  /*read_unlock(&table->metadata.rw_lock, thread_id);*/
 #endif
 
   return ret;
@@ -1127,8 +1127,8 @@ static inline bool iceberg_lv2_get_value(iceberg_table * table, KeyType key, Val
 bool iceberg_get_value(iceberg_table * table, KeyType key, ValueType *value, uint8_t thread_id) {
 
 #ifdef ENABLE_RESIZE
-  if (unlikely(!read_lock(&table->metadata.rw_lock, WAIT_FOR_LOCK, thread_id)))
-    return false;
+  /*if (unlikely(!read_lock(&table->metadata.rw_lock, WAIT_FOR_LOCK, thread_id)))*/
+    /*return false;*/
 #endif
 
   iceberg_metadata * metadata = &table->metadata;
@@ -1164,7 +1164,7 @@ bool iceberg_get_value(iceberg_table * table, KeyType key, ValueType *value, uin
           *value = blocks[old_boffset].slots[slot].val;
           if (key != *value)
             printf("Resize Index: %ld NBlocks: %ld Level: %ld\n", index, table->metadata.nblocks, 1);
-          read_unlock(&table->metadata.rw_lock, thread_id);
+          /*read_unlock(&table->metadata.rw_lock, thread_id);*/
           return true;
         }
       }
@@ -1189,7 +1189,7 @@ bool iceberg_get_value(iceberg_table * table, KeyType key, ValueType *value, uin
       if (key != *value)
         printf("Index: %ld NBlocks: %ld Level: %ld\n", index, table->metadata.nblocks, 1);
 #ifdef ENABLE_RESIZE
-      read_unlock(&table->metadata.rw_lock, thread_id);
+      /*read_unlock(&table->metadata.rw_lock, thread_id);*/
 #endif
       return true;
     }
@@ -1198,7 +1198,7 @@ bool iceberg_get_value(iceberg_table * table, KeyType key, ValueType *value, uin
   bool ret = iceberg_lv2_get_value(table, key, value, index);
 
 #ifdef ENABLE_RESIZE
-  read_unlock(&table->metadata.rw_lock, thread_id);
+  /*read_unlock(&table->metadata.rw_lock, thread_id);*/
 #endif
 
   return ret;
