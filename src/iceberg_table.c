@@ -134,7 +134,7 @@ int log2_64 (uint64_t value)
 }
 
 static inline void get_block_index_offset(iceberg_table * table, uint64_t index, uint64_t *bindex, uint64_t *boffset) {
-  if (likely(index < table->metadata.init_size)) {
+  if (unlikely(index < table->metadata.init_size)) {
     *bindex = 0;
     *boffset = index;
     return;
@@ -144,7 +144,7 @@ static inline void get_block_index_offset(iceberg_table * table, uint64_t index,
 }
 
 static inline void get_marker_index_offset(iceberg_table * table, uint64_t index, uint64_t *mindex, uint64_t *moffset) {
-  if (likely(index < table->metadata.init_size / 8)) {
+  if (unlikely(index < table->metadata.init_size / 8)) {
     *mindex = 0;
     *moffset = index;
     return;
@@ -1090,8 +1090,6 @@ static inline bool iceberg_lv2_get_value(iceberg_table * table, KeyType key, Val
 
           if (blocks[old_boffset].slots[slot].key == key) {
             *value = blocks[old_boffset].slots[slot].val;
-            if (key != *value)
-              printf("Resize Index: %ld NBlocks: %ld Level: %ld\n", index, table->metadata.nblocks, 2);
             return true;
           }
         }
@@ -1113,8 +1111,6 @@ static inline bool iceberg_lv2_get_value(iceberg_table * table, KeyType key, Val
 
       if (blocks[boffset].slots[slot].key == key) {
         *value = blocks[boffset].slots[slot].val;
-        if (key != *value)
-          printf("Index: %ld NBlocks: %ld Level: %ld\n", index, table->metadata.nblocks, 2);
         return true;
       }
     }
@@ -1162,8 +1158,6 @@ bool iceberg_get_value(iceberg_table * table, KeyType key, ValueType *value, uin
 
         if (blocks[old_boffset].slots[slot].key == key) {
           *value = blocks[old_boffset].slots[slot].val;
-          if (key != *value)
-            printf("Resize Index: %ld NBlocks: %ld Level: %ld\n", index, table->metadata.nblocks, 1);
           /*read_unlock(&table->metadata.rw_lock, thread_id);*/
           return true;
         }
@@ -1186,8 +1180,6 @@ bool iceberg_get_value(iceberg_table * table, KeyType key, ValueType *value, uin
 
     if (blocks[boffset].slots[slot].key == key) {
       *value = blocks[boffset].slots[slot].val;
-      if (key != *value)
-        printf("Index: %ld NBlocks: %ld Level: %ld\n", index, table->metadata.nblocks, 1);
 #ifdef ENABLE_RESIZE
       /*read_unlock(&table->metadata.rw_lock, thread_id);*/
 #endif
