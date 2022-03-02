@@ -776,7 +776,7 @@ static inline bool iceberg_lv3_remove(iceberg_table * table, KeyType key, uint64
 
 #ifdef ENABLE_RESIZE
   // check if there's an active resize and block isn't fixed yet
-  if (unlikely(lv3_index >= (table->metadata.nblocks >> 1) && is_lv3_resize_active(table))) {
+  if (unlikely(is_lv3_resize_active(table) && lv3_index >= (table->metadata.nblocks >> 1))) {
     uint64_t mask = ~(1ULL << (table->metadata.block_bits - 1));
     uint64_t old_index = lv3_index & mask;
     uint64_t chunk_idx = old_index / 8;
@@ -812,7 +812,7 @@ static inline bool iceberg_lv2_remove(iceberg_table * table, KeyType key, uint64
 
 #ifdef ENABLE_RESIZE
     // check if there's an active resize and block isn't fixed yet
-    if (unlikely(index >= (table->metadata.nblocks >> 1) && is_lv2_resize_active(table))) {
+    if (unlikely(is_lv2_resize_active(table) && index >= (table->metadata.nblocks >> 1))) {
       uint64_t mask = ~(1ULL << (table->metadata.block_bits - 1));
       uint64_t old_index = index & mask;
       uint64_t chunk_idx = old_index / 8;
@@ -875,7 +875,7 @@ bool iceberg_remove(iceberg_table * table, KeyType key, uint8_t thread_id) {
 
 #ifdef ENABLE_RESIZE
   // check if there's an active resize and block isn't fixed yet
-  if (unlikely(index >= (table->metadata.nblocks >> 1) && is_lv1_resize_active(table))) {
+  if (unlikely(is_lv1_resize_active(table) && index >= (table->metadata.nblocks >> 1))) {
     uint64_t mask = ~(1ULL << (table->metadata.block_bits - 1));
     uint64_t old_index = index & mask;
     uint64_t chunk_idx = old_index / 8;
@@ -962,7 +962,7 @@ static inline bool iceberg_lv3_get_value_internal(iceberg_table * table, KeyType
 static inline bool iceberg_lv3_get_value(iceberg_table * table, KeyType key, ValueType *value, uint64_t lv3_index) {
 #ifdef ENABLE_RESIZE
   // check if there's an active resize and block isn't fixed yet
-  if (unlikely(lv3_index >= (table->metadata.nblocks >> 1) && is_lv3_resize_active(table))) {
+  if (unlikely(is_lv3_resize_active(table) && lv3_index >= (table->metadata.nblocks >> 1))) {
     uint64_t mask = ~(1ULL << (table->metadata.block_bits - 1));
     uint64_t old_index = lv3_index & mask;
     uint64_t chunk_idx = old_index / 8;
@@ -999,7 +999,7 @@ static inline bool iceberg_lv2_get_value(iceberg_table * table, KeyType key, Val
 
 #ifdef ENABLE_RESIZE
     // check if there's an active resize and block isn't fixed yet
-    if (unlikely(index >= (table->metadata.nblocks >> 1) && is_lv2_resize_active(table))) {
+    if (unlikely(is_lv2_resize_active(table) && index >= (table->metadata.nblocks >> 1))) {
       uint64_t mask = ~(1ULL << (table->metadata.block_bits - 1));
       uint64_t old_index = index & mask;
       uint64_t chunk_idx = old_index / 8;
@@ -1061,7 +1061,7 @@ bool iceberg_get_value(iceberg_table * table, KeyType key, ValueType *value, uin
 
 #ifdef ENABLE_RESIZE
   // check if there's an active resize and block isn't fixed yet
-  if (unlikely(index >= (table->metadata.nblocks >> 1) && is_lv1_resize_active(table))) {
+  if (unlikely(is_lv1_resize_active(table) && index >= (table->metadata.nblocks >> 1))) {
     uint64_t mask = ~(1ULL << (table->metadata.block_bits - 1));
     uint64_t old_index = index & mask;
     uint64_t chunk_idx = old_index / 8;
