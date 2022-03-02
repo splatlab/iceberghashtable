@@ -1,7 +1,7 @@
 ifdef D
-   OPT=
+   OPT= -g
 else
-   OPT= -flto -O3
+   OPT= -flto -Ofast
 endif
 
 ifdef H
@@ -29,7 +29,7 @@ OPT += $(LATENCY_POLICY)
 
 CC = clang
 CPP = clang++
-CFLAGS = -g $(OPT) -Wall -march=native -pthread $(HUGE)
+CFLAGS = $(OPT) -Wall -march=native -pthread $(HUGE)
 INCLUDE = -I ./include
 SOURCES = src/iceberg_table.c src/hashutil.c src/partitioned_counter.c src/lock.c
 OBJECTS = $(subst src/,obj/,$(subst .c,.o,$(SOURCES)))

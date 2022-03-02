@@ -15,6 +15,27 @@
 
 #define NUM_COUNTERS 16
 
+/**
+ * Try to acquire a lock once and return even if the lock is busy.
+ * If spin flag is set, then spin until the lock is available.
+ */
+bool lock(volatile int *var, uint8_t flag) {
+  if (GET_WAIT_FOR_LOCK(flag) != WAIT_FOR_LOCK) {
+    return !__sync_lock_test_and_set(var, 1);
+  } else {
+    while (__sync_lock_test_and_set(var, 1))
+      while (var);
+    return true;
+  }
+
+  return false;
+}
+
+void unlock(volatile int *var) {
+  __sync_lock_release(var);
+  return;
+}
+
 void rw_lock_init(ReaderWriterLock *rwlock) {
   rwlock->readers = 0;
   rwlock->writer = 0;

@@ -37,6 +37,9 @@ extern "C" {
     pc_t pc_counter;
   } ReaderWriterLock;
 
+  bool lock(volatile int *var, uint8_t flag);
+
+  void unlock(volatile int *var);
 
   void rw_lock_init(ReaderWriterLock *rwlock);
 
