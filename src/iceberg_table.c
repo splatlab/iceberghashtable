@@ -10,12 +10,24 @@
 #include <sys/sysinfo.h>
 #include <math.h>
 
+#ifdef PMEM
+#include <fcntl.h>
+#include <libpmem.h>
+#endif
+
 #include "hashutil.h"
 #include "iceberg_precompute.h"
 #include "iceberg_table.h"
 
 #define likely(x)   __builtin_expect((x),1)
 #define unlikely(x) __builtin_expect((x),0)
+
+#ifdef PMEM
+#define PMEM_PATH "/mnt/pmem1"
+#define FILENAME_LEN 1024
+#define NUM_LEVEL3_NODES 2048
+#define FILE_SIZE (10ULL * 1024 * 1024 * 1024)
+#endif
 
 uint64_t seed[5] = { 12351327692179052ll, 23246347347385899ll, 35236262354132235ll, 13604702930934770ll, 57439820692984798ll };
 
@@ -105,10 +117,20 @@ static inline void get_index_offset(uint64_t init_log, uint64_t index, uint64_t 
   *boffset = index - adj;
 }
 
+#ifdef PMEM
+void split_hash(KeyType key, uint8_t *slot_choice, uint8_t *fprint, uint64_t *index, iceberg_metadata * metadata, uint64_t seed_idx)
+{
+  uint64_t hash = MurmurHash64A(&key, sizeof(KeyType), seed[seed_idx]);
+  *slot_choice = hash & ((1 << FPRINT_BITS) - 1);
+  *fprint = *slot_choice <= 1 ? 2 : *slot_choice;
+  *index = (hash >> FPRINT_BITS) & ((1 << metadata->block_bits) - 1);
+}
+#else
 static inline void split_hash(uint64_t hash, uint8_t *fprint, uint64_t *index, iceberg_metadata * metadata) {	
   *fprint = hash & ((1 << FPRINT_BITS) - 1);
   *index = (hash >> FPRINT_BITS) & ((1 << metadata->block_bits) - 1);
 }
+#endif
 
 static inline uint32_t slot_mask_32(uint8_t * metadata, uint8_t fprint) {
   __m256i bcast = _mm256_set1_epi8(fprint);
@@ -127,7 +149,7 @@ static uint64_t iceberg_block_load(iceberg_table * table, uint64_t index, uint8_
   get_index_offset(table->metadata.log_init_size, index, &bindex, &boffset);
   if (level == 1) {
       __mmask64 mask64 = slot_mask_64(table->metadata.lv1_md[bindex][boffset].block_md, 0);
-      return (1ULL << SLOT_BITS) - __builtin_popcountll(mask64); 
+      return (1ULL << SLOT_BITS) - __builtin_popcountll(mask64);
   } else if (level == 2) {
       __mmask32 mask32 = slot_mask_32(table->metadata.lv2_md[bindex][boffset].block_md, 0) & ((1 << (C_LV2 + MAX_LG_LG_N / D_CHOICES)) - 1);
       return (C_LV2 + MAX_LG_LG_N / D_CHOICES) - __builtin_popcountll(mask32);
@@ -178,6 +200,40 @@ int iceberg_init(iceberg_table *table, uint64_t log_slots) {
 #else
   int mmap_flags = MAP_PRIVATE | MAP_ANONYMOUS | MAP_POPULATE;
 #endif
+  
+#if PMEM
+  char level1_filename[FILENAME_LEN];
+  sprintf(level1_filename, "%s/level1", PMEM_PATH);
+  if ((table->level1[0] = (iceberg_lv1_block *)pmem_map_file(level1_filename, FILE_SIZE, PMEM_FILE_CREATE | PMEM_FILE_SPARSE, 0666, &mapped_len, &is_pmem)) == NULL) {
+    perror("pmem_map_file");
+    exit(1);
+  }
+  assert(is_pmem);
+  char level2_filename[FILENAME_LEN];
+  sprintf(level2_filename, "%s/level2", PMEM_PATH);
+  if ((table->level2[0] = (iceberg_lv2_block *)pmem_map_file(level2_filename, FILE_SIZE, PMEM_FILE_CREATE | PMEM_FILE_SPARSE, 0666, &mapped_len, &is_pmem)) == NULL) {
+    perror("pmem_map_file");
+  }
+  assert(is_pmem);
+  char level3_filename[FILENAME_LEN];
+  sprintf(level3_filename, "%s/level3", PMEM_PATH);
+  if ((table->level3[0] = (iceberg_lv3_list *)pmem_map_file(level3_filename, FILE_SIZE, PMEM_FILE_CREATE | PMEM_FILE_SPARSE, 0666, &mapped_len, &is_pmem)) == NULL) {
+    perror("pmem_map_file");
+    exit(1);
+  }
+  assert(is_pmem);
+  size_t level3_nodes_size = NUM_LEVEL3_NODES * sizeof(iceberg_lv3_node);
+  sprintf(level3_nodes_filename, "%s/level3_data", PMEM_PATH);
+  table->level3_nodes =
+    (iceberg_lv3_node *)pmem_map_file(level3_nodes_filename,
+        level3_nodes_size, PMEM_FILE_CREATE | PMEM_FILE_SPARSE, 0666,
+        &mapped_len, &is_pmem);
+  if (table->level3_nodes == NULL) {
+    perror("pmem_map_file");
+    exit(1);
+  }
+  assert(is_pmem);
+#else
   size_t level1_size = sizeof(iceberg_lv1_block) * total_blocks;
   //table->level1 = (iceberg_lv1_block *)malloc(level1_size);
   table->level1[0] = (iceberg_lv1_block *)mmap(NULL, level1_size, PROT_READ | PROT_WRITE, mmap_flags, 0, 0);
@@ -198,6 +254,7 @@ int iceberg_init(iceberg_table *table, uint64_t log_slots) {
     perror("level3 malloc failed");
     exit(1);
   }
+#endif
 
   table->metadata.total_size_in_bytes = total_size_in_bytes;
   table->metadata.nslots = 1 << log_slots;
@@ -205,6 +262,7 @@ int iceberg_init(iceberg_table *table, uint64_t log_slots) {
   table->metadata.block_bits = log_slots - SLOT_BITS;
   table->metadata.init_size = total_blocks;
   table->metadata.log_init_size = log2(total_blocks);
+  table->metadata.nblocks_parts[0] = total_blocks;
 
   uint32_t procs = get_nprocs();
   pc_init(&table->metadata.lv1_balls, &table->metadata.lv1_ctr, procs, 1000);
@@ -267,23 +325,292 @@ int iceberg_init(iceberg_table *table, uint64_t log_slots) {
   table->metadata.lock = 0;
 #endif
 
+#if PMEM
+  pmem_memset_persist(table->level1[0], 0, level1_size);
+  pmem_memset_persist(table->level2[0], 0, level2_size);
+
+  for (uint64_t i = 0; i < total_blocks; i++) {
+    table->level3[0][i].head_idx = -1;
+  }
+  pmem_persist(table->level3[0], level3_size);
+  pmem_memset_persist(table->level3_nodes, 0, level3_nodes_size);
+#else
   for (uint64_t i = 0; i < total_blocks; ++i) {
     for (uint64_t j = 0; j < (1 << SLOT_BITS); ++j) {
-      table->metadata.lv1_md[0][i].block_md[j] = 0;
       table->level1[0][i].slots[j].key = table->level1[0][i].slots[j].val = 0;
     }
 
     for (uint64_t j = 0; j < C_LV2 + MAX_LG_LG_N / D_CHOICES; ++j) {
-      table->metadata.lv2_md[0][i].block_md[j] = 0;
       table->level2[0][i].slots[j].key = table->level2[0][i].slots[j].val = 0;
     }
-
     table->level3[0]->head = NULL;
-    table->metadata.lv3_sizes[0][i] = table->metadata.lv3_locks[0][i] = 0;
   }
+#endif
+
+  memset((char *)table->metadata.lv1_md[0], 0, lv1_md_size);
+  memset((char *)table->metadata.lv2_md[0], 0, lv2_md_size);
+  memset(table->metadata.lv3_sizes[0], 0, total_blocks * sizeof(uint64_t));
+  memset(table->metadata.lv3_locks[0], 0, total_blocks * sizeof(uint8_t));
 
   return 0;
 }
+
+#if PMEM
+uint64_t iceberg_dismount(iceberg_table * table) {
+  for (uint64_t i = 0; i < resize_cnt; ++i) {
+    uint64_t total_blocks = table->metadata.nblocks_parts;
+    size_t lv1_md_size = sizeof(iceberg_lv1_block_md) * total_blocks + 64;
+    munmap(table->metadata.lv1_md[i], lv1_md_size);
+    size_t lv2_md_size = sizeof(iceberg_lv2_block_md) * total_blocks + 32;
+    munmap(table->metadata.lv2_md[i], lv2_md_size);
+    munmap(table->metadata.lv3_sizes, sizeof(uint64_t) * total_blocks);
+    munmap(table->metadata.lv3_locks, sizeof(uint8_t) * total_blocks);
+  }
+
+  pc_destructor(&table->metadata.lv1_balls);
+  pc_destructor(&table->metadata.lv2_balls);
+  pc_destructor(&table->metadata.lv3_balls);
+
+  pmem_unmap(table->level1[0], FILE_SIZE);
+  pmem_unmap(table->level2[0], FILE_SIZE);
+  pmem_unmap(table->level3[0], FILE_SIZE);
+
+  size_t level3_nodes_size = NUM_LEVEL3_NODES * sizeof(iceberg_lv3_node);
+  pmem_unmap(table->level3_nodes, level3_nodes_size);
+
+#ifdef ENABLE_RESIZE
+  for (uint64_t i = 0;  i <= table->metadata.resize_cnt; ++i) {
+    memset(table->metadata.lv1_resize_marker[i], 0, table->metadata.marker_sizes[i]);
+    memset(table->metadata.lv2_resize_marker[i], 0, table->metadata.marker_sizes[i]);
+    memset(table->metadata.lv3_resize_marker[i], 0, table->metadata.marker_sizes[i]);
+  }
+#endif
+
+  return table->metadata.block_bits + SLOT_BITS;
+}
+
+int iceberg_mount(iceberg_table *table, uint64_t log_slots, uint64_t resize_cnt) {
+  memset(table, 0, sizeof(*table));
+
+  uint64_t total_blocks = 1 << (log_slots - SLOT_BITS);
+  uint64_t total_size_in_bytes = (sizeof(iceberg_lv1_block) + sizeof(iceberg_lv2_block) + sizeof(iceberg_lv1_block_md) + sizeof(iceberg_lv2_block_md)) * total_blocks;
+
+  assert(table);
+
+#if defined(HUGE_TLB)
+  int mmap_flags = MAP_PRIVATE | MAP_ANONYMOUS | MAP_POPULATE | MAP_HUGETLB;
+#else
+  int mmap_flags = MAP_PRIVATE | MAP_ANONYMOUS | MAP_POPULATE;
+#endif
+
+  size_t mapped_len;
+  int is_pmem;
+
+  /* map the file for first partition */
+  char level1_filename[FILENAME_LEN];
+  sprintf(level1_filename, "%s/level1", PMEM_PATH);
+  if ((table->level1[0] = (iceberg_lv1_block *)pmem_map_file(level1_filename, 0, 0, 0666, &mapped_len, &is_pmem)) == NULL) {
+    perror("pmem_map_file");
+    exit(1);
+  }
+  assert(is_pmem);
+  assert(mapped_len == FILE_SIZE);
+
+  char level2_filename[FILENAME_LEN];
+  sprintf(level2_filename, "%s/level2", PMEM_PATH);
+  if ((table->level2[0] = (iceberg_lv2_block *)pmem_map_file(level2_filename, 0, 0, 0666, &mapped_len, &is_pmem)) == NULL) {
+    perror("pmem_map_file");
+    exit(1);
+  }
+  assert(is_pmem);
+  assert(mapped_len == FILE_SIZE);
+
+  char level3_filename[FILENAME_LEN];
+  sprintf(level3_filename, "%s/level3", PMEM_PATH);
+  if ((table->level3[0] = (iceberg_lv3_list *)pmem_map_file(level3_filename, 0, 0, 0666, &mapped_len, &is_pmem)) == NULL) {
+    perror("pmem_map_file");
+    exit(1);
+  }
+  assert(is_pmem);
+  assert(mapped_len == FILE_SIZE);
+
+  size_t level3_nodes_size = NUM_LEVEL3_NODES * sizeof(iceberg_lv3_node);
+  char level3_nodes_filename[FILENAME_LEN];
+  sprintf(level3_nodes_filename, "%s/level3_data", PMEM_PATH);
+  table->level3_nodes = (iceberg_lv3_node *)pmem_map_file(level3_nodes_filename, 0, 0, 0666, &mapped_len, &is_pmem);
+  if (table->level3_nodes == NULL) {
+    perror("pmem_map_file");
+    exit(1);
+  }
+  assert(is_pmem);
+  assert(mapped_len == level3_nodes_size);
+
+  /* init metadata for first partition */
+  table->metadata.total_size_in_bytes = total_size_in_bytes;
+  table->metadata.nslots = 1 << log_slots;
+  table->metadata.nblocks = total_blocks;
+  table->metadata.block_bits = log_slots - SLOT_BITS;
+  table->metadata.resize_cnt = resize_cnt;
+  table->metadata.nblocks_parts[0] = total_blocks;
+
+  /* init counters */
+  uint32_t procs = get_nprocs();
+  pc_init(&table->metadata.lv1_balls, &table->metadata.lv1_ctr, procs, 1000);
+  pc_init(&table->metadata.lv2_balls, &table->metadata.lv2_ctr, procs, 1000);
+  pc_init(&table->metadata.lv3_balls, &table->metadata.lv3_ctr, procs, 1000);
+
+  /* init fingerprint metadata for first partition */
+  size_t lv1_md_size = sizeof(iceberg_lv1_block_md) * total_blocks + 64;
+  table->metadata.lv1_md[0] = (iceberg_lv1_block_md *)mmap(NULL, lv1_md_size, PROT_READ | PROT_WRITE, mmap_flags, 0, 0);
+  if (!table->metadata.lv1_md[0]) {
+    perror("lv1_md malloc failed");
+    exit(1);
+  }
+
+  size_t lv2_md_size = sizeof(iceberg_lv2_block_md) * total_blocks + 32;
+  table->metadata.lv2_md[0] = (iceberg_lv2_block_md *)mmap(NULL, lv2_md_size, PROT_READ | PROT_WRITE, mmap_flags, 0, 0);
+  if (!table->metadata.lv2_md[0]) {
+    perror("lv2_md malloc failed");
+    exit(1);
+  }
+  table->metadata.lv3_sizes[0] = (uint64_t *)mmap(NULL, sizeof(uint64_t) * total_blocks, PROT_READ | PROT_WRITE, mmap_flags, 0, 0);
+  if (!table->metadata.lv3_sizes[0]) {
+    perror("lv3_sizes malloc failed");
+    exit(1);
+  }
+  table->metadata.lv3_locks[0] = (uint8_t *)mmap(NULL, sizeof(uint8_t) * total_blocks, PROT_READ | PROT_WRITE, mmap_flags, 0, 0);
+  if (!table->metadata.lv3_locks[0]) {
+    perror("lv3_locks malloc failed");
+    exit(1);
+  }
+
+  // Init table/metadata for rest of the partitions
+  for (uint64_t i = 1; i <= resize_cnt; ++i) {
+    uint64_t nblocks = total_blocks * pow(2, i-1);
+    table->metadata.nblocks_parts[i] = nblocks;
+    
+    table->level1[i] = table->level1[0] + nblocks;
+    table->level2[i] = table->level2[0] + nblocks;
+    table->level3[i] = table->level3[0] + nblocks;
+    
+    size_t lv1_md_size = sizeof(iceberg_lv1_block_md) * nblocks + 64;
+    table->metadata.lv1_md[i] = (iceberg_lv1_block_md *)mmap(NULL, lv1_md_size, PROT_READ | PROT_WRITE, mmap_flags, 0, 0);
+    if (!table->metadata.lv1_md[i]) {
+      perror("lv1_md malloc failed");
+      exit(1);
+    }
+    size_t lv2_md_size = sizeof(iceberg_lv2_block_md) * nblocks + 32;
+    table->metadata.lv2_md[i] = (iceberg_lv2_block_md *)mmap(NULL, lv2_md_size, PROT_READ | PROT_WRITE, mmap_flags, 0, 0);
+    if (!table->metadata.lv2_md[i]) {
+      perror("lv2_md malloc failed");
+      exit(1);
+    }
+    table->metadata.lv3_sizes[i] = (uint64_t *)mmap(NULL, sizeof(uint64_t) * nblocks, PROT_READ | PROT_WRITE, mmap_flags, 0, 0);
+    if (!table->metadata.lv3_sizes[i]) {
+      perror("lv3_sizes malloc failed");
+      exit(1);
+    }
+    table->metadata.lv3_locks[i] = (uint8_t *)mmap(NULL, sizeof(uint8_t) * nblocks, PROT_READ | PROT_WRITE, mmap_flags, 0, 0);
+    if (!table->metadata.lv3_locks[i]) {
+      perror("lv3_locks malloc failed");
+      exit(1);
+    }
+  }
+
+  for (uint64_t p = 0; p <= resize_cnt; ++p) {
+    uint64_t total_blocks = table->metadata.nblocks_parts[p];
+    
+    // recover the metadata
+    // level 1
+    for (uint64_t i = 0; i < total_blocks; i++) {
+      iceberg_lv1_block *block = &table->level1[p][i];
+      uint8_t *block_md = table->metadata.lv1_md[p][i].block_md;
+      for (uint64_t slot = 0; slot < 1 << SLOT_BITS; slot++) {
+        KeyType key = block->slots[slot].key;
+        if (key != 0) {
+          uint8_t fprint;
+          uint64_t index;
+
+          split_hash(lv1_hash(key), &fprint, &index, &table->metadata);
+          assert(index == i);
+          block_md[slot] = fprint;
+          pc_add(&table->metadata.lv1_balls, 1, 0);
+        }
+      }
+    }
+
+    // level 2
+    for (uint64_t i = 0; i < total_blocks; i++) {
+      iceberg_lv2_block *block = &table->level2[p][i];
+      uint8_t *block_md = table->metadata.lv2_md[p][i].block_md;
+      for (uint64_t slot = 0; slot < C_LV2 + MAX_LG_LG_N / D_CHOICES; slot++) {
+        KeyType key = block->slots[slot].key;
+        if (key != 0) {
+          uint8_t fprint;
+          uint64_t index;
+
+          split_hash(lv2_hash(key, 0), &fprint, &index, &table->metadata);
+          if (index != i) {
+            split_hash(lv2_hash(key, 1), &fprint, &index, &table->metadata);
+          }
+
+          assert(index == i);
+          block_md[slot] = fprint;
+          pc_add(&table->metadata.lv2_balls, 1, 0);
+        }
+      }
+    }
+
+    // level 3
+    for (uint64_t i = 0; i < total_blocks; i++) {
+      ptrdiff_t idx = table->level3[p][i].head_idx;
+      while (idx != -1) {
+        idx = table->level3_nodes[idx].next_idx;
+        table->metadata.lv3_sizes[p][i]++;
+        pc_add(&table->metadata.lv3_balls, 1, 0);
+      }
+    }
+  }
+
+#ifdef ENABLE_RESIZE
+  table->metadata.lv1_resize_ctr = total_blocks;
+  table->metadata.lv2_resize_ctr = total_blocks;
+  table->metadata.lv3_resize_ctr = total_blocks;
+
+  // Create marker metadata for rest of the partitions
+  for (uint64_t i = 0; i <= resize_cnt; ++i) {
+    uint64_t nblocks = table->metadata.nblocks_parts * pow(2, i-1);
+
+    size_t resize_marker_size = sizeof(uint8_t) * nblocks / 8;
+    table->metadata.marker_sizes[i] = resize_marker_size;
+
+    table->metadata.lv1_resize_marker[i] = (uint8_t *)mmap(NULL, resize_marker_size, PROT_READ | PROT_WRITE, mmap_flags, 0, 0);
+    if (!table->metadata.lv1_resize_marker[i]) {
+      perror("level1 resize ctr malloc failed");
+      exit(1);
+    }
+    table->metadata.lv2_resize_marker[i] = (uint8_t *)mmap(NULL, resize_marker_size, PROT_READ | PROT_WRITE, mmap_flags, 0, 0);
+    if (!table->metadata.lv2_resize_marker[i]) {
+      perror("level2 resize ctr malloc failed");
+      exit(1);
+    }
+    table->metadata.lv3_resize_marker[i] = (uint8_t *)mmap(NULL, resize_marker_size, PROT_READ | PROT_WRITE, mmap_flags, 0, 0);
+    if (!table->metadata.lv3_resize_marker[i]) {
+      perror("level3 resize ctr malloc failed");
+      exit(1);
+    }
+    
+    memset(table->metadata.lv1_resize_marker[i], 1, resize_marker_size[i]);
+    memset(table->metadata.lv2_resize_marker[i], 1, resize_marker_size[i]);
+    memset(table->metadata.lv3_resize_marker[i], 1, resize_marker_size[i]);
+  }
+
+  rw_lock_init(&table->metadata.rw_lock);
+#endif
+
+  return 0;
+}
+#endif
 
 #ifdef ENABLE_RESIZE
 static inline bool is_lv1_resize_active(iceberg_table * table) {
@@ -344,7 +671,11 @@ static bool iceberg_setup_resize(iceberg_table * table) {
   uint64_t resize_cnt = table->metadata.resize_cnt + 1;
 
   // Allocate new table and metadata
-
+#if PMEM
+  table->level1[resize_cnt] = table->level1[0] + cur_blocks;
+  table->level2[resize_cnt] = table->level2[0] + cur_blocks;
+  table->level3[resize_cnt] = table->level3[0] + cur_blocks;
+#else
   // alloc level1
   size_t level1_size = sizeof(iceberg_lv1_block) * cur_blocks;
   table->level1[resize_cnt] = (iceberg_lv1_block *)mmap(NULL, level1_size, PROT_READ | PROT_WRITE, mmap_flags, 0, 0);
@@ -368,6 +699,7 @@ static bool iceberg_setup_resize(iceberg_table * table) {
     perror("level3 resize failed");
     exit(1);
   }
+#endif
 
   // alloc level1 metadata
   size_t lv1_md_size = sizeof(iceberg_lv1_block_md) * cur_blocks + 64;
@@ -440,6 +772,7 @@ static bool iceberg_setup_resize(iceberg_table * table) {
   table->metadata.nslots *= 2;
   table->metadata.nblocks = total_blocks;
   table->metadata.block_bits += 1;
+  table->metadata.nblocks_parts[resize_cnt] = total_blocks;
 
   // reset the block ctr 
   table->metadata.lv1_resize_ctr = 0;

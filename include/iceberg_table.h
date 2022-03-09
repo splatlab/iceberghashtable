@@ -3,6 +3,7 @@
 
 #include <inttypes.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include "lock.h"
 
 #ifdef __cplusplus
@@ -44,7 +45,12 @@ extern "C" {
   typedef struct iceberg_lv3_node {
     KeyType key;
     ValueType val;
+#ifdef PMEM
+    bool in_use;
+    ptrdiff_t next_idx;
+#else
     struct iceberg_lv3_node * next_node;
+#endif
   } iceberg_lv3_node;
 
   typedef struct iceberg_lv3_list {
@@ -68,6 +74,7 @@ extern "C" {
     iceberg_lv2_block_md * lv2_md[MAX_RESIZES];
     uint64_t * lv3_sizes[MAX_RESIZES];
     uint8_t * lv3_locks[MAX_RESIZES];
+    uint64_t nblocks_parts[MAX_RESIZES];
 #ifdef ENABLE_RESIZE
     volatile int lock;
     uint64_t resize_cnt;
@@ -83,9 +90,13 @@ extern "C" {
 
   typedef struct iceberg_table {
     iceberg_metadata metadata;
+    /* Only things that are persisted on PMEM */
     iceberg_lv1_block * level1[MAX_RESIZES];
     iceberg_lv2_block * level2[MAX_RESIZES];
     iceberg_lv3_list * level3[MAX_RESIZES];
+#ifdef PMEM
+    iceberg_lv3_node * level3_nodes;
+#endif
   } iceberg_table;
 
   uint64_t lv1_balls(iceberg_table * table);
@@ -102,6 +113,11 @@ extern "C" {
   bool iceberg_remove(iceberg_table * table, KeyType key, uint8_t thread_id);
 
   bool iceberg_get_value(iceberg_table * table, KeyType key, ValueType *value, uint8_t thread_id);
+
+#ifdef PMEM
+  uint64_t iceberg_dismount(iceberg_table *table);
+  int iceberg_mount(iceberg_table *table, uint64_t log_slots);
+#endif
 
 #ifdef ENABLE_RESIZE
   void iceberg_end(iceberg_table * table);
