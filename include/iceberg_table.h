@@ -54,7 +54,11 @@ extern "C" {
   } iceberg_lv3_node;
 
   typedef struct iceberg_lv3_list {
+#ifdef PMEM
+    ptrdiff_t head_idx;
+#else
     iceberg_lv3_node * head;
+#endif
   } iceberg_lv3_list;
 
   typedef struct iceberg_metadata {
@@ -116,7 +120,7 @@ extern "C" {
 
 #ifdef PMEM
   uint64_t iceberg_dismount(iceberg_table *table);
-  int iceberg_mount(iceberg_table *table, uint64_t log_slots);
+  int iceberg_mount(iceberg_table *table, uint64_t log_slots, uint64_t resize_cnt);
 #endif
 
 #ifdef ENABLE_RESIZE

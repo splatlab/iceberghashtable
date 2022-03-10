@@ -15,17 +15,20 @@ RESIZE_POLICY = -DENABLE_RESIZE
 ifdef NORESIZE
 	RESIZE_POLICY = 
 endif
-OPT += $(RESIZE_POLICY)
 
 ifdef INST
 	THRPT_POLICY = -DINSTAN_THRPT
 endif
-OPT += $(THRPT_POLICY)
 
 ifdef LATENCY
 	LATENCY_POLICY = -DLATENCY
 endif
-OPT += $(LATENCY_POLICY)
+
+ifdef PMEM
+	PMEM_POLICY = -DPMEM
+endif
+
+OPT += $(RESIZE_POLICY) $(THRPT_POLICY) $(LATENCY_POLICY) $(PMEM_POLICY)
 
 CC = clang
 CPP = clang++
@@ -34,6 +37,11 @@ INCLUDE = -I ./include
 SOURCES = src/iceberg_table.c src/hashutil.c src/partitioned_counter.c src/lock.c
 OBJECTS = $(subst src/,obj/,$(subst .c,.o,$(SOURCES)))
 LIBS = -lssl -lcrypto -lpmem -ltbb
+
+ifdef PMEM
+INCLUDE += ./pmdk/src/PMDK/src/include
+LIBS +=  ./pmdk/src/PMDK/src/nondebug -lpmem -lpmemobj
+endif
 
 all: main ycsb
 
