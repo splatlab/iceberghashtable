@@ -544,13 +544,8 @@ int iceberg_mount(iceberg_table *table, uint64_t log_slots, uint64_t resize_cnt)
         if (key != 0) {
           uint8_t fprint;
           uint64_t index;
-
-#if PMEM
           uint8_t slot_choice;
           split_hash(key, &slot_choice, &fprint, &index, &table->metadata, 0);
-#else
-          split_hash(lv1_hash(key), &fprint, &index, &table->metadata);
-#endif
           assert(index == i);
           block_md[slot] = fprint;
           pc_add(&table->metadata.lv1_balls, 1, 0);
@@ -567,20 +562,11 @@ int iceberg_mount(iceberg_table *table, uint64_t log_slots, uint64_t resize_cnt)
         if (key != 0) {
           uint8_t fprint;
           uint64_t index;
-
-#if PMEM
           uint8_t slot_choice;
           split_hash(key, &slot_choice, &fprint, &index, &table->metadata, 1);
           if (index != i) {
             split_hash(key, &slot_choice, &fprint, &index, &table->metadata, 2);
           }
-#else
-          split_hash(lv2_hash(key, 0), &fprint, &index, &table->metadata);
-          if (index != i) {
-            split_hash(lv2_hash(key, 1), &fprint, &index, &table->metadata);
-          }
-#endif
-
           assert(index == i);
           block_md[slot] = fprint;
           pc_add(&table->metadata.lv2_balls, 1, 0);
@@ -934,7 +920,7 @@ static inline bool iceberg_lv3_insert(iceberg_table * table, KeyType key, ValueT
 #if PMEM
   new_node->next_idx = lists[boffset].head_idx;
   pmem_persist(new_node, sizeof(*new_node));
-  lists[lv3_index].head_idx = new_node_idx;
+  lists[boffset].head_idx = new_node_idx;
   pmem_persist(&lists[boffset], sizeof(lists[boffset]));
 #else
   new_node->next_node = lists[boffset].head;
