@@ -39,8 +39,8 @@ OBJECTS = $(subst src/,obj/,$(subst .c,.o,$(SOURCES)))
 LIBS = -lssl -lcrypto -lpmem -ltbb
 
 ifdef PMEM
-INCLUDE += ./pmdk/src/PMDK/src/include
-LIBS +=  ./pmdk/src/PMDK/src/nondebug -lpmem -lpmemobj
+INCLUDE += -I ./pmdk/src/PMDK/src/include
+LIBS +=  -L ./pmdk/src/PMDK/src/nondebug -lpmem -lpmemobj
 endif
 
 all: main ycsb
@@ -58,10 +58,10 @@ obj/ycsb.o: ycsb.cc
 	$(CPP) $(CFLAGS) $(INCLUDE) -c $< -o $@
 
 main: $(OBJECTS) obj/main.o
-	$(CPP) $(CFLAGS) $(INCLUDE) $^ -o $@ $(LIBS)
+	$(CPP) $(CFLAGS) $^ -o $@ $(LIBS)
 
 ycsb: $(OBJECTS) obj/ycsb.o
-	$(CPP) $(CFLAGS) $(INCLUDE) $^ -o $@ $(LIBS)
+	$(CPP) $(CFLAGS) $^ -o $@ $(LIBS)
 
 .PHONY: clean directories
 

@@ -1133,7 +1133,7 @@ static inline bool iceberg_lv3_remove_internal(iceberg_table * table, KeyType ke
     return true;
   }
 
-  iceberg_lv3_node * current_node = lists[boffset].head;
+  iceberg_lv3_node * current_node = head;
 
   for(uint64_t i = 0; i < metadata->lv3_sizes[bindex][boffset] - 1; ++i) {
 #if PMEM
@@ -1160,7 +1160,7 @@ static inline bool iceberg_lv3_remove_internal(iceberg_table * table, KeyType ke
       return true;
     }
 
-    current_node = current_node->next_node;
+    current_node = next_node;
   }
 
   metadata->lv3_locks[bindex][boffset] = 0;
@@ -1656,7 +1656,13 @@ static bool iceberg_lv3_move_block(iceberg_table * table, uint64_t bnum, uint8_t
   get_index_offset(table->metadata.log_init_size, bnum, &bindex, &boffset);
   // relocate items in level3
   if(unlikely(table->metadata.lv3_sizes[bindex][boffset])) {
+#if PMEM
+    iceberg_lv3_list * lists = table->level3[bindex];
+    iceberg_lv3_node * lv3_nodes = table->level3_nodes;
+    iceberg_lv3_node * current_node = &lv3_nodes[lists[boffset].head_idx];
+#else
     iceberg_lv3_node * current_node = table->level3[bindex][boffset].head;
+#endif
 
     while (current_node != NULL) {
       KeyType key = current_node->key;
@@ -1668,7 +1674,6 @@ static bool iceberg_lv3_move_block(iceberg_table * table, uint64_t bnum, uint8_t
       split_hash(lv1_hash(key), &fprint, &index, &table->metadata);
       // move to new location
       if (index != bnum) {
-        current_node = current_node->next_node;
         if (!iceberg_lv3_insert(table, key, value, index, thread_id)) {
           printf("Failed insert during resize lv3\n");
           exit(0);
@@ -1683,8 +1688,15 @@ static bool iceberg_lv3_move_block(iceberg_table * table, uint64_t bnum, uint8_t
         //exit(0);
         //}
       }
-      else
+#if PMEM      
+      if (current_node->next_idx != -1) {
+        current_node = &lv3_nodes[current_node->next_idx];
+      } else {
+        current_node = NULL;
+      }
+#else
         current_node = current_node->next_node;
+#endif
     }
   }
 
