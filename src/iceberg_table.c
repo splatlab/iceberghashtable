@@ -954,7 +954,11 @@ static inline bool iceberg_lv2_insert_internal(iceberg_table * table, KeyType ke
   uint8_t start = 0;
 #endif
   for(uint8_t i = start; i < start + popct; ++i) {
+#if PMEM
+    uint8_t slot = word_select(md_mask, i % popct);
+#else
     uint8_t slot = word_select(md_mask, i);
+#endif
 
     if(__sync_bool_compare_and_swap(metadata->lv2_md[bindex][boffset].block_md + slot, 0, 1)) {
       pc_add(&metadata->lv2_balls, 1, thread_id);
@@ -1063,7 +1067,11 @@ static bool iceberg_insert_internal(iceberg_table * table, KeyType key, ValueTyp
   uint8_t start = 0;
 #endif
   for(uint8_t i = start; i < start + popct; ++i) {
+#if PMEM
     uint8_t slot = word_select(md_mask, i);
+#else
+    uint8_t slot = word_select(md_mask, i % popct);
+#endif
 
     if(__sync_bool_compare_and_swap(metadata->lv1_md[bindex][boffset].block_md + slot, 0, 1)) {
       pc_add(&metadata->lv1_balls, 1, thread_id);
