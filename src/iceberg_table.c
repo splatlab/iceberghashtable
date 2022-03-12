@@ -102,7 +102,7 @@ static inline double iceberg_load_factor_aprox(iceberg_table * table) {
 #ifdef ENABLE_RESIZE
 bool need_resize(iceberg_table * table) {
   double lf = iceberg_load_factor_aprox(table);
-  if (lf >= 0.96)
+  if (lf >= 0.85)
     return true;
   return false;
 }
@@ -1068,9 +1068,9 @@ static bool iceberg_insert_internal(iceberg_table * table, KeyType key, ValueTyp
 #endif
   for(uint8_t i = start; i < start + popct; ++i) {
 #if PMEM
-    uint8_t slot = word_select(md_mask, i);
-#else
     uint8_t slot = word_select(md_mask, i % popct);
+#else
+    uint8_t slot = word_select(md_mask, i);
 #endif
 
     if(__sync_bool_compare_and_swap(metadata->lv1_md[bindex][boffset].block_md + slot, 0, 1)) {
