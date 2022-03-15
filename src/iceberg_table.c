@@ -55,7 +55,7 @@ uint64_t lv1_balls(iceberg_table * table) {
   return *(table->metadata.lv1_balls.global_counter);
 }
 
-uint64_t lv1_balls_aprox(iceberg_table * table) {
+static inline uint64_t lv1_balls_aprox(iceberg_table * table) {
   return *(table->metadata.lv1_balls.global_counter);
 }
 
@@ -64,7 +64,7 @@ uint64_t lv2_balls(iceberg_table * table) {
   return *(table->metadata.lv2_balls.global_counter);
 }
 
-uint64_t lv2_balls_aprox(iceberg_table * table) {
+static inline uint64_t lv2_balls_aprox(iceberg_table * table) {
   return *(table->metadata.lv2_balls.global_counter);
 }
 
@@ -73,7 +73,7 @@ uint64_t lv3_balls(iceberg_table * table) {
   return *(table->metadata.lv3_balls.global_counter);
 }
 
-uint64_t lv3_balls_aprox(iceberg_table * table) {
+static inline uint64_t lv3_balls_aprox(iceberg_table * table) {
   return *(table->metadata.lv3_balls.global_counter);
 }
 
