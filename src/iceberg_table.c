@@ -22,6 +22,8 @@
 #define likely(x)   __builtin_expect((x),1)
 #define unlikely(x) __builtin_expect((x),0)
 
+#define RESIZE_THRESHOLD 0.85
+
 #ifdef PMEM
 #define PMEM_PATH "/mnt/pmem1"
 #define FILENAME_LEN 1024
@@ -102,7 +104,7 @@ static inline double iceberg_load_factor_aprox(iceberg_table * table) {
 #ifdef ENABLE_RESIZE
 bool need_resize(iceberg_table * table) {
   double lf = iceberg_load_factor_aprox(table);
-  if (lf >= 0.85)
+  if (lf >= RESIZE_THRESHOLD)
     return true;
   return false;
 }
@@ -118,19 +120,17 @@ static inline void get_index_offset(uint64_t init_log, uint64_t index, uint64_t 
 }
 
 #ifdef PMEM
-void split_hash(KeyType key, uint8_t *slot_choice, uint8_t *fprint, uint64_t *index, iceberg_metadata * metadata, uint64_t seed_idx)
+static inline uint8_t get_slot_choice(KeyType key)
 {
-  uint64_t hash = MurmurHash64A(&key, sizeof(KeyType), seed[seed_idx]);
-  *slot_choice = hash & ((1 << FPRINT_BITS) - 1);
-  *fprint = *slot_choice <= 1 ? 2 : *slot_choice;
-  *index = (hash >> FPRINT_BITS) & ((1 << metadata->block_bits) - 1);
+  uint64_t hash = MurmurHash64A(&key, sizeof(KeyType), seed[0]);
+  return hash & ((1 << FPRINT_BITS) - 1);
 }
-#else
+#endif
+
 static inline void split_hash(uint64_t hash, uint8_t *fprint, uint64_t *index, iceberg_metadata * metadata) {	
   *fprint = hash & ((1 << FPRINT_BITS) - 1);
   *index = (hash >> FPRINT_BITS) & ((1 << metadata->block_bits) - 1);
 }
-#endif
 
 static inline uint32_t slot_mask_32(uint8_t * metadata, uint8_t fprint) {
   __m256i bcast = _mm256_set1_epi8(fprint);
@@ -544,8 +544,7 @@ int iceberg_mount(iceberg_table *table, uint64_t log_slots, uint64_t resize_cnt)
         if (key != 0) {
           uint8_t fprint;
           uint64_t index;
-          uint8_t slot_choice;
-          split_hash(key, &slot_choice, &fprint, &index, &table->metadata, 0);
+          split_hash(lv1_hash(key), &fprint, &index, &table->metadata);
           assert(index == i);
           block_md[slot] = fprint;
           pc_add(&table->metadata.lv1_balls, 1, 0);
@@ -562,10 +561,9 @@ int iceberg_mount(iceberg_table *table, uint64_t log_slots, uint64_t resize_cnt)
         if (key != 0) {
           uint8_t fprint;
           uint64_t index;
-          uint8_t slot_choice;
-          split_hash(key, &slot_choice, &fprint, &index, &table->metadata, 1);
+          split_hash(lv2_hash(key, 0), &fprint, &index, &table->metadata);
           if (index != i) {
-            split_hash(key, &slot_choice, &fprint, &index, &table->metadata, 2);
+            split_hash(lv2_hash(key, 1), &fprint, &index, &table->metadata);
           }
           assert(index == i);
           block_md[slot] = fprint;
@@ -934,11 +932,7 @@ static inline bool iceberg_lv3_insert(iceberg_table * table, KeyType key, ValueT
   return true;
 }
 
-static inline bool iceberg_lv2_insert_internal(iceberg_table * table, KeyType key, ValueType value, uint8_t fprint, uint64_t index,
-#if PMEM
-    uint8_t slot_choice,
-#endif
-    uint8_t thread_id) {
+static inline bool iceberg_lv2_insert_internal(iceberg_table * table, KeyType key, ValueType value, uint8_t fprint, uint64_t index, uint8_t thread_id) {
   uint64_t bindex, boffset;
   get_index_offset(table->metadata.log_init_size, index, &bindex, &boffset);
 
@@ -949,6 +943,7 @@ static inline bool iceberg_lv2_insert_internal(iceberg_table * table, KeyType ke
   uint8_t popct = __builtin_popcountll(md_mask);
 
 #if PMEM
+  uint8_t slot_choice = get_slot_choice(key);
   uint8_t start = popct == 0 ? 0 : slot_choice % popct;
 #else
   uint8_t start = 0;
@@ -985,14 +980,8 @@ static inline bool iceberg_lv2_insert(iceberg_table * table, KeyType key, ValueT
   uint8_t fprint1, fprint2;
   uint64_t index1, index2;
 
-#if PMEM
-  uint8_t slot_choice;
-  split_hash(key, &slot_choice, &fprint1, &index1, metadata, 1);
-  split_hash(key, &slot_choice, &fprint2, &index2, metadata, 2);
-#else
   split_hash(lv2_hash(key, 0), &fprint1, &index1, metadata);
   split_hash(lv2_hash(key, 1), &fprint2, &index2, metadata);
-#endif
 
   uint64_t bindex1, boffset1, bindex2, boffset2;
   get_index_offset(table->metadata.log_init_size, index1, &bindex1, &boffset1);
@@ -1036,21 +1025,13 @@ static inline bool iceberg_lv2_insert(iceberg_table * table, KeyType key, ValueT
   }
 #endif
 
-  if (iceberg_lv2_insert_internal(table, key, value, fprint1, index1,
-#if PMEM
-        slot_choice,
-#endif
-        thread_id))
+  if (iceberg_lv2_insert_internal(table, key, value, fprint1, index1, thread_id))
     return true;
 
   return iceberg_lv3_insert(table, key, value, lv3_index, thread_id);
 }
 
-static bool iceberg_insert_internal(iceberg_table * table, KeyType key, ValueType value, uint8_t fprint, uint64_t index,
-#if PMEM
-    uint8_t slot_choice,
-#endif
-    uint8_t thread_id) {
+static bool iceberg_insert_internal(iceberg_table * table, KeyType key, ValueType value, uint8_t fprint, uint64_t index, uint8_t thread_id) {
   uint64_t bindex, boffset;
   get_index_offset(table->metadata.log_init_size, index, &bindex, &boffset);
 
@@ -1062,6 +1043,7 @@ static bool iceberg_insert_internal(iceberg_table * table, KeyType key, ValueTyp
   uint8_t popct = __builtin_popcountll(md_mask);
 
 #if PMEM
+  uint8_t slot_choice = get_slot_choice(key);
   uint8_t start = popct == 0 ? 0 : slot_choice % popct;
 #else
   uint8_t start = 0;
@@ -1100,12 +1082,7 @@ bool iceberg_insert(iceberg_table * table, KeyType key, ValueType value, uint8_t
   uint8_t fprint;
   uint64_t index;
 
-#if PMEM
-  uint8_t slot_choice;
-  split_hash(key, &slot_choice, &fprint, &index, metadata, 0);
-#else
   split_hash(lv1_hash(key), &fprint, &index, metadata);
-#endif
 
 #ifdef ENABLE_RESIZE
   // move blocks if resize is active and not already moved.
@@ -1130,11 +1107,7 @@ bool iceberg_insert(iceberg_table * table, KeyType key, ValueType value, uint8_t
   }
 #endif
 
-  bool ret = iceberg_insert_internal(table, key, value, fprint, index,
-#if PMEM
-      slot_choice,
-#endif
-      thread_id);
+  bool ret = iceberg_insert_internal(table, key, value, fprint, index, thread_id);
   if (!ret)
     ret = iceberg_lv2_insert(table, key, value, index, thread_id);
 
@@ -1248,12 +1221,7 @@ static inline bool iceberg_lv2_remove(iceberg_table * table, KeyType key, uint64
     uint8_t fprint;
     uint64_t index;
 
-#if PMEM
-    uint8_t slot_choice; // ununsed
-    split_hash(key, &slot_choice, &fprint, &index, metadata, 1 + i);
-#else
     split_hash(lv2_hash(key, i), &fprint, &index, metadata);
-#endif
 
     uint64_t bindex, boffset;
     get_index_offset(table->metadata.log_init_size, index, &bindex, &boffset);
@@ -1322,12 +1290,7 @@ bool iceberg_remove(iceberg_table * table, KeyType key, uint8_t thread_id) {
   uint8_t fprint;
   uint64_t index;
 
-#if PMEM
-  uint8_t slot_choice; // unused
-  split_hash(key, &slot_choice, &fprint, &index, metadata, 0);
-#else
   split_hash(lv1_hash(key), &fprint, &index, metadata);
-#endif
 
   uint64_t bindex, boffset;
   get_index_offset(table->metadata.log_init_size, index, &bindex, &boffset);
@@ -1465,12 +1428,7 @@ static inline bool iceberg_lv2_get_value(iceberg_table * table, KeyType key, Val
     uint8_t fprint;
     uint64_t index;
 
-#if PMEM
-    uint8_t slot_choice; // ununsed
-    split_hash(key, &slot_choice, &fprint, &index, metadata, 1 + i);
-#else
     split_hash(lv2_hash(key, i), &fprint, &index, metadata);
-#endif
 
     uint64_t bindex, boffset;
     get_index_offset(table->metadata.log_init_size, index, &bindex, &boffset);
@@ -1532,12 +1490,7 @@ bool iceberg_get_value(iceberg_table * table, KeyType key, ValueType *value, uin
   uint8_t fprint;
   uint64_t index;
 
-#if PMEM
-  uint8_t slot_choice; // unused
-  split_hash(key, &slot_choice, &fprint, &index, metadata, 0);
-#else
   split_hash(lv1_hash(key), &fprint, &index, metadata);
-#endif
 
   uint64_t bindex, boffset;
   get_index_offset(table->metadata.log_init_size, index, &bindex, &boffset);
@@ -1637,20 +1590,11 @@ static bool iceberg_lv1_move_block(iceberg_table * table, uint64_t bnum, uint8_t
     uint8_t fprint;
     uint64_t index;
 
-#if PMEM
-    uint8_t slot_choice; // unused
-    split_hash(key, &slot_choice, &fprint, &index, &table->metadata, 0);
-#else
     split_hash(lv1_hash(key), &fprint, &index, &table->metadata);
-#endif
 
     // move to new location
     if (index != bnum) {
-      if (!iceberg_insert_internal(table, key, value, fprint, index,
-#if PMEM
-            slot_choice,
-#endif
-            thread_id)) {
+      if (!iceberg_insert_internal(table, key, value, fprint, index, thread_id)) {
         printf("Failed insert during resize lv1\n");
         exit(0);
       }
@@ -1687,31 +1631,17 @@ static bool iceberg_lv2_move_block(iceberg_table * table, uint64_t bnum, uint8_t
     uint8_t fprint;
     uint64_t index;
 
-#if PMEM
-    uint8_t slot_choice; // unused
-    split_hash(key, &slot_choice, &fprint, &index, &table->metadata, 0);
-#else
     split_hash(lv1_hash(key), &fprint, &index, &table->metadata);
-#endif
 
     for(int i = 0; i < D_CHOICES; ++i) {
       uint8_t l2fprint;
       uint64_t l2index;
 
-#if PMEM
-      uint8_t slot_choice; // ununsed
-      split_hash(key, &slot_choice, &l2fprint, &l2index, &table->metadata, 1 + i);
-#else
       split_hash(lv2_hash(key, i), &l2fprint, &l2index, &table->metadata);
-#endif
 
       // move to new location
       if ((l2index & mask) == bnum && l2index != bnum) {
-        if (!iceberg_lv2_insert_internal(table, key, value, l2fprint, l2index,
-#if PMEM
-            slot_choice,
-#endif
-              thread_id)) {
+        if (!iceberg_lv2_insert_internal(table, key, value, l2fprint, l2index, thread_id)) {
           if (!iceberg_lv2_insert(table, key, value, index, thread_id)) {
             printf("Failed insert during resize lv2\n");
             exit(0);
@@ -1759,12 +1689,7 @@ static bool iceberg_lv3_move_block(iceberg_table * table, uint64_t bnum, uint8_t
       uint8_t fprint;
       uint64_t index;
 
-#if PMEM
-      uint8_t slot_choice; // unused
-      split_hash(key, &slot_choice, &fprint, &index, &table->metadata, 0);
-#else
       split_hash(lv1_hash(key), &fprint, &index, &table->metadata);
-#endif
       // move to new location
       if (index != bnum) {
         if (!iceberg_lv3_insert(table, key, value, index, thread_id)) {
