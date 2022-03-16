@@ -13,6 +13,9 @@
 #include <iostream>
 #include <fstream>
 
+#include <sys/time.h>
+#include <sys/resource.h>
+
 using namespace std::chrono;
 
 //vectors of key/value pairs in the table and not in the table
@@ -166,6 +169,7 @@ int main (int argc, char** argv) {
 
   N = N / size * size;
 
+  uint64_t total_alloc = (N * sizeof(uint64_t) * 4)/1024;
   if (!is_benchmark) {
     printf("%ld\n", N * 2 * sizeof(uint64_t));
   }
@@ -207,6 +211,9 @@ int main (int argc, char** argv) {
   t1 = high_resolution_clock::now();
 
   std::vector<std::thread> thread_list;
+#ifdef INSTAN_THRPT
+  struct rusage usage;
+#endif
   for(uint64_t i = 0; i < splits; ++i) {
 #ifdef INSTAN_THRPT
     high_resolution_clock::time_point t1, t2;
@@ -218,6 +225,9 @@ int main (int argc, char** argv) {
       thread_list[j].join();
 
 #ifdef INSTAN_THRPT
+    auto num = i * size + size;
+    getrusage(RUSAGE_SELF, &usage);
+    printf("Num: %ld MaxRSS: %ld\n", num, usage.ru_maxrss-total_alloc);
     t2 = high_resolution_clock::now();
     printf("%f\n", size * threads / elapsed(t1, t2));
 #endif
