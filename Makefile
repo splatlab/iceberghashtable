@@ -36,7 +36,7 @@ CFLAGS = $(OPT) -Wall -march=native -pthread $(HUGE)
 INCLUDE = -I ./include
 SOURCES = src/iceberg_table.c src/hashutil.c src/partitioned_counter.c src/lock.c
 OBJECTS = $(subst src/,obj/,$(subst .c,.o,$(SOURCES)))
-LIBS = -lssl -lcrypto -lpmem -ltbb
+LIBS = -lssl -lcrypto -lpmem 
 
 ifdef PMEM
 INCLUDE += -I ./pmdk/src/PMDK/src/include
