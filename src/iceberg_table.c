@@ -23,6 +23,7 @@
 #define unlikely(x) __builtin_expect((x),0)
 
 #define RESIZE_THRESHOLD 0.96
+/*#define RESIZE_THRESHOLD 0.85 // For YCSB*/
 
 #ifdef PMEM
 #define PMEM_PATH "/mnt/pmem1"
@@ -939,8 +940,12 @@ static inline bool iceberg_lv2_insert_internal(iceberg_table * table, KeyType ke
   iceberg_metadata * metadata = &table->metadata;
   iceberg_lv2_block * blocks = table->level2[bindex];
 
+start: ;
   __mmask32 md_mask = slot_mask_32(metadata->lv2_md[bindex][boffset].block_md, 0) & ((1 << (C_LV2 + MAX_LG_LG_N / D_CHOICES)) - 1);
   uint8_t popct = __builtin_popcountll(md_mask);
+
+  if (unlikely(!popct))
+    return false;
 
 #if PMEM
   uint8_t slot_choice = get_slot_choice(key);
@@ -948,11 +953,11 @@ static inline bool iceberg_lv2_insert_internal(iceberg_table * table, KeyType ke
 #else
   uint8_t start = 0;
 #endif
-  for(uint8_t i = start; i < start + popct; ++i) {
+  /*for(uint8_t i = start; i < start + popct; ++i) {*/
 #if PMEM
-    uint8_t slot = word_select(md_mask, i % popct);
+    uint8_t slot = word_select(md_mask, start % popct);
 #else
-    uint8_t slot = word_select(md_mask, i);
+    uint8_t slot = word_select(md_mask, start);
 #endif
 
     if(__sync_bool_compare_and_swap(metadata->lv2_md[bindex][boffset].block_md + slot, 0, 1)) {
@@ -965,7 +970,8 @@ static inline bool iceberg_lv2_insert_internal(iceberg_table * table, KeyType ke
       metadata->lv2_md[bindex][boffset].block_md[slot] = fprint;
       return true;
     }
-  }
+    goto start;
+  /*}*/
 
   return false;
 }
@@ -1038,9 +1044,13 @@ static bool iceberg_insert_internal(iceberg_table * table, KeyType key, ValueTyp
   iceberg_metadata * metadata = &table->metadata;
   iceberg_lv1_block * blocks = table->level1[bindex];	
 
+start: ;
   __mmask64 md_mask = slot_mask_64(metadata->lv1_md[bindex][boffset].block_md, 0);
 
   uint8_t popct = __builtin_popcountll(md_mask);
+
+  if (unlikely(!popct))
+    return false;
 
 #if PMEM
   uint8_t slot_choice = get_slot_choice(key);
@@ -1048,11 +1058,11 @@ static bool iceberg_insert_internal(iceberg_table * table, KeyType key, ValueTyp
 #else
   uint8_t start = 0;
 #endif
-  for(uint8_t i = start; i < start + popct; ++i) {
+  /*for(uint8_t i = start; i < start + popct; ++i) {*/
 #if PMEM
-    uint8_t slot = word_select(md_mask, i % popct);
+    uint8_t slot = word_select(md_mask, start % popct);
 #else
-    uint8_t slot = word_select(md_mask, i);
+    uint8_t slot = word_select(md_mask, start);
 #endif
 
     if(__sync_bool_compare_and_swap(metadata->lv1_md[bindex][boffset].block_md + slot, 0, 1)) {
@@ -1065,12 +1075,18 @@ static bool iceberg_insert_internal(iceberg_table * table, KeyType key, ValueTyp
       metadata->lv1_md[bindex][boffset].block_md[slot] = fprint;
       return true;
     }
-  }
+  goto start;
+  /*}*/
 
   return false;
 }
 
-bool iceberg_insert(iceberg_table * table, KeyType key, ValueType value, uint8_t thread_id) {
+__attribute__ ((always_inline)) inline bool iceberg_insert(iceberg_table * table, KeyType key, ValueType value, uint8_t thread_id) {
+  ValueType v;
+  if (unlikely(iceberg_get_value(table, key, &v, thread_id))) {
+    printf("Found!\n");
+    return false;
+  }
 
 #ifdef ENABLE_RESIZE
   if (unlikely(need_resize(table))) {
@@ -1484,7 +1500,7 @@ static inline bool iceberg_lv2_get_value(iceberg_table * table, KeyType key, Val
   return iceberg_lv3_get_value(table, key, value, lv3_index);
 }
 
-bool iceberg_get_value(iceberg_table * table, KeyType key, ValueType *value, uint8_t thread_id) {
+__attribute__ ((always_inline)) inline bool iceberg_get_value(iceberg_table * table, KeyType key, ValueType *value, uint8_t thread_id) {
   iceberg_metadata * metadata = &table->metadata;
 
   uint8_t fprint;

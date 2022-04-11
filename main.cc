@@ -118,13 +118,13 @@ void safe_rand_bytes(unsigned char *v, size_t n) {
      */
 }
 
-void do_mixed(uint8_t id, std::vector<std::pair<uint64_t, uint64_t>>& v, uint64_t start, uint64_t n) {
+void do_mixed(uint8_t id, uint64_t *keys, uint64_t *values, uint64_t start, uint64_t n) {
   uint64_t val;
   for(uint64_t i = start; i < start + n; ++i)
-    if(iceberg_get_value(&table, v[i].first, &val, id)) {
-
-      iceberg_remove(&table, v[i].first, id);
-    } else iceberg_insert(&table, v[i].first, v[i].second, id);
+    if(iceberg_get_value(&table, keys[i], &val, id))
+      iceberg_remove(&table, keys[i], id);
+    else
+      iceberg_insert(&table, keys[i], values[i], id);
 }
 
 int main (int argc, char** argv) {
@@ -169,7 +169,9 @@ int main (int argc, char** argv) {
 
   N = N / size * size;
 
+#ifdef INSTAN_THRPT
   uint64_t total_alloc = (N * sizeof(uint64_t) * 4)/1024;
+#endif
   if (!is_benchmark) {
     printf("%ld\n", N * 2 * sizeof(uint64_t));
   }
@@ -357,30 +359,64 @@ int main (int argc, char** argv) {
   printf("Positive queries after removals: %f /sec\n", num_removed / elapsed(t1, t2));
   thread_list.clear();
 
-  /*
-     printf("\nMIXED WORKLOAD, HIGH LOAD FACTOR\n");
+  // insert removed items again
+  for(uint64_t i = 0; i < threads; i++)
+    thread_list.emplace_back(do_inserts, i, removed, in_values, i * (N / 2 / threads), N / 2 / threads);
+  for(uint64_t i = 0; i < threads; i++)
+    thread_list[i].join();
+  thread_list.clear();
+  printf("Load factor after re-insertion: %f\n", iceberg_load_factor(&table));
 
-     for(uint64_t i = 0; i < N; ++i) in_table.push_back(not_in_table[i]);
+  if (!is_benchmark)
+    printf("\nMIXED WORKLOAD, HIGH LOAD FACTOR\n");
 
-     shuffle(in_table.begin(), in_table.end(), g);
+  uint64_t mixed_N = N / 2;
+  uint64_t *m_keys = (uint64_t *)malloc(mixed_N * sizeof(uint64_t));
+  if(!m_keys) {
+    printf("Malloc m_keys failed\n");
+    exit(0);
+  }
+  uint64_t *m_vals = (uint64_t *)malloc(mixed_N * sizeof(uint64_t));
+  if(!m_vals) {
+    printf("Malloc m_vals failed\n");
+    exit(0);
+  }
 
-     t1 = high_resolution_clock::now();
+  uint64_t half = mixed_N * sizeof(uint64_t) / 2;
+  memcpy(m_keys, in_keys, half);
+  memcpy(m_keys + half/8, out_keys, half);
 
-     for(uint64_t i = 0; i < threads; ++i)
-     thread_list.emplace_back(do_mixed, i, std::ref(in_table), i * 2 * N / threads, 2 * N / threads);
-     for(uint64_t i = 0; i < threads; ++i)
-     thread_list[i].join();
+  memcpy(m_vals, in_values, half);
+  memcpy(m_vals + half/8, out_values, half);
 
-     t2 = high_resolution_clock::now();
-     printf("Mixed operations at high load factor: %f /sec\n", 4 * N / elapsed(t1, t2));
-     thread_list.clear();
+  shuffle(&m_keys[0], &m_keys[mixed_N], g);
 
-     max_size = sum_sizes = 0;
-     for(uint64_t i = 0; i < table.metadata.nblocks; ++i) {
-     max_size = std::max(max_size, table.metadata.lv3_sizes[i]);
-     sum_sizes += table.metadata.lv3_sizes[i];
-     }
+  t1 = high_resolution_clock::now();
 
-     printf("Average list size: %f\n", sum_sizes / (double)table.metadata.nblocks);
-     printf("Max list size: %ld\n", max_size);*/
+  for(uint64_t i = 0; i < threads; ++i)
+    thread_list.emplace_back(do_mixed, i, m_keys, m_vals, i * (mixed_N / threads), mixed_N / threads);
+  for(uint64_t i = 0; i < threads; ++i)
+    thread_list[i].join();
+
+  t2 = high_resolution_clock::now();
+
+  printf("Mixed operations at high load factor: %f /sec\n", 4 * mixed_N / elapsed(t1, t2));
+  thread_list.clear();
+
+  if (!is_benchmark) {
+    max_size = sum_sizes = 0;
+    for(uint64_t i = 0; i < table.metadata.nblocks; ++i) {
+      max_size = std::max(max_size, table.metadata.lv3_sizes[0][i]);
+      sum_sizes += table.metadata.lv3_sizes[0][i];
+    }
+
+    printf("Load factor: %f\n", iceberg_load_factor(&table));
+    printf("Number level 1 inserts: %ld\n", lv1_balls(&table));
+    printf("Number level 2 inserts: %ld\n", lv2_balls(&table));
+    printf("Number level 3 inserts: %ld\n", lv3_balls(&table));
+    printf("Total inserts: %ld\n", tot_balls(&table));
+
+    printf("Average list size: %f\n", sum_sizes / (double)table.metadata.nblocks);
+    printf("Max list size: %ld\n", max_size);
+  }
 }
