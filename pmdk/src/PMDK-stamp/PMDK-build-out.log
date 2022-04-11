@@ -1,2 +1,0 @@
-NOTE: Skipping kv_server because libuv is missing -- see src/examples/libpmemobj/map/README for details.
-NOTE: Skipping pmemobjfs because fuse (version >= 2.9.1) is missing -- see src/examples/libpmemobj/pmemobjfs/README for details.
