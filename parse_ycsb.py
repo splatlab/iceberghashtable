@@ -46,10 +46,10 @@ with open(fname) as f:
             ser_app(line, run_ser, crun, 2) 
         line = f.readline()
 
-print(load)
-print(arun)
-print(brun)
-print(crun)
+# print(load)
+# print(arun)
+# print(brun)
+# print(crun)
 
 # Print output file
 opfname = sys.argv[2]

@@ -498,6 +498,7 @@ int iceberg_mount(iceberg_table *table, uint64_t log_slots, uint64_t resize_cnt)
     perror("lv3_locks malloc failed");
     exit(1);
   }
+  memset(table->metadata.lv3_locks[0], 0, total_blocks * sizeof(uint8_t));
 
   // Init table/metadata for rest of the partitions
   for (uint64_t i = 1; i <= resize_cnt; ++i) {
@@ -530,6 +531,7 @@ int iceberg_mount(iceberg_table *table, uint64_t log_slots, uint64_t resize_cnt)
       perror("lv3_locks malloc failed");
       exit(1);
     }
+    memset(table->metadata.lv3_locks[i], 0, nblocks * sizeof(uint8_t));
   }
 
   for (uint64_t p = 0; p <= resize_cnt; ++p) {
@@ -741,6 +743,7 @@ static bool iceberg_setup_resize(iceberg_table * table) {
     perror("lv3_locks remap failed");
     exit(1);
   }
+  memset(table->metadata.lv3_locks[resize_cnt], 0, cur_blocks * sizeof(uint8_t));
 
   // alloc resize markers
   // resize_marker_size
@@ -908,6 +911,7 @@ static inline bool iceberg_lv3_insert(iceberg_table * table, KeyType key, ValueT
     }
   }
   if (new_node == NULL) {
+    metadata->lv3_locks[bindex][boffset] = 0;
     return false;
   }
 #else
@@ -1084,8 +1088,8 @@ start: ;
 __attribute__ ((always_inline)) inline bool iceberg_insert(iceberg_table * table, KeyType key, ValueType value, uint8_t thread_id) {
   ValueType v;
   if (unlikely(iceberg_get_value(table, key, &v, thread_id))) {
-    printf("Found!\n");
-    return false;
+    /*printf("Found!\n");*/
+    return true;
   }
 
 #ifdef ENABLE_RESIZE
