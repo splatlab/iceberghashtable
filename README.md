@@ -3,8 +3,7 @@ IcebergDB: High Performance Hash Tables Through Stability and Low Associativity
 
 Overview
 --------
- IcebergDB is a fast, concurrent, and resizeable hash table implementation. It
- is based on [Iceberg hashing](https://arxiv.org/abs/2109.04548). It supports
+ IcebergDB is a fast, concurrent, and resizeable hash table implementation. It supports
  insertions, deletions and queries for 64-bit keys and values.
  
 API
