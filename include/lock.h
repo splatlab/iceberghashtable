@@ -1,12 +1,3 @@
-/*
- * ============================================================================
- *
- *         Author:  Prashant Pandey (), ppandey@cs.stonybrook.edu
- *   Organization:  Stony Brook University
- *
- * ============================================================================
- */
-
 #ifndef _LOCK_H_
 #define _LOCK_H_
 

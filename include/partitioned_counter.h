@@ -1,12 +1,3 @@
-/*
- * ============================================================================
- *
- *         Author:  Prashant Pandey (), ppandey@cs.stonybrook.edu
- *   Organization:  Stony Brook University
- *
- * ============================================================================
- */
-
 #ifndef _PARTITIONED_COUNTER_H_
 #define _PARTITIONED_COUNTER_H_
 
