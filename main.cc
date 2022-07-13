@@ -367,6 +367,7 @@ int main (int argc, char** argv) {
   thread_list.clear();
   printf("Load factor after re-insertion: %f\n", iceberg_load_factor(&table));
 
+#if 0
   if (!is_benchmark)
     printf("\nMIXED WORKLOAD, HIGH LOAD FACTOR\n");
 
@@ -419,4 +420,5 @@ int main (int argc, char** argv) {
     printf("Average list size: %f\n", sum_sizes / (double)table.metadata.nblocks);
     printf("Max list size: %ld\n", max_size);
   }
+#endif
 }

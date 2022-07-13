@@ -145,6 +145,12 @@ static inline uint64_t slot_mask_64(uint8_t * metadata, uint8_t fprint) {
   return _mm512_cmp_epi8_mask(bcast, block, _MM_CMPINT_EQ);
 }
 
+static inline void atomic_write_128(uint64_t key, uint64_t val, uint64_t *slot) {
+  uint64_t arr[2] = {key, val};
+  __m128d a =  _mm_load_pd((double *)arr);
+  _mm_store_pd ((double*)slot, a);
+}
+
 static uint64_t iceberg_block_load(iceberg_table * table, uint64_t index, uint8_t level) {
   uint64_t bindex, boffset;
   get_index_offset(table->metadata.log_init_size, index, &bindex, &boffset);
@@ -966,8 +972,9 @@ start: ;
 
     if(__sync_bool_compare_and_swap(metadata->lv2_md[bindex][boffset].block_md + slot, 0, 1)) {
       pc_add(&metadata->lv2_balls, 1, thread_id);
-      blocks[boffset].slots[slot].key = key;
-      blocks[boffset].slots[slot].val = value;
+      /*blocks[boffset].slots[slot].key = key;*/
+      /*blocks[boffset].slots[slot].val = value;*/
+      atomic_write_128(key, value, (uint64_t*)&blocks[boffset].slots[slot]);
 #if PMEM
       pmem_persist(&blocks[boffset].slots[slot], sizeof(kv_pair));
 #endif
@@ -1071,8 +1078,9 @@ start: ;
 
     if(__sync_bool_compare_and_swap(metadata->lv1_md[bindex][boffset].block_md + slot, 0, 1)) {
       pc_add(&metadata->lv1_balls, 1, thread_id);
-      blocks[boffset].slots[slot].key = key;
-      blocks[boffset].slots[slot].val = value;
+      /*blocks[boffset].slots[slot].key = key;*/
+      /*blocks[boffset].slots[slot].val = value;*/
+      atomic_write_128(key, value, (uint64_t*)&blocks[boffset].slots[slot]);
 #if PMEM
       pmem_persist(&blocks[boffset].slots[slot], sizeof(kv_pair));
 #endif
