@@ -133,6 +133,25 @@ static inline void split_hash(uint64_t hash, uint8_t *fprint, uint64_t *index, i
   *index = (hash >> FPRINT_BITS) & ((1 << metadata->block_bits) - 1);
 }
 
+#define LOCK_MASK 1
+#define UNLOCK_MASK ~1
+
+static inline void lock_block(uint8_t * metadata)
+{
+#ifdef ENABLE_BLOCK_LOCKING
+  uint8_t *data = metadata + 63;
+  while ((__sync_fetch_and_or(data, LOCK_MASK) & 1) != 0) {}
+#endif
+}
+
+static inline void unlock_block(uint8_t * metadata)
+{
+#ifdef ENABLE_BLOCK_LOCKING
+  uint8_t *data = metadata + 63;
+   __sync_fetch_and_and(data, UNLOCK_MASK);
+#endif
+}
+
 static inline uint32_t slot_mask_32(uint8_t * metadata, uint8_t fprint) {
   __m256i bcast = _mm256_set1_epi8(fprint);
   __m256i block = _mm256_loadu_si256((const __m256i *)(metadata));
@@ -140,7 +159,9 @@ static inline uint32_t slot_mask_32(uint8_t * metadata, uint8_t fprint) {
 }
 
 static inline uint64_t slot_mask_64(uint8_t * metadata, uint8_t fprint) {
+  __m512i mask = _mm512_loadu_si512((const __m512i *)(broadcast_mask));
   __m512i bcast = _mm512_set1_epi8(fprint);
+  bcast = _mm512_or_epi64(bcast, mask);
   __m512i block = _mm512_loadu_si512((const __m512i *)(metadata));
   return _mm512_cmp_epi8_mask(bcast, block, _MM_CMPINT_EQ);
 }
@@ -1055,13 +1076,16 @@ static bool iceberg_insert_internal(iceberg_table * table, KeyType key, ValueTyp
   iceberg_metadata * metadata = &table->metadata;
   iceberg_lv1_block * blocks = table->level1[bindex];	
 
+  lock_block(&metadata->lv1_md[bindex][boffset].block_md);
 start: ;
   __mmask64 md_mask = slot_mask_64(metadata->lv1_md[bindex][boffset].block_md, 0);
 
   uint8_t popct = __builtin_popcountll(md_mask);
 
-  if (unlikely(!popct))
+  if (unlikely(!popct)) {
+    unlock_block(&metadata->lv1_md[bindex][boffset].block_md);
     return false;
+  }
 
 #if PMEM
   uint8_t slot_choice = get_slot_choice(key);
@@ -1076,7 +1100,7 @@ start: ;
     uint8_t slot = word_select(md_mask, start);
 #endif
 
-    if(__sync_bool_compare_and_swap(metadata->lv1_md[bindex][boffset].block_md + slot, 0, 1)) {
+    /*if(__sync_bool_compare_and_swap(metadata->lv1_md[bindex][boffset].block_md + slot, 0, 1)) {*/
       pc_add(&metadata->lv1_balls, 1, thread_id);
       /*blocks[boffset].slots[slot].key = key;*/
       /*blocks[boffset].slots[slot].val = value;*/
@@ -1085,11 +1109,13 @@ start: ;
       pmem_persist(&blocks[boffset].slots[slot], sizeof(kv_pair));
 #endif
       metadata->lv1_md[bindex][boffset].block_md[slot] = fprint;
+      unlock_block(&metadata->lv1_md[bindex][boffset].block_md);
       return true;
-    }
+    /*}*/
   goto start;
   /*}*/
 
+  unlock_block(&metadata->lv1_md[bindex][boffset].block_md);
   return false;
 }
 
@@ -1362,6 +1388,7 @@ bool iceberg_remove(iceberg_table * table, KeyType key, uint8_t thread_id) {
   }
 #endif
 
+  lock_block(&metadata->lv1_md[bindex][boffset].block_md);
   __mmask64 md_mask = slot_mask_64(metadata->lv1_md[bindex][boffset].block_md, fprint);
   uint8_t popct = __builtin_popcountll(md_mask);
 
@@ -1375,12 +1402,14 @@ bool iceberg_remove(iceberg_table * table, KeyType key, uint8_t thread_id) {
       pmem_persist(&blocks[boffset].slots[slot], sizeof(kv_pair));
 #endif
       pc_add(&metadata->lv1_balls, -1, thread_id);
+      unlock_block(&metadata->lv1_md[bindex][boffset].block_md);
       return true;
     }
   }
 
   bool ret = iceberg_lv2_remove(table, key, index, thread_id);
 
+  unlock_block(&metadata->lv1_md[bindex][boffset].block_md);
   return ret;
 }
 
@@ -1557,6 +1586,7 @@ __attribute__ ((always_inline)) inline bool iceberg_get_value(iceberg_table * ta
   }
 #endif
 
+  lock_block(&metadata->lv1_md[bindex][boffset].block_md);
   __mmask64 md_mask = slot_mask_64(metadata->lv1_md[bindex][boffset].block_md, fprint);
 
   while (md_mask != 0) {
@@ -1565,12 +1595,14 @@ __attribute__ ((always_inline)) inline bool iceberg_get_value(iceberg_table * ta
 
     if (blocks[boffset].slots[slot].key == key) {
       *value = blocks[boffset].slots[slot].val;
+      unlock_block(&metadata->lv1_md[bindex][boffset].block_md);
       return true;
     }
   }
 
   bool ret = iceberg_lv2_get_value(table, key, value, index);
 
+  unlock_block(&metadata->lv1_md[bindex][boffset].block_md);
   return ret;
 }
 

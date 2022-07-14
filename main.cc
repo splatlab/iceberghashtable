@@ -39,6 +39,8 @@ void do_inserts(uint8_t id, uint64_t *keys, uint64_t *values, uint64_t start, ui
       printf("Failed insert\n");
       exit(0);
     }
+    //printf("\rInsert %ld", i);
+    //fflush(stdout);
 #ifdef LATENCY
     high_resolution_clock::time_point t2 = high_resolution_clock::now();
     times.emplace_back(duration_cast<nanoseconds>(t2-t1).count());
@@ -111,11 +113,11 @@ void safe_rand_bytes(unsigned char *v, size_t n) {
     v += round_size;
     n -= round_size;
   }
-  /*
-     for (uint64_t i = 0; i < n; ++i) {
-     v[i] = rand();
-     }
-     */
+
+  //for (uint64_t i = 0; i < n; ++i) {
+  //v[i] = rand();
+  //}
+     
 }
 
 void do_mixed(uint8_t id, uint64_t *keys, uint64_t *values, uint64_t start, uint64_t n) {
