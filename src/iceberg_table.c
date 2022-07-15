@@ -133,13 +133,13 @@ static inline void split_hash(uint64_t hash, uint8_t *fprint, uint64_t *index, i
   *index = (hash >> FPRINT_BITS) & ((1 << metadata->block_bits) - 1);
 }
 
-#define LOCK_MASK 1
-#define UNLOCK_MASK ~1
+#define LOCK_MASK (1ULL << 63)
+#define UNLOCK_MASK ~(1ULL << 63)
 
 static inline void lock_block(uint8_t * metadata)
 {
 #ifdef ENABLE_BLOCK_LOCKING
-  uint8_t *data = metadata + 63;
+  uint8_t *data = metadata + 7;
   while ((__sync_fetch_and_or(data, LOCK_MASK) & 1) != 0) {}
 #endif
 }
@@ -147,7 +147,7 @@ static inline void lock_block(uint8_t * metadata)
 static inline void unlock_block(uint8_t * metadata)
 {
 #ifdef ENABLE_BLOCK_LOCKING
-  uint8_t *data = metadata + 63;
+  uint8_t *data = metadata + 7;
    __sync_fetch_and_and(data, UNLOCK_MASK);
 #endif
 }
@@ -1077,6 +1077,13 @@ static bool iceberg_insert_internal(iceberg_table * table, KeyType key, ValueTyp
   iceberg_lv1_block * blocks = table->level1[bindex];	
 
   lock_block(&metadata->lv1_md[bindex][boffset].block_md);
+  ValueType v;
+  if (unlikely(iceberg_get_value(table, key, &v, thread_id))) {
+    /*printf("Found!\n");*/
+    unlock_block(&metadata->lv1_md[bindex][boffset].block_md);
+    return true;
+  }
+
 start: ;
   __mmask64 md_mask = slot_mask_64(metadata->lv1_md[bindex][boffset].block_md, 0);
 
@@ -1120,12 +1127,6 @@ start: ;
 }
 
 __attribute__ ((always_inline)) inline bool iceberg_insert(iceberg_table * table, KeyType key, ValueType value, uint8_t thread_id) {
-  ValueType v;
-  if (unlikely(iceberg_get_value(table, key, &v, thread_id))) {
-    /*printf("Found!\n");*/
-    return true;
-  }
-
 #ifdef ENABLE_RESIZE
   if (unlikely(need_resize(table))) {
     iceberg_setup_resize(table);
@@ -1586,7 +1587,6 @@ __attribute__ ((always_inline)) inline bool iceberg_get_value(iceberg_table * ta
   }
 #endif
 
-  lock_block(&metadata->lv1_md[bindex][boffset].block_md);
   __mmask64 md_mask = slot_mask_64(metadata->lv1_md[bindex][boffset].block_md, fprint);
 
   while (md_mask != 0) {
@@ -1595,14 +1595,13 @@ __attribute__ ((always_inline)) inline bool iceberg_get_value(iceberg_table * ta
 
     if (blocks[boffset].slots[slot].key == key) {
       *value = blocks[boffset].slots[slot].val;
-      unlock_block(&metadata->lv1_md[bindex][boffset].block_md);
       return true;
     }
   }
 
   bool ret = iceberg_lv2_get_value(table, key, value, index);
 
-  unlock_block(&metadata->lv1_md[bindex][boffset].block_md);
+  /*unlock_block(&metadata->lv1_md[bindex][boffset].block_md);*/
   return ret;
 }
 
