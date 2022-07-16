@@ -206,6 +206,14 @@ void ycsb_load_run_randint(int index_type, int wl, int kt, int ap, int num_threa
             auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
                     std::chrono::system_clock::now() - starttime);
             printf("Throughput: load, %f ,ops/us\n", (LOAD_SIZE * 1.0) / duration.count());
+
+            iceberg_dismount(&hashtable);
+
+            starttime = std::chrono::system_clock::now();
+            iceberg_mount(&hashtable, 24, 2);
+            duration = std::chrono::duration_cast<std::chrono::microseconds>(
+                    std::chrono::system_clock::now() - starttime);
+            printf("Throughput: mount, %f ,ops/us\n", (LOAD_SIZE * 1.0) / duration.count());
         }
 
         {

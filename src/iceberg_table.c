@@ -22,8 +22,8 @@
 #define likely(x)   __builtin_expect((x),1)
 #define unlikely(x) __builtin_expect((x),0)
 
-#define RESIZE_THRESHOLD 0.96
-/*#define RESIZE_THRESHOLD 0.85 // For YCSB*/
+//#define RESIZE_THRESHOLD 0.96
+#define RESIZE_THRESHOLD 0.85 // For YCSB
 
 #ifdef PMEM
 #define PMEM_PATH "/mnt/pmem1"
@@ -413,6 +413,8 @@ uint64_t iceberg_dismount(iceberg_table * table) {
 int iceberg_mount(iceberg_table *table, uint64_t log_slots, uint64_t resize_cnt) {
   memset(table, 0, sizeof(*table));
 
+  uint64_t init_log_slots = log_slots;
+  log_slots += resize_cnt;
   uint64_t total_blocks = 1 << (log_slots - SLOT_BITS);
   uint64_t total_size_in_bytes = (sizeof(iceberg_lv1_block) + sizeof(iceberg_lv2_block) + sizeof(iceberg_lv1_block_md) + sizeof(iceberg_lv2_block_md)) * total_blocks;
 
@@ -473,6 +475,8 @@ int iceberg_mount(iceberg_table *table, uint64_t log_slots, uint64_t resize_cnt)
   table->metadata.block_bits = log_slots - SLOT_BITS;
   table->metadata.resize_cnt = resize_cnt;
   table->metadata.nblocks_parts[0] = total_blocks;
+  table->metadata.log_init_size = init_log_slots;
+  table->metadata.init_size = 1 << init_log_slots;
 
   /* init counters */
   uint32_t procs = get_nprocs();
@@ -508,7 +512,8 @@ int iceberg_mount(iceberg_table *table, uint64_t log_slots, uint64_t resize_cnt)
 
   // Init table/metadata for rest of the partitions
   for (uint64_t i = 1; i <= resize_cnt; ++i) {
-    uint64_t nblocks = total_blocks * pow(2, i-1);
+    uint64_t initial_total_blocks = 1 << table->metadata.log_init_size;
+    uint64_t nblocks = initial_total_blocks * pow(2, i-1);
     table->metadata.nblocks_parts[i] = nblocks;
 
     table->level1[i] = table->level1[0] + nblocks;
@@ -554,7 +559,10 @@ int iceberg_mount(iceberg_table *table, uint64_t log_slots, uint64_t resize_cnt)
           uint8_t fprint;
           uint64_t index;
           split_hash(lv1_hash(key), &fprint, &index, &table->metadata);
-          assert(index == i);
+          uint64_t bindex, boffset;
+          get_index_offset(table->metadata.log_init_size, index, &bindex, &boffset);
+          assert(bindex == p);
+          assert(boffset == i);
           block_md[slot] = fprint;
           pc_add(&table->metadata.lv1_balls, 1, 0);
         }
@@ -571,10 +579,14 @@ int iceberg_mount(iceberg_table *table, uint64_t log_slots, uint64_t resize_cnt)
           uint8_t fprint;
           uint64_t index;
           split_hash(lv2_hash(key, 0), &fprint, &index, &table->metadata);
-          if (index != i) {
+          uint64_t bindex, boffset;
+          get_index_offset(table->metadata.log_init_size - 3, index, &bindex, &boffset);
+          if (boffset != i) {
             split_hash(lv2_hash(key, 1), &fprint, &index, &table->metadata);
+            get_index_offset(table->metadata.log_init_size - 3, index, &bindex, &boffset);
           }
-          assert(index == i);
+          assert(bindex == p);
+          assert(boffset == i);
           block_md[slot] = fprint;
           pc_add(&table->metadata.lv2_balls, 1, 0);
         }
@@ -693,6 +705,9 @@ static bool iceberg_setup_resize(iceberg_table * table) {
   table->level1[resize_cnt] = table->level1[0] + cur_blocks;
   table->level2[resize_cnt] = table->level2[0] + cur_blocks;
   table->level3[resize_cnt] = table->level3[0] + cur_blocks;
+  for (uint64_t i = 0; i < cur_blocks; i++) {
+    table->level3[resize_cnt][i].head_idx = -1;
+  }
 #else
   // alloc level1
   size_t level1_size = sizeof(iceberg_lv1_block) * cur_blocks;
