@@ -191,6 +191,8 @@ void ycsb_load_run_randint(int index_type, int wl, int kt, int ap, int num_threa
                     printf("Failed insert\n");
                     exit(0);
                   }
+                  //printf("\rInsert %ld", i);
+                  //fflush(stdout);
                 }
             };
 

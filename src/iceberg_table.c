@@ -22,8 +22,8 @@
 #define likely(x)   __builtin_expect((x),1)
 #define unlikely(x) __builtin_expect((x),0)
 
-#define RESIZE_THRESHOLD 0.96
-/*#define RESIZE_THRESHOLD 0.85 // For YCSB*/
+/*#define RESIZE_THRESHOLD 0.96*/
+#define RESIZE_THRESHOLD 0.85 // For YCSB
 
 #ifdef PMEM
 #define PMEM_PATH "/mnt/pmem1"
@@ -1070,30 +1070,16 @@ static inline bool iceberg_lv2_insert(iceberg_table * table, KeyType key, ValueT
   return iceberg_lv3_insert(table, key, value, lv3_index, thread_id);
 }
 
-static bool iceberg_insert_internal(iceberg_table * table, KeyType key, ValueType value, uint8_t fprint, uint64_t index, uint8_t thread_id) {
-  uint64_t bindex, boffset;
-  get_index_offset(table->metadata.log_init_size, index, &bindex, &boffset);
-
+static bool iceberg_insert_internal(iceberg_table * table, KeyType key, ValueType value, uint8_t fprint, uint64_t bindex, uint64_t boffset, uint8_t thread_id) {
   iceberg_metadata * metadata = &table->metadata;
   iceberg_lv1_block * blocks = table->level1[bindex];	
-
-  lock_block(&metadata->lv1_md[bindex][boffset].block_md);
-  ValueType v;
-  if (unlikely(iceberg_get_value(table, key, &v, thread_id))) {
-    /*printf("Found!\n");*/
-    unlock_block(&metadata->lv1_md[bindex][boffset].block_md);
-    return true;
-  }
-
 start: ;
   __mmask64 md_mask = slot_mask_64(metadata->lv1_md[bindex][boffset].block_md, 0);
 
   uint8_t popct = __builtin_popcountll(md_mask);
 
-  if (unlikely(!popct)) {
-    unlock_block(&metadata->lv1_md[bindex][boffset].block_md);
+  if (unlikely(!popct))
     return false;
-  }
 
 #if PMEM
   uint8_t slot_choice = get_slot_choice(key);
@@ -1117,13 +1103,11 @@ start: ;
       pmem_persist(&blocks[boffset].slots[slot], sizeof(kv_pair));
 #endif
       metadata->lv1_md[bindex][boffset].block_md[slot] = fprint;
-      unlock_block(&metadata->lv1_md[bindex][boffset].block_md);
       return true;
     /*}*/
   goto start;
   /*}*/
 
-  unlock_block(&metadata->lv1_md[bindex][boffset].block_md);
   return false;
 }
 
@@ -1162,11 +1146,22 @@ __attribute__ ((always_inline)) inline bool iceberg_insert(iceberg_table * table
     }
   }
 #endif
+  uint64_t bindex, boffset;
+  get_index_offset(table->metadata.log_init_size, index, &bindex, &boffset);
 
-  bool ret = iceberg_insert_internal(table, key, value, fprint, index, thread_id);
+  lock_block(&metadata->lv1_md[bindex][boffset].block_md);
+  ValueType v;
+  if (unlikely(iceberg_get_value(table, key, &v, thread_id))) {
+    /*printf("Found!\n");*/
+    unlock_block(&metadata->lv1_md[bindex][boffset].block_md);
+    return true;
+  }
+
+  bool ret = iceberg_insert_internal(table, key, value, fprint, bindex, boffset, thread_id);
   if (!ret)
     ret = iceberg_lv2_insert(table, key, value, index, thread_id);
 
+  unlock_block(&metadata->lv1_md[bindex][boffset].block_md);
   return ret;
 }
 
@@ -1654,7 +1649,9 @@ static bool iceberg_lv1_move_block(iceberg_table * table, uint64_t bnum, uint8_t
 
     // move to new location
     if (index != bnum) {
-      if (!iceberg_insert_internal(table, key, value, fprint, index, thread_id)) {
+      uint64_t local_bindex, local_boffset;
+      get_index_offset(table->metadata.log_init_size,index, &local_bindex, &local_boffset);
+      if (!iceberg_insert_internal(table, key, value, fprint, local_bindex, local_boffset, thread_id)) {
         printf("Failed insert during resize lv1\n");
         exit(0);
       }
