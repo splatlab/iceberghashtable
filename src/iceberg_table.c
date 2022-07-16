@@ -378,6 +378,7 @@ int iceberg_init(iceberg_table *table, uint64_t log_slots) {
 
 #if PMEM
 uint64_t iceberg_dismount(iceberg_table * table) {
+  iceberg_end(table);
   for (uint64_t i = 0; i < table->metadata.resize_cnt; ++i) {
     uint64_t total_blocks = table->metadata.nblocks_parts[i];
     size_t lv1_md_size = sizeof(iceberg_lv1_block_md) * total_blocks + 64;
@@ -474,9 +475,9 @@ int iceberg_mount(iceberg_table *table, uint64_t log_slots, uint64_t resize_cnt)
   table->metadata.nblocks = total_blocks;
   table->metadata.block_bits = log_slots - SLOT_BITS;
   table->metadata.resize_cnt = resize_cnt;
-  table->metadata.nblocks_parts[0] = total_blocks;
-  table->metadata.log_init_size = init_log_slots;
-  table->metadata.init_size = 1 << init_log_slots;
+  table->metadata.log_init_size = init_log_slots - SLOT_BITS;
+  table->metadata.init_size = 1 << (init_log_slots - SLOT_BITS);
+  table->metadata.nblocks_parts[0] = table->metadata.init_size;
 
   /* init counters */
   uint32_t procs = get_nprocs();
@@ -580,10 +581,10 @@ int iceberg_mount(iceberg_table *table, uint64_t log_slots, uint64_t resize_cnt)
           uint64_t index;
           split_hash(lv2_hash(key, 0), &fprint, &index, &table->metadata);
           uint64_t bindex, boffset;
-          get_index_offset(table->metadata.log_init_size - 3, index, &bindex, &boffset);
+          get_index_offset(table->metadata.log_init_size, index, &bindex, &boffset);
           if (boffset != i) {
             split_hash(lv2_hash(key, 1), &fprint, &index, &table->metadata);
-            get_index_offset(table->metadata.log_init_size - 3, index, &bindex, &boffset);
+            get_index_offset(table->metadata.log_init_size, index, &bindex, &boffset);
           }
           assert(bindex == p);
           assert(boffset == i);
