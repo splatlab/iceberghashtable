@@ -133,21 +133,21 @@ static inline void split_hash(uint64_t hash, uint8_t *fprint, uint64_t *index, i
   *index = (hash >> FPRINT_BITS) & ((1 << metadata->block_bits) - 1);
 }
 
-#define LOCK_MASK (1ULL << 63)
-#define UNLOCK_MASK ~(1ULL << 63)
+#define LOCK_MASK 1ULL
+#define UNLOCK_MASK ~1ULL
 
-static inline void lock_block(uint8_t * metadata)
+static inline void lock_block(uint64_t * metadata)
 {
 #ifdef ENABLE_BLOCK_LOCKING
-  uint8_t *data = metadata + 7;
+  uint64_t *data = metadata + 7;
   while ((__sync_fetch_and_or(data, LOCK_MASK) & 1) != 0) {}
 #endif
 }
 
-static inline void unlock_block(uint8_t * metadata)
+static inline void unlock_block(uint64_t * metadata)
 {
 #ifdef ENABLE_BLOCK_LOCKING
-  uint8_t *data = metadata + 7;
+  uint64_t *data = metadata + 7;
    __sync_fetch_and_and(data, UNLOCK_MASK);
 #endif
 }
