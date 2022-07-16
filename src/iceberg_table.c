@@ -140,7 +140,7 @@ static inline void lock_block(uint64_t * metadata)
 {
 #ifdef ENABLE_BLOCK_LOCKING
   uint64_t *data = metadata + 7;
-  while ((__sync_fetch_and_or(data, LOCK_MASK) & 1) != 0) {}
+  while ((__sync_fetch_and_or(data, LOCK_MASK) & 1) != 0) { _mm_pause(); }
 #endif
 }
 
@@ -148,7 +148,7 @@ static inline void unlock_block(uint64_t * metadata)
 {
 #ifdef ENABLE_BLOCK_LOCKING
   uint64_t *data = metadata + 7;
-   __sync_fetch_and_and(data, UNLOCK_MASK);
+   *data = *data & UNLOCK_MASK;
 #endif
 }
 
@@ -163,6 +163,7 @@ static inline uint64_t slot_mask_64(uint8_t * metadata, uint8_t fprint) {
   __m512i bcast = _mm512_set1_epi8(fprint);
   bcast = _mm512_or_epi64(bcast, mask);
   __m512i block = _mm512_loadu_si512((const __m512i *)(metadata));
+  block = _mm512_or_epi64(block, mask);
   return _mm512_cmp_epi8_mask(bcast, block, _MM_CMPINT_EQ);
 }
 
