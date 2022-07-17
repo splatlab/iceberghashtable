@@ -1,7 +1,7 @@
 ifdef D
    OPT= -g
 else
-   OPT= -flto -Ofast
+   OPT= -g -flto -Ofast
 endif
 
 ifdef H
