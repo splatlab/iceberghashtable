@@ -509,7 +509,6 @@ int iceberg_mount(iceberg_table *table, uint64_t log_slots, uint64_t resize_cnt)
     perror("lv3_locks malloc failed");
     exit(1);
   }
-  memset(table->metadata.lv3_locks[0], 0, total_blocks * sizeof(uint8_t));
 
   // Init table/metadata for rest of the partitions
   for (uint64_t i = 1; i <= resize_cnt; ++i) {
@@ -543,7 +542,6 @@ int iceberg_mount(iceberg_table *table, uint64_t log_slots, uint64_t resize_cnt)
       perror("lv3_locks malloc failed");
       exit(1);
     }
-    memset(table->metadata.lv3_locks[i], 0, nblocks * sizeof(uint8_t));
   }
 
   for (uint64_t p = 0; p <= resize_cnt; ++p) {
@@ -582,7 +580,7 @@ int iceberg_mount(iceberg_table *table, uint64_t log_slots, uint64_t resize_cnt)
           split_hash(lv2_hash(key, 0), &fprint, &index, &table->metadata);
           uint64_t bindex, boffset;
           get_index_offset(table->metadata.log_init_size, index, &bindex, &boffset);
-          if (boffset != i) {
+          if (bindex != p || boffset != i) {
             split_hash(lv2_hash(key, 1), &fprint, &index, &table->metadata);
             get_index_offset(table->metadata.log_init_size, index, &bindex, &boffset);
           }
@@ -612,7 +610,7 @@ int iceberg_mount(iceberg_table *table, uint64_t log_slots, uint64_t resize_cnt)
 
   // Create marker metadata for rest of the partitions
   for (uint64_t i = 0; i <= resize_cnt; ++i) {
-    uint64_t nblocks = table->metadata.nblocks_parts[i] * pow(2, i-1);
+    uint64_t nblocks = table->metadata.nblocks_parts[i];
 
     size_t resize_marker_size = sizeof(uint8_t) * nblocks / 8;
     table->metadata.marker_sizes[i] = resize_marker_size;
