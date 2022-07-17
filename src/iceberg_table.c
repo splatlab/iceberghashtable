@@ -1417,12 +1417,10 @@ static inline bool iceberg_lv3_get_value_internal(iceberg_table * table, KeyType
   iceberg_metadata * metadata = &table->metadata;
   iceberg_lv3_list * lists = table->level3[bindex];
 
-  while(__sync_lock_test_and_set(metadata->lv3_locks[bindex] + boffset, 1));
-
-  if(likely(!metadata->lv3_sizes[bindex][boffset])) {
-    metadata->lv3_locks[bindex][boffset] = 0;
+  if(likely(!metadata->lv3_sizes[bindex][boffset]))
     return false;
-  }
+
+  while(__sync_lock_test_and_set(metadata->lv3_locks[bindex] + boffset, 1));
 
 #if PMEM
   iceberg_lv3_node * lv3_nodes = table->level3_nodes;
