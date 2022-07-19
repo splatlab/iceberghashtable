@@ -359,6 +359,15 @@ int main (int argc, char** argv) {
   printf("Positive queries after removals: %f /sec\n", num_removed / elapsed(t1, t2));
   thread_list.clear();
 
+#if PMEM
+  iceberg_dismount(&table);
+  t1 = high_resolution_clock::now();
+  iceberg_mount(&table, tbits, 0);
+  t2 = high_resolution_clock::now();
+  printf("throughput: mount: %f ops/sec\n", N / 2 / elapsed(t1, t2));
+#endif
+
+#if 0
   // insert removed items again
   for(uint64_t i = 0; i < threads; i++)
     thread_list.emplace_back(do_inserts, i, removed, in_values, i * (N / 2 / threads), N / 2 / threads);
@@ -367,7 +376,6 @@ int main (int argc, char** argv) {
   thread_list.clear();
   printf("Load factor after re-insertion: %f\n", iceberg_load_factor(&table));
 
-#if 0
   if (!is_benchmark)
     printf("\nMIXED WORKLOAD, HIGH LOAD FACTOR\n");
 
