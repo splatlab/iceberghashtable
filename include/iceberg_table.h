@@ -11,11 +11,11 @@
 extern "C" {
 #endif
 
-#define SLOT_BITS 6
+#define SLOT_BITS 5
 #define FPRINT_BITS 8
 #define D_CHOICES 2
 #define MAX_LG_LG_N 4
-#define C_LV2 6
+#define C_LV2 2
 #define MAX_RESIZES 8
 
   typedef uint64_t KeyType;

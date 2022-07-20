@@ -22,7 +22,7 @@
 #define likely(x)   __builtin_expect((x),1)
 #define unlikely(x) __builtin_expect((x),0)
 
-#define RESIZE_THRESHOLD 0.96
+#define RESIZE_THRESHOLD 0.98
 /*#define RESIZE_THRESHOLD 0.85 // For YCSB*/
 
 #ifdef PMEM
@@ -139,7 +139,7 @@ static inline void split_hash(uint64_t hash, uint8_t *fprint, uint64_t *index, i
 static inline void lock_block(uint64_t * metadata)
 {
 #ifdef ENABLE_BLOCK_LOCKING
-  uint64_t *data = metadata + 7;
+  uint64_t *data = metadata + 3;
   while ((__sync_fetch_and_or(data, LOCK_MASK) & 1) != 0) { _mm_pause(); }
 #endif
 }
@@ -147,7 +147,7 @@ static inline void lock_block(uint64_t * metadata)
 static inline void unlock_block(uint64_t * metadata)
 {
 #ifdef ENABLE_BLOCK_LOCKING
-  uint64_t *data = metadata + 7;
+  uint64_t *data = metadata + 3;
    *data = *data & UNLOCK_MASK;
 #endif
 }
@@ -1088,7 +1088,7 @@ static bool iceberg_insert_internal(iceberg_table * table, KeyType key, ValueTyp
   iceberg_metadata * metadata = &table->metadata;
   iceberg_lv1_block * blocks = table->level1[bindex];	
 start: ;
-  __mmask64 md_mask = slot_mask_64(metadata->lv1_md[bindex][boffset].block_md, 0);
+  __mmask64 md_mask = slot_mask_64(metadata->lv1_md[bindex][boffset].block_md, 0) & ((1ULL << 32) - 1);
 
   uint8_t popct = __builtin_popcountll(md_mask);
 
@@ -1117,6 +1117,7 @@ start: ;
       pmem_persist(&blocks[boffset].slots[slot], sizeof(kv_pair));
 #endif
       metadata->lv1_md[bindex][boffset].block_md[slot] = fprint;
+      unlock_block(&metadata->lv1_md[bindex][boffset].block_md);
       return true;
     /*}*/
   goto start;
