@@ -15,6 +15,7 @@ print(np.percentile(data,95))
 print(np.percentile(data,99))
 print(np.percentile(data,99.9))
 print(np.percentile(data,99.99))
+print(mx)
 
 """
 # Use the histogram function to bin the data
