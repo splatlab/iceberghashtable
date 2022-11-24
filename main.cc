@@ -27,7 +27,7 @@ double elapsed(high_resolution_clock::time_point t1, high_resolution_clock::time
   return (duration_cast<duration<double>>(t2 - t1)).count();
 }
 
-void do_inserts(uint8_t id, uint64_t *keys, uint64_t *values, uint64_t start, uint64_t n) {
+void do_inserts(uint8_t id, char **keys, uint64_t *values, uint64_t start, uint64_t n) {
 #ifdef LATENCY
   std::vector<double> times;
 #endif
@@ -65,7 +65,7 @@ void do_inserts(uint8_t id, uint64_t *keys, uint64_t *values, uint64_t start, ui
 #endif
 }
 
-void do_queries(uint8_t id, uint64_t *keys, uint64_t start, uint64_t n, bool positive) {
+void do_queries(uint8_t id, char **keys, uint64_t start, uint64_t n, bool positive) {
 
   uint64_t val;
 #ifdef LATENCY
@@ -77,7 +77,7 @@ void do_queries(uint8_t id, uint64_t *keys, uint64_t start, uint64_t n, bool pos
 #endif
     if (iceberg_get_value(&table, keys[i], &val, id) != positive) {
       if(positive)
-        printf("False negative query key: " "%" PRIu64 "\n", keys[i]);
+        printf("False negative query key: " "%s\n", keys[i]);
       else
         printf("False positive query\n");
       exit(0);
@@ -97,7 +97,7 @@ void do_queries(uint8_t id, uint64_t *keys, uint64_t start, uint64_t n, bool pos
 #endif
 }
 
-void do_removals(uint8_t id, uint64_t *keys, uint64_t start, uint64_t n) {
+void do_removals(uint8_t id, char **keys, uint64_t start, uint64_t n) {
   //uint64_t val;
   for(uint64_t i = start; i < start + n; ++i)
     if(!iceberg_remove(&table, keys[i], id)) {
@@ -118,15 +118,6 @@ void safe_rand_bytes(unsigned char *v, size_t n) {
   //v[i] = rand();
   //}
      
-}
-
-void do_mixed(uint8_t id, uint64_t *keys, uint64_t *values, uint64_t start, uint64_t n) {
-  uint64_t val;
-  for(uint64_t i = start; i < start + n; ++i)
-    if(iceberg_get_value(&table, keys[i], &val, id))
-      iceberg_remove(&table, keys[i], id);
-    else
-      iceberg_insert(&table, keys[i], values[i], id);
 }
 
 int main (int argc, char** argv) {
@@ -178,12 +169,21 @@ int main (int argc, char** argv) {
     printf("%ld\n", N * 2 * sizeof(uint64_t));
   }
 
-  uint64_t *in_keys = (uint64_t *)malloc(N * sizeof(uint64_t));
+  char *in_keys = (char *)malloc(N * KEY_SIZE);
   if(!in_keys) {
     printf("Malloc in_keys failed\n");
     exit(0);
   }
-  safe_rand_bytes((unsigned char *)in_keys, sizeof(*in_keys) * N);
+  safe_rand_bytes((unsigned char *)in_keys, KEY_SIZE * N);
+
+  char **in_key_ptrs = (char **)malloc(N * sizeof(char **));
+  if(!in_key_ptrs) {
+    printf("Malloc in_keys failed\n");
+    exit(0);
+  }
+  for (uint64_t i = 0; i < N; i++) {
+    in_key_ptrs[i] = &in_keys[KEY_SIZE * i];
+  }
 
   uint64_t *in_values = (uint64_t *)malloc(N * sizeof(uint64_t));
   if(!in_values) {
@@ -192,12 +192,21 @@ int main (int argc, char** argv) {
   }
   safe_rand_bytes((unsigned char *)in_values, sizeof(*in_values) * N);
 
-  uint64_t *out_keys = (uint64_t *)malloc(N * sizeof(uint64_t));
+  char *out_keys = (char *)malloc(N * KEY_SIZE);
   if(!out_keys) {
     printf("Malloc out_keys failed\n");
     exit(0);
   }
-  safe_rand_bytes((unsigned char *)out_keys, sizeof(*out_keys) * N);
+  safe_rand_bytes((unsigned char *)out_keys, KEY_SIZE * N);
+
+  char **out_key_ptrs = (char **)malloc(N * sizeof(char **));
+  if(!out_key_ptrs) {
+    printf("Malloc out_keys failed\n");
+    exit(0);
+  }
+  for (uint64_t i = 0; i < N; i++) {
+    out_key_ptrs[i] = &out_keys[KEY_SIZE * i];
+  }
 
   uint64_t *out_values = (uint64_t *)malloc(N * sizeof(uint64_t));
   if(!out_values) {
@@ -224,7 +233,7 @@ int main (int argc, char** argv) {
     t1 = high_resolution_clock::now();
 #endif
     for(uint64_t j = 0; j < threads; j++)
-      thread_list.emplace_back(do_inserts, j, in_keys, in_values, (i * threads + j) * size, size);
+      thread_list.emplace_back(do_inserts, j, in_key_ptrs, in_values, (i * threads + j) * size, size);
     for(uint64_t j = 0; j < threads; j++)
       thread_list[j].join();
 
@@ -270,14 +279,14 @@ int main (int argc, char** argv) {
   }
 
   std::mt19937 g(__builtin_ia32_rdtsc());
-  std::shuffle(&in_keys[0], &in_keys[N], g);
+  std::shuffle(&in_key_ptrs[0], &in_key_ptrs[N], g);
 
   //	exit(0);
 
   t1 = high_resolution_clock::now();
 
   for(uint64_t i = 0; i < threads; ++i)
-    thread_list.emplace_back(do_queries, i, out_keys, i * (N / threads), N / threads, false);
+    thread_list.emplace_back(do_queries, i, out_key_ptrs, i * (N / threads), N / threads, false);
   for(uint64_t i = 0; i < threads; ++i)
     thread_list[i].join();
 
@@ -293,7 +302,7 @@ int main (int argc, char** argv) {
   t1 = high_resolution_clock::now();
 
   for(uint64_t i = 0; i < threads; ++i)
-    thread_list.emplace_back(do_queries, i, in_keys, i * (N / threads), N / threads, true);
+    thread_list.emplace_back(do_queries, i, in_key_ptrs, i * (N / threads), N / threads, true);
   for(uint64_t i = 0; i < threads; ++i)
     thread_list[i].join();
 
@@ -311,8 +320,8 @@ int main (int argc, char** argv) {
   }
 
   uint64_t num_removed = N / 2 / threads * threads;
-  uint64_t *removed = in_keys;
-  uint64_t *non_removed = in_keys + num_removed;
+  char **removed = in_key_ptrs;
+  char **non_removed = removed + num_removed;
 
   shuffle(&removed[0], &removed[num_removed], g);
   shuffle(&non_removed[0], &non_removed[N - num_removed], g);

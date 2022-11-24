@@ -18,7 +18,9 @@ extern "C" {
 #define C_LV2 6
 #define MAX_RESIZES 8
 
-  typedef uint64_t KeyType;
+#define KEY_SIZE 24
+
+  typedef char * KeyType;
   typedef uint64_t ValueType;
 
   typedef struct __attribute__ ((__packed__)) kv_pair {
