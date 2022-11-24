@@ -929,7 +929,8 @@ static inline bool iceberg_lv3_insert(iceberg_table * table, KeyType key, ValueT
 #endif
 
   new_node->key = key;
-  new_node->val = value;
+  new_node->val.refcount = 1;
+  new_node->val.value = value.value;
 #if PMEM
   new_node->next_idx = lists[boffset].head_idx;
   pmem_persist(new_node, sizeof(*new_node));
@@ -978,7 +979,8 @@ start: ;
       pc_add(&metadata->lv2_balls, 1, thread_id);
       /*blocks[boffset].slots[slot].key = key;*/
       /*blocks[boffset].slots[slot].val = value;*/
-      atomic_write_128(key, value, (uint64_t*)&blocks[boffset].slots[slot]);
+      ValueType value_with_refcount = { .refcount = 1, .value = value.value };
+      atomic_write_128(key, value_with_refcount, (uint64_t*)&blocks[boffset].slots[slot]);
 #if PMEM
       pmem_persist(&blocks[boffset].slots[slot], sizeof(kv_pair));
 #endif
@@ -1080,7 +1082,8 @@ start: ;
       pc_add(&metadata->lv1_balls, 1, thread_id);
       /*blocks[boffset].slots[slot].key = key;*/
       /*blocks[boffset].slots[slot].val = value;*/
-      atomic_write_128(key, value, (uint64_t*)&blocks[boffset].slots[slot]);
+      ValueType value_with_refcount = { .refcount = 1, .value = value.value };
+      atomic_write_128(key, value_with_refcount, (uint64_t*)&blocks[boffset].slots[slot]);
 #if PMEM
       pmem_persist(&blocks[boffset].slots[slot], sizeof(kv_pair));
 #endif
@@ -1203,6 +1206,8 @@ static inline bool iceberg_lv3_remove_internal(iceberg_table * table, KeyType ke
         iceberg_lv3_node * old_node = current_node->next_node;
         current_node->next_node = current_node->next_node->next_node;
         free(old_node);
+      } else if (next_node->val.refcount == 0) {
+        return false;
       } else {
         next_node->val.refcount--;
       }
@@ -1314,6 +1319,8 @@ static inline bool iceberg_lv2_remove(iceberg_table * table, KeyType key, uint64
           metadata->lv2_md[bindex][boffset].block_md[slot] = 0;
           blocks[boffset].slots[slot].key = NULL;
           blocks[boffset].slots[slot].val.refcount = 0;
+        } else if (blocks[boffset].slots[slot].val.refcount == 0) {
+          return false;
         } else {
           blocks[boffset].slots[slot].val.refcount--;
         }
@@ -1391,6 +1398,9 @@ bool iceberg_remove(iceberg_table * table, KeyType key, uint8_t thread_id) {
         metadata->lv1_md[bindex][boffset].block_md[slot] = 0;
         blocks[boffset].slots[slot].key = NULL;
         blocks[boffset].slots[slot].val.refcount = 0;
+      } else if (blocks[boffset].slots[slot].val.refcount == 0) {
+        unlock_block((uint64_t *)&metadata->lv1_md[bindex][boffset].block_md);
+        return false;
       } else {
         blocks[boffset].slots[slot].val.refcount--;
       }
