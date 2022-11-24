@@ -27,7 +27,7 @@ double elapsed(high_resolution_clock::time_point t1, high_resolution_clock::time
   return (duration_cast<duration<double>>(t2 - t1)).count();
 }
 
-void do_inserts(uint8_t id, char **keys, uint64_t *values, uint64_t start, uint64_t n) {
+void do_inserts(uint8_t id, char **keys, ValueType *values, uint64_t start, uint64_t n) {
 #ifdef LATENCY
   std::vector<double> times;
 #endif
@@ -67,7 +67,7 @@ void do_inserts(uint8_t id, char **keys, uint64_t *values, uint64_t start, uint6
 
 void do_queries(uint8_t id, char **keys, uint64_t start, uint64_t n, bool positive) {
 
-  uint64_t val;
+  ValueType *val;
 #ifdef LATENCY
   std::vector<double> times;
 #endif
@@ -185,12 +185,15 @@ int main (int argc, char** argv) {
     in_key_ptrs[i] = &in_keys[KEY_SIZE * i];
   }
 
-  uint64_t *in_values = (uint64_t *)malloc(N * sizeof(uint64_t));
+  ValueType *in_values = (ValueType *)malloc(N * sizeof(ValueType));
   if(!in_values) {
     printf("Malloc in_values failed\n");
     exit(0);
   }
   safe_rand_bytes((unsigned char *)in_values, sizeof(*in_values) * N);
+  for (uint64_t i = 0; i < N; i++) {
+    in_values[i].refcount = 0;
+  }
 
   char *out_keys = (char *)malloc(N * KEY_SIZE);
   if(!out_keys) {
@@ -207,13 +210,6 @@ int main (int argc, char** argv) {
   for (uint64_t i = 0; i < N; i++) {
     out_key_ptrs[i] = &out_keys[KEY_SIZE * i];
   }
-
-  uint64_t *out_values = (uint64_t *)malloc(N * sizeof(uint64_t));
-  if(!out_values) {
-    printf("Malloc out_values failed\n");
-    exit(0);
-  }
-  safe_rand_bytes((unsigned char *)out_values, sizeof(*out_values) * N);
 
   if (!is_benchmark) {
     printf("INSERTIONS\n");

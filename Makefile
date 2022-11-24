@@ -10,7 +10,7 @@ else
    HUGE=
 endif
 
-RESIZE_POLICY = -DENABLE_RESIZE
+RESIZE_POLICY =
 BLOCK_LOCKING = -DENABLE_BLOCK_LOCKING
 
 ifdef NBL
@@ -48,7 +48,7 @@ INCLUDE += -I ./pmdk/src/PMDK/src/include
 LIBS +=  -L ./pmdk/src/PMDK/src/nondebug -lpmem -lpmemobj
 endif
 
-all: main ycsb
+all: main
 
 obj/%.o: src/%.c
 	@ mkdir -p obj

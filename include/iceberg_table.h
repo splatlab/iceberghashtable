@@ -21,7 +21,11 @@ extern "C" {
 #define KEY_SIZE 24
 
   typedef char * KeyType;
-  typedef uint64_t ValueType;
+
+  typedef struct {
+    uint64_t refcount : 4;
+    uint64_t value    : 60;
+  } ValueType;
 
   typedef struct __attribute__ ((__packed__)) kv_pair {
     KeyType key;
@@ -118,7 +122,7 @@ extern "C" {
 
   bool iceberg_remove(iceberg_table * table, KeyType key, uint8_t thread_id);
 
-  bool iceberg_get_value(iceberg_table * table, KeyType key, ValueType *value, uint8_t thread_id);
+  bool iceberg_get_value(iceberg_table * table, KeyType key, ValueType **value, uint8_t thread_id);
 
 #ifdef PMEM
   uint64_t iceberg_dismount(iceberg_table *table);
