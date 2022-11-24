@@ -1134,6 +1134,7 @@ __attribute__ ((always_inline)) inline bool iceberg_insert(iceberg_table * table
   lock_block((uint64_t *)&metadata->lv1_md[bindex][boffset].block_md);
   ValueType *v;
   if (unlikely(iceberg_get_value(table, key, &v, thread_id))) {
+    v->refcount++;
     /*printf("Found!\n");*/
     unlock_block((uint64_t *)&metadata->lv1_md[bindex][boffset].block_md);
     return true;
@@ -1170,7 +1171,7 @@ static inline bool iceberg_lv3_remove_internal(iceberg_table * table, KeyType ke
 #if PMEM
     lists[boffset].head_idx = head->next_idx;
     pmem_memset_persist(head, 0, sizeof(*head));
-#else    
+#else
     iceberg_lv3_node * old_head = lists[boffset].head;
     lists[boffset].head = lists[boffset].head->next_node;
     free(old_head);
@@ -1198,9 +1199,13 @@ static inline bool iceberg_lv3_remove_internal(iceberg_table * table, KeyType ke
       current_node->next_idx = next_node->next_idx;
       pmem_memset_persist(next_node, 0, sizeof(*next_node));
 #else
-      iceberg_lv3_node * old_node = current_node->next_node;
-      current_node->next_node = current_node->next_node->next_node;
-      free(old_node);
+      if (next_node->val.refcount == 1) {
+        iceberg_lv3_node * old_node = current_node->next_node;
+        current_node->next_node = current_node->next_node->next_node;
+        free(old_node);
+      } else {
+        next_node->val.refcount--;
+      }
 #endif
 
       metadata->lv3_sizes[bindex][boffset]--;
@@ -1305,9 +1310,13 @@ static inline bool iceberg_lv2_remove(iceberg_table * table, KeyType key, uint64
       uint8_t slot = word_select(md_mask, i);
 
       if (iceberg_key_compare(blocks[boffset].slots[slot].key, key) == 0) {
-        metadata->lv2_md[bindex][boffset].block_md[slot] = 0;
-        blocks[boffset].slots[slot].key = NULL;
-        blocks[boffset].slots[slot].val.refcount = 0;
+        if (blocks[boffset].slots[slot].val.refcount == 1) {
+          metadata->lv2_md[bindex][boffset].block_md[slot] = 0;
+          blocks[boffset].slots[slot].key = NULL;
+          blocks[boffset].slots[slot].val.refcount = 0;
+        } else {
+          blocks[boffset].slots[slot].val.refcount--;
+        }
 #if PMEM
         pmem_persist(&blocks[boffset].slots[slot], sizeof(kv_pair));
 #endif
@@ -1378,9 +1387,13 @@ bool iceberg_remove(iceberg_table * table, KeyType key, uint8_t thread_id) {
     uint8_t slot = word_select(md_mask, i);
 
     if (iceberg_key_compare(blocks[boffset].slots[slot].key, key) == 0) {
-      metadata->lv1_md[bindex][boffset].block_md[slot] = 0;
-      blocks[boffset].slots[slot].key = NULL;
-      blocks[boffset].slots[slot].val.refcount = 0;
+      if (blocks[boffset].slots[slot].val.refcount == 1) {
+        metadata->lv1_md[bindex][boffset].block_md[slot] = 0;
+        blocks[boffset].slots[slot].key = NULL;
+        blocks[boffset].slots[slot].val.refcount = 0;
+      } else {
+        blocks[boffset].slots[slot].val.refcount--;
+      }
 #if PMEM
       pmem_persist(&blocks[boffset].slots[slot], sizeof(kv_pair));
 #endif
