@@ -248,7 +248,7 @@ int main (int argc, char** argv) {
 #endif
   t2 = high_resolution_clock::now();
 
-  double insert_throughput = N / elapsed(t1, t2);
+  //double insert_throughput = N / elapsed(t1, t2);
   //	exit(0);
 
   if (!is_benchmark) {
@@ -271,31 +271,64 @@ int main (int argc, char** argv) {
     printf("Average list size: %f\n", sum_sizes / (double)table.metadata.nblocks);
     printf("Max list size: %ld\n", max_size);
 
-    printf("\nQUERIES\n");
   }
 
   std::mt19937 g(__builtin_ia32_rdtsc());
-  std::shuffle(&in_key_ptrs[0], &in_key_ptrs[N], g);
 
   //	exit(0);
 
-  t1 = high_resolution_clock::now();
-
-  for(uint64_t i = 0; i < threads; ++i)
-    thread_list.emplace_back(do_queries, i, out_key_ptrs, i * (N / threads), N / threads, false);
-  for(uint64_t i = 0; i < threads; ++i)
-    thread_list[i].join();
-
-  t2 = high_resolution_clock::now();
-  double negative_throughput = N / elapsed(t1, t2);
   if (!is_benchmark) {
-    printf("Negative queries: %f /sec\n", N / elapsed(t1, t2));	
+    printf("\nREFCOUNT INCREMENTS\n");
   }
-  thread_list.clear();
+
+  for(uint64_t i = 0; i < splits; ++i) {
+    for(uint64_t j = 0; j < threads; j++)
+      thread_list.emplace_back(do_inserts, j, in_key_ptrs, in_values, (i * threads + j) * size, size);
+    for(uint64_t j = 0; j < threads; j++)
+      thread_list[j].join();
+    thread_list.clear();
+  }
+
+#ifdef ENABLE_RESIZE
+  iceberg_end(&table);
+#endif
+  t2 = high_resolution_clock::now();
 
   //	exit(0);
 
+  if (!is_benchmark) {
+    printf("Increments: %f\n", N / elapsed(t1, t2));
+
+    printf("Load factor: %f\n", iceberg_load_factor(&table));
+    printf("Number level 1 inserts: %ld\n", lv1_balls(&table));
+    printf("Number level 2 inserts: %ld\n", lv2_balls(&table));
+    printf("Number level 3 inserts: %ld\n", lv3_balls(&table));
+    printf("Total inserts: %ld\n", tot_balls(&table));
+  }
+
+  for(uint64_t i = 0; i < table.metadata.nblocks; ++i) {
+    max_size = std::max(max_size, table.metadata.lv3_sizes[0][i]);
+    sum_sizes += table.metadata.lv3_sizes[0][i];
+  }
+
+  if (!is_benchmark) {
+    printf("REFCOUNT DECREMENTS\n");
+  }
+
+  for(uint64_t i = 0; i < splits; ++i) {
+    for(uint64_t j = 0; j < threads; j++)
+      thread_list.emplace_back(do_removals, j, in_key_ptrs, (i * threads + j) * size, size);
+    for(uint64_t j = 0; j < threads; j++)
+      thread_list[j].join();
+    thread_list.clear();
+  }
+  if (!is_benchmark) {
+    printf("Decrements: %f /sec\n", N / elapsed(t1, t2));
+  }
+
   t1 = high_resolution_clock::now();
+  printf("\nQUERIES AFTER DECREMENTS\n");
+  std::shuffle(&in_key_ptrs[0], &in_key_ptrs[N], g);
 
   for(uint64_t i = 0; i < threads; ++i)
     thread_list.emplace_back(do_queries, i, in_key_ptrs, i * (N / threads), N / threads, true);
@@ -303,13 +336,10 @@ int main (int argc, char** argv) {
     thread_list[i].join();
 
   t2 = high_resolution_clock::now();
-  double positive_throughput = N / elapsed(t1, t2);
   if (!is_benchmark) {
     printf("Positive queries: %f /sec\n", N / elapsed(t1, t2));
   }
   thread_list.clear();
-
-  //	exit(0);
 
   if (!is_benchmark) {
     printf("\nREMOVALS\n");
@@ -330,7 +360,7 @@ int main (int argc, char** argv) {
     thread_list[i].join();
 
   t2 = high_resolution_clock::now();
-  double removal_throughput = num_removed / elapsed(t1, t2);
+  //double removal_throughput = num_removed / elapsed(t1, t2);
   if (!is_benchmark) {
     printf("Removals: %f /sec\n", num_removed / elapsed(t1, t2));
     printf("Load factor: %f\n", iceberg_load_factor(&table));
@@ -342,7 +372,7 @@ int main (int argc, char** argv) {
   t1 = high_resolution_clock::now();
 
   if (is_benchmark) {
-    printf("%f %f %f %f\n", insert_throughput, negative_throughput, positive_throughput, removal_throughput);
+    //printf("%f %f %f %f\n", insert_throughput, negative_throughput, positive_throughput, removal_throughput);
     return 0;
   }
 

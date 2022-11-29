@@ -1175,15 +1175,20 @@ static inline bool iceberg_lv3_remove_internal(iceberg_table * table, KeyType ke
     lists[boffset].head_idx = head->next_idx;
     pmem_memset_persist(head, 0, sizeof(*head));
 #else
-    iceberg_lv3_node * old_head = lists[boffset].head;
-    lists[boffset].head = lists[boffset].head->next_node;
-    free(old_head);
+    if (head->val.refcount == 1) {
+      iceberg_lv3_node * old_head = lists[boffset].head;
+      lists[boffset].head = lists[boffset].head->next_node;
+      free(old_head);
+      metadata->lv3_sizes[bindex][boffset]--;
+      pc_add(&metadata->lv3_balls, -1, thread_id);
+    } else if (head->val.refcount == 0) {
+      return false;
+    } else {
+      head->val.refcount--;
+    }
 #endif
 
-    metadata->lv3_sizes[bindex][boffset]--;
-    pc_add(&metadata->lv3_balls, -1, thread_id);
     metadata->lv3_locks[bindex][boffset] = 0;
-
     return true;
   }
 
