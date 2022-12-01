@@ -39,11 +39,11 @@ static inline uint64_t nonzero_fprint(uint64_t hash) {
 }
 
 static inline uint64_t lv1_hash(KeyType key) {
-  return nonzero_fprint(MurmurHash64A(&key, FPRINT_BITS, seed[0]));
+  return nonzero_fprint(MurmurHash64A(key, KEY_SIZE, seed[0]));
 }
 
 static inline uint64_t lv2_hash(KeyType key, uint8_t i) {
-  return nonzero_fprint(MurmurHash64A(&key, FPRINT_BITS, seed[i + 1]));
+  return nonzero_fprint(MurmurHash64A(key, KEY_SIZE, seed[i + 1]));
 }
 
 static inline uint8_t word_select(uint64_t val, int rank) {
