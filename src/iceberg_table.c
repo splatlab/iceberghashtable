@@ -1138,6 +1138,7 @@ __attribute__ ((always_inline)) inline bool iceberg_insert(iceberg_table * table
   ValueType *v;
   if (unlikely(iceberg_get_value(table, key, &v, thread_id))) {
     v->refcount++;
+    v->value = value.value;
     /*printf("Found!\n");*/
     unlock_block((uint64_t *)&metadata->lv1_md[bindex][boffset].block_md);
     return true;
