@@ -173,7 +173,7 @@ static inline uint64_t slot_mask_64(uint8_t * metadata, uint8_t fprint) {
   return _mm512_cmp_epi8_mask(bcast, block, _MM_CMPINT_EQ);
 }
 #else /* ! (defined __AVX512F__ && defined __AVX512BW__) */
-static inline uint64_t slot_mask_64_half(__m256i fprint, __m256i md, __m256i mask)
+static inline uint32_t slot_mask_64_half(__m256i fprint, __m256i md, __m256i mask)
 {
   __m256i masked_fp = _mm256_or_si256(fprint, mask);
   __m256i masked_md = _mm256_or_si256(md, mask);
@@ -192,7 +192,7 @@ static inline uint64_t slot_mask_64(uint8_t * metadata, uint8_t fp) {
   __m256i  mask2   = _mm256_loadu_si256((const __m256i *)(&broadcast_mask[32]));
   uint64_t result2 = slot_mask_64_half(fprint, md2, mask2);
 
-  return (result1 << 32) | result2;
+  return ((uint64_t)result2 << 32) | result1;
 }
 #endif /* ! (defined __AVX512F__ && defined __AVX512BW__) */
 
