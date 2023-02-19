@@ -155,9 +155,15 @@ static inline void unlock_block(uint64_t * metadata)
 static inline uint32_t slot_mask_32(uint8_t * metadata, uint8_t fprint) {
   __m256i bcast = _mm256_set1_epi8(fprint);
   __m256i block = _mm256_loadu_si256((const __m256i *)(metadata));
+#if defined __AVX512BW__ && defined __AVX512VL__
   return _mm256_cmp_epi8_mask(bcast, block, _MM_CMPINT_EQ);
+#else
+  __m256i cmp = _mm256_cmpeq_epi8(bcast, block);
+  return _mm256_movemask_epi8(cmp);
+#endif
 }
 
+#if defined __AVX512F__ && defined __AVX512BW__
 static inline uint64_t slot_mask_64(uint8_t * metadata, uint8_t fprint) {
   __m512i mask = _mm512_loadu_si512((const __m512i *)(broadcast_mask));
   __m512i bcast = _mm512_set1_epi8(fprint);
@@ -166,6 +172,30 @@ static inline uint64_t slot_mask_64(uint8_t * metadata, uint8_t fprint) {
   block = _mm512_or_epi64(block, mask);
   return _mm512_cmp_epi8_mask(bcast, block, _MM_CMPINT_EQ);
 }
+#else /* ! (defined __AVX512F__ && defined __AVX512BW__) */
+static inline uint32_t slot_mask_64_half(__m256i fprint, __m256i md, __m256i mask)
+{
+  __m256i masked_fp = _mm256_or_si256(fprint, mask);
+  __m256i masked_md = _mm256_or_si256(md, mask);
+  __m256i cmp       = _mm256_cmpeq_epi8(masked_md, masked_fp);
+  return _mm256_movemask_epi8(cmp);
+}
+
+static inline uint64_t slot_mask_64(uint8_t * metadata, uint8_t fp) {
+  __m256i fprint   = _mm256_set1_epi8(fp);
+
+  __m256i  md1     = _mm256_loadu_si256((const __m256i *)(metadata));
+  __m256i  mask1   = _mm256_loadu_si256((const __m256i *)(broadcast_mask));
+  uint64_t result1 = slot_mask_64_half(fprint, md1, mask1);
+
+  __m256i  md2     = _mm256_loadu_si256((const __m256i *)(&metadata[32]));
+  __m256i  mask2   = _mm256_loadu_si256((const __m256i *)(&broadcast_mask[32]));
+  uint64_t result2 = slot_mask_64_half(fprint, md2, mask2);
+
+  return ((uint64_t)result2 << 32) | result1;
+}
+#endif /* ! (defined __AVX512F__ && defined __AVX512BW__) */
+
 
 static inline void atomic_write_128(uint64_t key, uint64_t val, uint64_t *slot) {
   uint64_t arr[2] = {key, val};
