@@ -3,7 +3,6 @@
 #include <thread>
 #include <immintrin.h>
 #include <tmmintrin.h>
-#include <openssl/rand.h>
 #include <unistd.h>
 #include <chrono>
 #include <random>
@@ -19,12 +18,12 @@
 using namespace std::chrono;
 
 //vectors of key/value pairs in the table and not in the table
-std::vector<std::pair<uint64_t, uint64_t>> in_table, not_in_table;
+std::vector<std::pair<uint64_t, uint64_t> > in_table, not_in_table;
 
 iceberg_table table;
 
 double elapsed(high_resolution_clock::time_point t1, high_resolution_clock::time_point t2) {
-  return (duration_cast<duration<double>>(t2 - t1)).count();
+  return (duration_cast<duration<double> >(t2 - t1)).count();
 }
 
 void do_inserts(uint8_t id, uint64_t *keys, uint64_t *values, uint64_t start, uint64_t n) {
@@ -107,17 +106,11 @@ void do_removals(uint8_t id, uint64_t *keys, uint64_t start, uint64_t n) {
 }
 
 void safe_rand_bytes(unsigned char *v, size_t n) {
-  while (n > 0) {
-    size_t round_size = n >= INT_MAX ? INT_MAX - 1 : n;
-    RAND_bytes(v, round_size);
-    v += round_size;
-    n -= round_size;
+  size_t round_size = n >= INT_MAX ? INT_MAX - 1 : n;
+  for (uint64_t i = 0; i < round_size; ++i) {
+    v[i] = rand();
   }
 
-  //for (uint64_t i = 0; i < n; ++i) {
-  //v[i] = rand();
-  //}
-     
 }
 
 void do_mixed(uint8_t id, uint64_t *keys, uint64_t *values, uint64_t start, uint64_t n) {
@@ -175,7 +168,7 @@ int main (int argc, char** argv) {
   uint64_t total_alloc = (N * sizeof(uint64_t) * 4)/1024;
 #endif
   if (!is_benchmark) {
-    printf("%ld\n", N * 2 * sizeof(uint64_t));
+    printf("%" PRIu64 "\n", N * 2 * sizeof(uint64_t));
   }
 
   uint64_t *in_keys = (uint64_t *)malloc(N * sizeof(uint64_t));
@@ -250,10 +243,10 @@ int main (int argc, char** argv) {
     printf("Insertions: %f\n", N / elapsed(t1, t2));
 
     printf("Load factor: %f\n", iceberg_load_factor(&table));
-    printf("Number level 1 inserts: %ld\n", lv1_balls(&table));
-    printf("Number level 2 inserts: %ld\n", lv2_balls(&table));
-    printf("Number level 3 inserts: %ld\n", lv3_balls(&table));
-    printf("Total inserts: %ld\n", tot_balls(&table));
+    printf("Number level 1 inserts: %" PRIu64 "\n", lv1_balls(&table));
+    printf("Number level 2 inserts: %" PRIu64 "\n", lv2_balls(&table));
+    printf("Number level 3 inserts: %" PRIu64 "\n", lv3_balls(&table));
+    printf("Total inserts: %" PRIu64 "\n", tot_balls(&table));
   }
 
   uint64_t max_size = 0, sum_sizes = 0;
@@ -264,7 +257,7 @@ int main (int argc, char** argv) {
 
   if (!is_benchmark) {
     printf("Average list size: %f\n", sum_sizes / (double)table.metadata.nblocks);
-    printf("Max list size: %ld\n", max_size);
+    printf("Max list size: %" PRIu64 "\n", max_size);
 
     printf("\nQUERIES\n");
   }

@@ -18,7 +18,7 @@ ifdef NBL
 endif
 
 ifdef NORESIZE
-	RESIZE_POLICY = 
+	RESIZE_POLICY =
 endif
 
 ifdef INST
@@ -37,11 +37,11 @@ OPT += $(RESIZE_POLICY) $(BLOCK_LOCKING) $(THRPT_POLICY) $(LATENCY_POLICY) $(PME
 
 CC = clang
 CPP = clang++
-CFLAGS = $(OPT) -Wall -march=native -pthread $(HUGE)
+CFLAGS = $(OPT) -Wall -march=native -pthread -Werror -Wfatal-errors $(HUGE)
+CPPFLAGS = $(OPT) -Wall -march=native -pthread -Werror -Wfatal-errors $(HUGE) -std=c++11
 INCLUDE = -I ./include
 SOURCES = src/iceberg_table.c src/hashutil.c src/partitioned_counter.c src/lock.c
 OBJECTS = $(subst src/,obj/,$(subst .c,.o,$(SOURCES)))
-LIBS = -lssl -lcrypto -ltbb 
 
 ifdef PMEM
 INCLUDE += -I ./pmdk/src/PMDK/src/include
@@ -56,11 +56,11 @@ obj/%.o: src/%.c
 
 obj/main.o: main.cc
 	@ mkdir -p obj
-	$(CPP) $(CFLAGS) $(INCLUDE) -c $< -o $@
+	$(CPP) $(CPPFLAGS) $(INCLUDE) -c $< -o $@
 
 obj/ycsb.o: ycsb.cc
 	@ mkdir -p obj
-	$(CPP) $(CFLAGS) $(INCLUDE) -c $< -o $@
+	$(CPP) $(CPPFLAGS) $(INCLUDE) -c $< -o $@
 
 main: $(OBJECTS) obj/main.o
 	$(CPP) $(CFLAGS) $^ -o $@ $(LIBS)
