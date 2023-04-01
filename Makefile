@@ -48,13 +48,13 @@ INCLUDE += -I ./pmdk/src/PMDK/src/include
 LIBS +=  -L ./pmdk/src/PMDK/src/nondebug -lpmem -lpmemobj
 endif
 
-all: main ycsb
+all: micro ycsb
 
 obj/%.o: src/%.c
 	@ mkdir -p obj
 	$(CC) $(CFLAGS) $(INCLUDE) -c $< -o $@
 
-obj/main.o: main.cc
+obj/micro.o: micro.cc
 	@ mkdir -p obj
 	$(CPP) $(CPPFLAGS) $(INCLUDE) -c $< -o $@
 
@@ -62,7 +62,7 @@ obj/ycsb.o: ycsb.cc
 	@ mkdir -p obj
 	$(CPP) $(CPPFLAGS) $(INCLUDE) -c $< -o $@
 
-main: $(OBJECTS) obj/main.o
+micro: $(OBJECTS) obj/micro.o
 	$(CPP) $(CFLAGS) $^ -o $@ $(LIBS)
 
 ycsb: $(OBJECTS) obj/ycsb.o
@@ -71,4 +71,4 @@ ycsb: $(OBJECTS) obj/ycsb.o
 .PHONY: clean directories
 
 clean:
-	rm -f main ycsb $(OBJECTS) obj/main.o obj/ycsb.o
+	rm -f micro ycsb $(OBJECTS) obj/micro.o obj/ycsb.o
