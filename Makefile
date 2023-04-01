@@ -39,7 +39,7 @@ CC = clang
 CPP = clang++
 CFLAGS = $(OPT) -Wall -march=native -pthread -Werror -Wfatal-errors $(HUGE)
 CPPFLAGS = $(OPT) -Wall -march=native -pthread -Werror -Wfatal-errors $(HUGE) -std=c++11
-INCLUDE = -I ./include
+INCLUDE = -I ./include -I ./src
 SOURCES = src/iceberg_table.c src/hashutil.c src/partitioned_counter.c src/lock.c
 OBJECTS = $(subst src/,obj/,$(subst .c,.o,$(SOURCES)))
 
