@@ -168,7 +168,6 @@ static inline void unlock_block(uint64_t * metadata)
 #ifdef ENABLE_BLOCK_LOCKING
   //printf("Unlocking %p\n", metadata);
   uint64_t *data = metadata + 7;
-  assert((*data & LOCK_MASK) != 0);
   *data = *data & UNLOCK_MASK;
 #endif
 }
@@ -225,7 +224,7 @@ static inline void atomic_write_128(uint64_t key, uint64_t val, kv_pair *slot) {
 
 static inline uint64_t level1_slots_per_block()
 {
-   return (1 >> SLOT_BITS);
+   return (1ULL << SLOT_BITS);
 }
 
 static inline kv_pair *level1_kv_pair(iceberg_table *table, uint64_t partition, uint64_t block, uint64_t slot_in_block)
@@ -393,7 +392,6 @@ int iceberg_init(iceberg_table *table, uint64_t log_slots) {
   pmem_persist(table->level3[0], level3_size);
   pmem_memset_persist(table->level3_nodes, 0, level3_nodes_size);
 #else
-  memset(table->level1[0], 0, level1_size);
   for (uint64_t i = 0; i < total_blocks; ++i) {
     for (uint64_t j = 0; j < C_LV2 + MAX_LG_LG_N / D_CHOICES; ++j) {
       table->level2[0][i].slots[j].key = table->level2[0][i].slots[j].val = 0;
