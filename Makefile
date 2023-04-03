@@ -37,9 +37,9 @@ OPT += $(RESIZE_POLICY) $(BLOCK_LOCKING) $(THRPT_POLICY) $(LATENCY_POLICY) $(PME
 
 CC = clang
 CPP = clang++
-CFLAGS = $(OPT) -Wall -march=native -pthread -Werror -Wfatal-errors $(HUGE)
+CFLAGS = $(OPT) -Wall -march=native -pthread -Werror -Wfatal-errors $(HUGE) -DXXH_INLINE_ALL
 CPPFLAGS = $(OPT) -Wall -march=native -pthread -Werror -Wfatal-errors $(HUGE) -std=c++11
-INCLUDE = -I ./include -I ./src
+INCLUDE = -I ./include -I ./src -I ./xxhash
 SOURCES = src/iceberg_table.c src/hashutil.c src/partitioned_counter.c src/lock.c
 OBJECTS = $(subst src/,obj/,$(subst .c,.o,$(SOURCES)))
 
