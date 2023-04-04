@@ -93,27 +93,17 @@ uint64_t tot_balls_aprox(iceberg_table * table) {
 }
 
 static inline uint64_t total_capacity(iceberg_table * table) {
-  return lv3_balls(table) + table->metadata.nblocks * ((1 << SLOT_BITS) + C_LV2 + MAX_LG_LG_N / D_CHOICES);
-}
-
-static inline uint64_t total_capacity_aprox(iceberg_table * table) {
-  return lv3_balls_aprox(table) + table->metadata.nblocks * ((1 << SLOT_BITS) + C_LV2 + MAX_LG_LG_N / D_CHOICES);
+  return table->metadata.nblocks * ((1 << SLOT_BITS) + C_LV2 + MAX_LG_LG_N / D_CHOICES);
 }
 
 inline double iceberg_load_factor(iceberg_table * table) {
   return (double)tot_balls(table) / (double)total_capacity(table);
 }
 
-static inline double iceberg_load_factor_aprox(iceberg_table * table) {
-  return (double)tot_balls_aprox(table) / (double)total_capacity_aprox(table);
-}
-
 #ifdef ENABLE_RESIZE
-bool need_resize(iceberg_table * table) {
-  double lf = iceberg_load_factor_aprox(table);
-  if (lf >= RESIZE_THRESHOLD)
-    return true;
-  return false;
+static inline bool
+need_resize(iceberg_table * table) {
+  return tot_balls_aprox(table) >= table->metadata.resize_threshold;
 }
 #endif
 
@@ -346,6 +336,7 @@ int iceberg_init(iceberg_table *table, uint64_t log_slots) {
   table->metadata.init_size = total_blocks;
   table->metadata.log_init_size = log2(total_blocks);
   table->metadata.nblocks_parts[0] = total_blocks;
+  table->metadata.resize_threshold = RESIZE_THRESHOLD * total_capacity(table);
 
   pc_init(&table->metadata.lv1_balls, &table->metadata.lv1_ctr, MAX_PROCS, 1000);
   pc_init(&table->metadata.lv2_balls, &table->metadata.lv2_ctr, MAX_PROCS, 1000);
@@ -851,6 +842,7 @@ static bool iceberg_setup_resize(iceberg_table * table) {
   table->metadata.nblocks = total_blocks;
   table->metadata.block_bits += 1;
   table->metadata.nblocks_parts[resize_cnt] = total_blocks;
+  table->metadata.resize_threshold = RESIZE_THRESHOLD * total_capacity(table);
 
   // reset the block ctr 
   table->metadata.lv1_resize_ctr = 0;
