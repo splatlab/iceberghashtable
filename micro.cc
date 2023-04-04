@@ -251,9 +251,9 @@ int main (int argc, char** argv) {
   }
 
   uint64_t max_size = 0, sum_sizes = 0;
-  for(uint64_t i = 0; i < table.metadata.nblocks; ++i) {
-    max_size = std::max(max_size, table.metadata.lv3_sizes[0][i]);
-    sum_sizes += table.metadata.lv3_sizes[0][i];
+  for(uint64_t i = 0; i < LEVEL3_BLOCKS; ++i) {
+    max_size = std::max(max_size, table.metadata.lv3_sizes[i]);
+    sum_sizes += table.metadata.lv3_sizes[i];
   }
 
   if (!is_benchmark) {
