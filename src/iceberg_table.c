@@ -1125,6 +1125,9 @@ start: ;
   return false;
 }
 
+inline bool
+iceberg_get_value_internal(iceberg_table * table, KeyType key, ValueType *value, hash h, uint8_t thread_id);
+
 __attribute__ ((always_inline)) inline bool
 iceberg_insert(iceberg_table * table, KeyType key, ValueType value, uint8_t thread_id) {
 #ifdef ENABLE_RESIZE
@@ -1160,7 +1163,7 @@ iceberg_insert(iceberg_table * table, KeyType key, ValueType value, uint8_t thre
   partition_block pb = decode_raw_block(table, h.level1_raw_block);
   lock_block((uint64_t *)&metadata->lv1_md[pb.partition][pb.block].block_md);
   ValueType v;
-  if (unlikely(iceberg_get_value(table, key, &v, thread_id))) {
+  if (unlikely(iceberg_get_value_internal(table, key, &v, h, thread_id))) {
     /*printf("Found!\n");*/
     unlock_block((uint64_t *)&metadata->lv1_md[pb.partition][pb.block].block_md);
     return true;
@@ -1522,10 +1525,8 @@ static inline bool iceberg_lv2_get_value(iceberg_table * table, KeyType key, Val
 }
 
 __attribute__ ((always_inline)) inline bool
-iceberg_get_value(iceberg_table * table, KeyType key, ValueType *value, uint8_t thread_id) {
+iceberg_get_value_internal(iceberg_table * table, KeyType key, ValueType *value, hash h, uint8_t thread_id) {
   iceberg_metadata * metadata = &table->metadata;
-
-  hash h = hash_key(table, &key);
 
 #ifdef ENABLE_RESIZE
   // check if there's an active resize and block isn't fixed yet
@@ -1575,6 +1576,14 @@ iceberg_get_value(iceberg_table * table, KeyType key, ValueType *value, uint8_t 
   bool ret = iceberg_lv2_get_value(table, key, value, h);
 
   return ret;
+}
+
+
+__attribute__ ((always_inline)) inline bool
+iceberg_get_value(iceberg_table * table, KeyType key, ValueType *value, uint8_t thread_id) {
+  hash h = hash_key(table, &key);
+
+  return iceberg_get_value_internal(table, key, value, h, thread_id);
 }
 
 #ifdef ENABLE_RESIZE
