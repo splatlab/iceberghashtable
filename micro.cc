@@ -76,7 +76,7 @@ void do_queries(uint8_t id, uint64_t *keys, uint64_t start, uint64_t n, bool pos
 #endif
     if (iceberg_get_value(&table, keys[i], &val, id) != positive) {
       if(positive)
-        printf("False negative query key: " "%" PRIu64 "\n", keys[i]);
+        printf("False negative query key: %8" PRIu64 " : " "%" PRIu64 "\n", i, keys[i]);
       else
         printf("False positive query\n");
       exit(0);
@@ -151,8 +151,8 @@ int main (int argc, char** argv) {
     printf("Creation time: %f\n", elapsed(t1, t2));
   }
 
-  srand(time(NULL));
-  //srand(0);
+  //srand(time(NULL));
+  srand(0);
 
   //Generating vectors of size N for data contained and not contained in the tablea
   uint64_t splits = 1;
@@ -263,7 +263,7 @@ int main (int argc, char** argv) {
   }
 
   std::mt19937 g(__builtin_ia32_rdtsc());
-  std::shuffle(&in_keys[0], &in_keys[N], g);
+  //std::shuffle(&in_keys[0], &in_keys[N], g);
 
   //	exit(0);
 
