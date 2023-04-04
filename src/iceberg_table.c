@@ -130,14 +130,21 @@ typedef struct __attribute__ (( packed )) {
   uint64_t level2_raw_block1 : 40;
   uint64_t level2_raw_block2 : 40;
   uint8_t  fingerprint   : 8;
+} raw_hash;
+
+_Static_assert(sizeof(raw_hash) == 16, "hash not 16B\n");
+
+typedef struct {
+  uint64_t level1_raw_block;
+  uint64_t level2_raw_block1;
+  uint64_t level2_raw_block2;
+  uint8_t  fingerprint;
 } hash;
 
-_Static_assert(sizeof(hash) == 16, "hash not 16B\n");
-
-static inline void
-ensure_nonzero_fingerprint(hash *h)
+static inline uint8_t
+ensure_nonzero_fingerprint(raw_hash *h)
 {
-   h->fingerprint = (h->fingerprint <= 1 ? h->fingerprint | 2 : h->fingerprint);
+   return (h->fingerprint <= 1 ? h->fingerprint | 2 : h->fingerprint);
 }
 
 static inline uint64_t
@@ -149,12 +156,13 @@ truncate_to_current_num_raw_blocks(iceberg_table *table, uint64_t raw_block)
 static inline hash
 hash_key(iceberg_table *table, KeyType *key) {
   XXH128_hash_t raw = XXH128(key, sizeof(*key), seed[0]);
-  hash *h = (hash *)&raw;
-  ensure_nonzero_fingerprint(h);
-  h->level1_raw_block = truncate_to_current_num_raw_blocks(table, h->level1_raw_block);
-  h->level2_raw_block1 = truncate_to_current_num_raw_blocks(table, h->level2_raw_block1);
-  h->level2_raw_block2 = truncate_to_current_num_raw_blocks(table, h->level2_raw_block2);
-  return *h;
+  raw_hash *rh = (raw_hash *)&raw;
+  hash h = { 0 };
+  h.fingerprint = ensure_nonzero_fingerprint(rh);
+  h.level1_raw_block = truncate_to_current_num_raw_blocks(table, rh->level1_raw_block);
+  h.level2_raw_block1 = truncate_to_current_num_raw_blocks(table, rh->level2_raw_block1);
+  h.level2_raw_block2 = truncate_to_current_num_raw_blocks(table, rh->level2_raw_block2);
+  return h;
 }
 
 typedef struct {
