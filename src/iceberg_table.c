@@ -370,8 +370,8 @@ int iceberg_init(iceberg_table *table, uint64_t log_slots) {
 
 #ifdef ENABLE_RESIZE
   table->metadata.resize_cnt = 0;
-  table->metadata.lv1_resize_ctr = total_blocks;
-  table->metadata.lv2_resize_ctr = total_blocks;
+  table->metadata.lv1_resize_ctr = 0;
+  table->metadata.lv2_resize_ctr = 0;
 
   // create one marker for 8 blocks.
   size_t resize_marker_size = sizeof(uint8_t) * total_blocks / 8;
@@ -640,8 +640,8 @@ int iceberg_mount(iceberg_table *table, uint64_t log_slots, uint64_t resize_cnt)
   }
 
 #ifdef ENABLE_RESIZE
-  table->metadata.lv1_resize_ctr = total_blocks;
-  table->metadata.lv2_resize_ctr = total_blocks;
+  table->metadata.lv1_resize_ctr = 0;
+  table->metadata.lv2_resize_ctr = 0;
 
   // Create marker metadata for rest of the partitions
   for (uint64_t i = 0; i <= resize_cnt; ++i) {
@@ -672,15 +672,11 @@ int iceberg_mount(iceberg_table *table, uint64_t log_slots, uint64_t resize_cnt)
 
 #ifdef ENABLE_RESIZE
 static inline bool is_lv1_resize_active(iceberg_table * table) {
-  uint64_t half_mark = table->metadata.nblocks >> 1;
-  uint64_t lv1_ctr = __atomic_load_n(&table->metadata.lv1_resize_ctr, __ATOMIC_SEQ_CST);
-  return lv1_ctr < half_mark;
+  return __atomic_load_n(&table->metadata.lv1_resize_ctr, __ATOMIC_SEQ_CST);
 }
 
 static inline bool is_lv2_resize_active(iceberg_table * table) {
-  uint64_t half_mark = table->metadata.nblocks >> 1;
-  uint64_t lv2_ctr = __atomic_load_n(&table->metadata.lv2_resize_ctr, __ATOMIC_SEQ_CST);
-  return lv2_ctr < half_mark;
+  return __atomic_load_n(&table->metadata.lv2_resize_ctr, __ATOMIC_SEQ_CST);
 }
 
 static bool is_resize_active(iceberg_table * table) {
@@ -796,8 +792,8 @@ static bool iceberg_setup_resize(iceberg_table * table) {
   table->metadata.resize_threshold = RESIZE_THRESHOLD * total_capacity(table);
 
   // reset the block ctr
-  table->metadata.lv1_resize_ctr = 0;
-  table->metadata.lv2_resize_ctr = 0;
+  table->metadata.lv1_resize_ctr = table->metadata.nblocks / 2;
+  table->metadata.lv2_resize_ctr = table->metadata.nblocks / 2;
 
   /*printf("Setting up finished\n");*/
   unlock(&table->metadata.lock);
@@ -964,7 +960,7 @@ iceberg_lv2_insert(iceberg_table * table, KeyType key, ValueType value, hash h, 
 
 #ifdef ENABLE_RESIZE
   // move blocks if resize is active and not already moved.
-  if (unlikely(raw_block < (table->metadata.nblocks >> 1) && is_lv2_resize_active(table))) {
+  if (unlikely(is_lv2_resize_active(table) && raw_block < (table->metadata.nblocks >> 1))) {
     uint64_t chunk = raw_block / 8;
     partition_block pb = decode_raw_chunk(table, chunk);
     // if fixing is needed set the marker
@@ -1047,7 +1043,7 @@ iceberg_insert(iceberg_table * table, KeyType key, ValueType value, uint8_t thre
 
 #ifdef ENABLE_RESIZE
   // move blocks if resize is active and not already moved.
-  if (unlikely(h.level1_raw_block < (table->metadata.nblocks >> 1) && is_lv1_resize_active(table))) {
+  if (unlikely(is_lv1_resize_active(table) && h.level1_raw_block < (table->metadata.nblocks >> 1))) {
     uint64_t chunk = h.level1_raw_block / 8;
     partition_block pb = decode_raw_chunk(table, chunk);
     // if fixing is needed set the marker
@@ -1479,7 +1475,7 @@ static bool iceberg_nuke_key(iceberg_table * table, uint64_t level, uint64_t ind
 
 static bool iceberg_lv1_move_block(iceberg_table * table, uint64_t bnum, uint8_t thread_id) {
   // grab a block
-  uint64_t bctr = __atomic_fetch_add(&table->metadata.lv1_resize_ctr, 1, __ATOMIC_SEQ_CST);
+  uint64_t bctr = __atomic_fetch_sub(&table->metadata.lv1_resize_ctr, 1, __ATOMIC_SEQ_CST);
   if (bctr >= (table->metadata.nblocks >> 1))
     return true;
 
@@ -1517,7 +1513,7 @@ static bool iceberg_lv1_move_block(iceberg_table * table, uint64_t bnum, uint8_t
 
 static bool iceberg_lv2_move_block(iceberg_table * table, uint64_t bnum, uint8_t thread_id) {
   // grab a block
-  uint64_t bctr = __atomic_fetch_add(&table->metadata.lv2_resize_ctr, 1, __ATOMIC_SEQ_CST);
+  uint64_t bctr = __atomic_fetch_sub(&table->metadata.lv2_resize_ctr, 1, __ATOMIC_SEQ_CST);
   if (bctr >= (table->metadata.nblocks >> 1))
     return true;
 
