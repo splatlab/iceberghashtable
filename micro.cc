@@ -11,6 +11,7 @@
 #include <assert.h>
 #include <iostream>
 #include <fstream>
+#include <limits.h>
 
 #include <sys/time.h>
 #include <sys/resource.h>
@@ -263,7 +264,7 @@ int main (int argc, char** argv) {
   }
 
   std::mt19937 g(__builtin_ia32_rdtsc());
-  //std::shuffle(&in_keys[0], &in_keys[N], g);
+  std::shuffle(&in_keys[0], &in_keys[N], g);
 
   //	exit(0);
 

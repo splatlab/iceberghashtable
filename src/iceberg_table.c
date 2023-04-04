@@ -1526,8 +1526,6 @@ iceberg_get_value(iceberg_table * table, KeyType key, ValueType *value, uint8_t 
   iceberg_metadata * metadata = &table->metadata;
 
   hash h = hash_key(table, &key);
-  partition_block pb = decode_raw_block(table, h.level1_raw_block);
-  iceberg_lv1_block * blocks = table->level1[pb.partition];
 
 #ifdef ENABLE_RESIZE
   // check if there's an active resize and block isn't fixed yet
@@ -1560,6 +1558,8 @@ iceberg_get_value(iceberg_table * table, KeyType key, ValueType *value, uint8_t 
   }
 #endif
 
+  partition_block pb = decode_raw_block(table, h.level1_raw_block);
+  iceberg_lv1_block * blocks = table->level1[pb.partition];
   __mmask64 md_mask = slot_mask_64(metadata->lv1_md[pb.partition][pb.block].block_md, h.fingerprint);
 
   while (md_mask != 0) {
