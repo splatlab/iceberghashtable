@@ -124,11 +124,16 @@ typedef struct __attribute__ (( packed )) {
 
 _Static_assert(sizeof(raw_hash) == 16, "hash not 16B\n");
 
+typedef enum {
+  LEVEL1 = 0,
+  LEVEL2_BLOCK1,
+  LEVEL2_BLOCK2,
+  NUM_LEVELS,
+} level;
+
 typedef struct {
   raw_hash raw;
-  uint64_t level1_raw_block;
-  uint64_t level2_raw_block1;
-  uint64_t level2_raw_block2;
+  uint64_t raw_block[NUM_LEVELS];
   uint8_t  fingerprint;
 } hash;
 
@@ -150,9 +155,9 @@ hash_key(iceberg_table *table, KeyType *key) {
   XXH128_hash_t *raw = (XXH128_hash_t *)&h.raw;
   *raw = XXH128(key, sizeof(*key), seed[0]);
   h.fingerprint = ensure_nonzero_fingerprint(&h.raw);
-  h.level1_raw_block = truncate_to_current_num_raw_blocks(table, h.raw.level1_raw_block);
-  h.level2_raw_block1 = truncate_to_current_num_raw_blocks(table, h.raw.level2_raw_block1);
-  h.level2_raw_block2 = truncate_to_current_num_raw_blocks(table, h.raw.level2_raw_block2);
+  h.raw_block[LEVEL1] = truncate_to_current_num_raw_blocks(table, h.raw.level1_raw_block);
+  h.raw_block[LEVEL2_BLOCK1] = truncate_to_current_num_raw_blocks(table, h.raw.level2_raw_block1);
+  h.raw_block[LEVEL2_BLOCK2] = truncate_to_current_num_raw_blocks(table, h.raw.level2_raw_block2);
   return h;
 }
 
@@ -178,6 +183,18 @@ static inline partition_block
 decode_raw_block(iceberg_table *table, uint64_t raw_block)
 {
    return decode_raw_internal(table->metadata.log_init_size, raw_block);
+}
+
+static inline partition_block
+get_block(iceberg_table *table, hash *h, level lvl)
+{
+  return decode_raw_block(table, h->raw_block[lvl]);
+}
+
+static inline uint64_t
+get_level3_block(hash *h)
+{
+  return h->raw_block[LEVEL1] % LEVEL3_BLOCKS;
 }
 
 static inline partition_block
@@ -599,7 +616,7 @@ int iceberg_mount(iceberg_table *table, uint64_t log_slots, uint64_t resize_cnt)
         KeyType key = block->slots[slot].key;
         if (key != 0) {
           hash h = hash_key(table, key);
-          partition_block pb = decode_raw_block(table, h.level1_raw_block);
+          pb = get_block(table, &h, LEVEL1);
           assert(pb.partition == p);
           assert(pb.block == i);
           block_md[slot] = fprint;
@@ -616,9 +633,9 @@ int iceberg_mount(iceberg_table *table, uint64_t log_slots, uint64_t resize_cnt)
         KeyType key = block->slots[slot].key;
         if (key != 0) {
           hash h = hash_key(table, key);
-          partition_block pb = decode_raw_block(table, h.level2_raw_block1);
+          partition_block pb = get_block(table, &h, LEVEL2_BLOCK1);
           if (pb.partition != p || pb.block != i) {
-            pb = decode_raw_block(table, h.level2_raw_block2);
+            pb = get_block(table, &h, LEVEL2_BLOCK2);
           }
           assert(pb.partition == p);
           assert(pb.block == i);
@@ -844,8 +861,8 @@ void iceberg_end(iceberg_table * table) {
 #endif
 
 static inline bool
-iceberg_lv3_insert(iceberg_table * table, KeyType key, ValueType value, hash h, uint8_t thread_id) {
-  uint64_t block = h.level1_raw_block % LEVEL3_BLOCKS;
+iceberg_lv3_insert(iceberg_table * table, KeyType key, ValueType value, hash *h, uint8_t thread_id) {
+  uint64_t block = get_level3_block(h);
   iceberg_metadata * metadata = &table->metadata;
 
   while(__sync_lock_test_and_set(&metadata->lv3_locks[block], 1)) {
@@ -893,7 +910,7 @@ iceberg_lv3_insert(iceberg_table * table, KeyType key, ValueType value, hash h, 
 }
 
 static inline bool
-iceberg_lv2_insert_internal(iceberg_table * table, KeyType key, ValueType value, hash h, partition_block pb, uint8_t thread_id) {
+iceberg_lv2_insert_internal(iceberg_table * table, KeyType key, ValueType value, hash *h, partition_block pb, uint8_t thread_id) {
   iceberg_metadata * metadata = &table->metadata;
   iceberg_lv2_block * blocks = table->level2[pb.partition];
 
@@ -925,7 +942,7 @@ start: ;
 #if PMEM
       pmem_persist(&blocks[pb.block].slots[slot], sizeof(kv_pair));
 #endif
-      metadata->lv2_md[pb.partition][pb.block].block_md[slot] = h.fingerprint;
+      metadata->lv2_md[pb.partition][pb.block].block_md[slot] = h->fingerprint;
       return true;
     }
     goto start;
@@ -935,7 +952,7 @@ start: ;
 }
 
 static inline bool
-iceberg_lv2_insert(iceberg_table * table, KeyType key, ValueType value, hash h, uint8_t thread_id) {
+iceberg_lv2_insert(iceberg_table * table, KeyType key, ValueType value, hash *h, uint8_t thread_id) {
 
   iceberg_metadata * metadata = &table->metadata;
 
@@ -943,8 +960,8 @@ iceberg_lv2_insert(iceberg_table * table, KeyType key, ValueType value, hash h, 
     return iceberg_lv3_insert(table, key, value, h, thread_id);
   }
 
-  partition_block pb1 = decode_raw_block(table, h.level2_raw_block1);
-  partition_block pb2 = decode_raw_block(table, h.level2_raw_block2);
+  partition_block pb1 = get_block(table, h, LEVEL2_BLOCK1);
+  partition_block pb2 = get_block(table, h, LEVEL2_BLOCK2);
 
   __mmask32 md_mask1 = slot_mask_32(metadata->lv2_md[pb1.partition][pb1.block].block_md, 0) & ((1 << (C_LV2 + MAX_LG_LG_N / D_CHOICES)) - 1);
   __mmask32 md_mask2 = slot_mask_32(metadata->lv2_md[pb2.partition][pb2.block].block_md, 0) & ((1 << (C_LV2 + MAX_LG_LG_N / D_CHOICES)) - 1);
@@ -952,10 +969,10 @@ iceberg_lv2_insert(iceberg_table * table, KeyType key, ValueType value, hash h, 
   uint8_t popct1 = __builtin_popcountll(md_mask1);
   uint8_t popct2 = __builtin_popcountll(md_mask2);
 
-  uint64_t raw_block = h.level2_raw_block1;
+  uint64_t raw_block = h->raw_block[LEVEL2_BLOCK1];
   if(popct2 > popct1) {
     pb1 = pb2;
-    raw_block = h.level2_raw_block2;
+    raw_block = h->raw_block[LEVEL2_BLOCK2];
   }
 
 #ifdef ENABLE_RESIZE
@@ -985,8 +1002,9 @@ iceberg_lv2_insert(iceberg_table * table, KeyType key, ValueType value, hash h, 
   return iceberg_lv3_insert(table, key, value, h, thread_id);
 }
 
-static inline bool
-iceberg_insert_internal(iceberg_table * table, KeyType key, ValueType value, hash h, partition_block pb, uint8_t thread_id) {
+//static inline bool
+bool
+iceberg_insert_internal(iceberg_table * table, KeyType key, ValueType value, hash *h, partition_block pb, uint8_t thread_id) {
   iceberg_metadata * metadata = &table->metadata;
   iceberg_lv1_block * blocks = table->level1[pb.partition];	
 start: ;
@@ -1018,7 +1036,7 @@ start: ;
 #if PMEM
       pmem_persist(&blocks[pb.block].slots[slot], sizeof(kv_pair));
 #endif
-      metadata->lv1_md[pb.partition][pb.block].block_md[slot] = h.fingerprint;
+      metadata->lv1_md[pb.partition][pb.block].block_md[slot] = h->fingerprint;
       return true;
     /*}*/
   goto start;
@@ -1027,8 +1045,8 @@ start: ;
   return false;
 }
 
-inline bool
-iceberg_get_value_internal(iceberg_table * table, KeyType key, ValueType *value, hash h, uint8_t thread_id);
+static inline bool
+iceberg_get_value_internal(iceberg_table * table, KeyType key, ValueType *value, hash *h, uint8_t thread_id);
 
 __attribute__ ((always_inline)) inline bool
 iceberg_insert(iceberg_table * table, KeyType key, ValueType value, uint8_t thread_id) {
@@ -1043,8 +1061,8 @@ iceberg_insert(iceberg_table * table, KeyType key, ValueType value, uint8_t thre
 
 #ifdef ENABLE_RESIZE
   // move blocks if resize is active and not already moved.
-  if (unlikely(is_lv1_resize_active(table) && h.level1_raw_block < (table->metadata.nblocks >> 1))) {
-    uint64_t chunk = h.level1_raw_block / 8;
+  if (unlikely(is_lv1_resize_active(table) && h.raw_block[LEVEL1] < (table->metadata.nblocks >> 1))) {
+    uint64_t chunk = h.raw_block[LEVEL1] / 8;
     partition_block pb = decode_raw_chunk(table, chunk);
     // if fixing is needed set the marker
     if (!__sync_lock_test_and_set(&table->metadata.lv1_resize_marker[pb.partition][pb.block], 1)) {
@@ -1062,26 +1080,26 @@ iceberg_insert(iceberg_table * table, KeyType key, ValueType value, uint8_t thre
   }
 #endif
 
-  partition_block pb = decode_raw_block(table, h.level1_raw_block);
+  partition_block pb = get_block(table, &h, LEVEL1);
   lock_block((uint64_t *)&metadata->lv1_md[pb.partition][pb.block].block_md);
   ValueType v;
-  if (unlikely(iceberg_get_value_internal(table, key, &v, h, thread_id))) {
+  if (unlikely(iceberg_get_value_internal(table, key, &v, &h, thread_id))) {
     /*printf("Found!\n");*/
     unlock_block((uint64_t *)&metadata->lv1_md[pb.partition][pb.block].block_md);
     return true;
   }
 
-  bool ret = iceberg_insert_internal(table, key, value, h, pb, thread_id);
+  bool ret = iceberg_insert_internal(table, key, value, &h, pb, thread_id);
   if (!ret) {
-    ret = iceberg_lv2_insert(table, key, value, h, thread_id);
+    ret = iceberg_lv2_insert(table, key, value, &h, thread_id);
   }
 
   unlock_block((uint64_t *)&metadata->lv1_md[pb.partition][pb.block].block_md);
   return ret;
 }
 
-static inline bool iceberg_lv3_remove_internal(iceberg_table * table, KeyType key, uint64_t level1_raw_block, uint8_t thread_id) {
-  uint64_t block = level1_raw_block % LEVEL3_BLOCKS;
+static inline bool iceberg_lv3_remove_internal(iceberg_table * table, KeyType key, hash *h, uint8_t thread_id) {
+  uint64_t block = get_level3_block(h);
 
   iceberg_metadata * metadata = &table->metadata;
   iceberg_lv3_list * lists = table->level3;
@@ -1151,28 +1169,27 @@ static inline bool iceberg_lv3_remove_internal(iceberg_table * table, KeyType ke
   return false;
 }
 
-static inline bool iceberg_lv3_remove(iceberg_table * table, KeyType key, hash h, uint8_t thread_id) {
-  return iceberg_lv3_remove_internal(table, key, h.level1_raw_block, thread_id);
+static inline bool iceberg_lv3_remove(iceberg_table * table, KeyType key, hash *h, uint8_t thread_id) {
+  return iceberg_lv3_remove_internal(table, key, h, thread_id);
 }
 
-static inline bool iceberg_lv2_remove(iceberg_table * table, KeyType key, hash h, uint8_t thread_id) {
+static inline bool iceberg_lv2_remove(iceberg_table * table, KeyType key, hash *h, uint8_t thread_id) {
   iceberg_metadata * metadata = &table->metadata;
 
-  for(int i = 0; i < D_CHOICES; ++i) {
-    uint64_t raw_block = i == 0 ? h.level2_raw_block1 : h.level2_raw_block2;
-    partition_block pb = decode_raw_block(table, raw_block);
+  for(level lvl = LEVEL2_BLOCK1; lvl < NUM_LEVELS; ++lvl) {
+    partition_block pb = get_block(table, h, lvl);
     iceberg_lv2_block * blocks = table->level2[pb.partition];
 
 #ifdef ENABLE_RESIZE
     // check if there's an active resize and block isn't fixed yet
-    if (unlikely(is_lv2_resize_active(table) && raw_block >= (table->metadata.nblocks >> 1))) {
+    if (unlikely(is_lv2_resize_active(table) && h->raw_block[lvl] >= (table->metadata.nblocks >> 1))) {
       uint64_t mask = ~(1ULL << (table->metadata.block_bits - 1));
-      uint64_t old_index = raw_block & mask;
+      uint64_t old_index = h->raw_block[lvl] & mask;
       uint64_t chunk = old_index / 8;
       partition_block pb = decode_raw_chunk(table, chunk);
       if (__atomic_load_n(&table->metadata.lv2_resize_marker[pb.partition][pb.block], __ATOMIC_SEQ_CST) == 0) { // not fixed yet
         partition_block old_pb = decode_raw_chunk(table, old_index);
-        __mmask32 md_mask = slot_mask_32(metadata->lv2_md[old_pb.partition][old_pb.block].block_md, h.fingerprint) & ((1 << (C_LV2 + MAX_LG_LG_N / D_CHOICES)) - 1);
+        __mmask32 md_mask = slot_mask_32(metadata->lv2_md[old_pb.partition][old_pb.block].block_md, h->fingerprint) & ((1 << (C_LV2 + MAX_LG_LG_N / D_CHOICES)) - 1);
         uint8_t popct = __builtin_popcount(md_mask);
         iceberg_lv2_block * blocks = table->level2[old_pb.partition];
         for(uint8_t i = 0; i < popct; ++i) {
@@ -1190,7 +1207,7 @@ static inline bool iceberg_lv2_remove(iceberg_table * table, KeyType key, hash h
         }
       } else {
         // wait for the old block to be fixed
-        uint64_t dest_chunk = raw_block / 8;
+        uint64_t dest_chunk = h->raw_block[lvl] / 8;
         pb = decode_raw_chunk(table, dest_chunk);
         while (__atomic_load_n(&table->metadata.lv2_resize_marker[pb.partition][pb.block], __ATOMIC_SEQ_CST) == 0)
           ;
@@ -1198,7 +1215,7 @@ static inline bool iceberg_lv2_remove(iceberg_table * table, KeyType key, hash h
     }
 #endif
 
-    __mmask32 md_mask = slot_mask_32(metadata->lv2_md[pb.partition][pb.block].block_md, h.fingerprint) & ((1 << (C_LV2 + MAX_LG_LG_N / D_CHOICES)) - 1);
+    __mmask32 md_mask = slot_mask_32(metadata->lv2_md[pb.partition][pb.block].block_md, h->fingerprint) & ((1 << (C_LV2 + MAX_LG_LG_N / D_CHOICES)) - 1);
     uint8_t popct = __builtin_popcount(md_mask);
 
     for(uint8_t i = 0; i < popct; ++i) {
@@ -1222,14 +1239,14 @@ static inline bool iceberg_lv2_remove(iceberg_table * table, KeyType key, hash h
 bool iceberg_remove(iceberg_table * table, KeyType key, uint8_t thread_id) {
   iceberg_metadata * metadata = &table->metadata;
   hash h = hash_key(table, &key);
-  partition_block pb = decode_raw_block(table, h.level1_raw_block);
+  partition_block pb = get_block(table, &h, LEVEL1);
   iceberg_lv1_block * blocks = table->level1[pb.partition];
 
 #ifdef ENABLE_RESIZE
   // check if there's an active resize and block isn't fixed yet
-  if (unlikely(is_lv1_resize_active(table) && h.level1_raw_block >= (table->metadata.nblocks >> 1))) {
+  if (unlikely(is_lv1_resize_active(table) && h.raw_block[LEVEL1] >= (table->metadata.nblocks >> 1))) {
     uint64_t mask = ~(1ULL << (table->metadata.block_bits - 1));
-    uint64_t old_index = h.level1_raw_block & mask;
+    uint64_t old_index = h.raw_block[LEVEL1] & mask;
     uint64_t chunk = old_index / 8;
     partition_block chunk_pb = decode_raw_chunk(table, chunk);
     if (__atomic_load_n(&table->metadata.lv1_resize_marker[chunk_pb.partition][chunk_pb.block], __ATOMIC_SEQ_CST) == 0) { // not fixed yet
@@ -1253,7 +1270,7 @@ bool iceberg_remove(iceberg_table * table, KeyType key, uint8_t thread_id) {
       }
     } else {
       // wait for the old block to be fixed
-      uint64_t dest_chunk = h.level1_raw_block / 8;
+      uint64_t dest_chunk = h.raw_block[LEVEL1] / 8;
       chunk_pb = decode_raw_chunk(table, dest_chunk);
       while (__atomic_load_n(&table->metadata.lv1_resize_marker[chunk_pb.partition][chunk_pb.block], __ATOMIC_SEQ_CST) == 0)
         ;
@@ -1280,14 +1297,14 @@ bool iceberg_remove(iceberg_table * table, KeyType key, uint8_t thread_id) {
     }
   }
 
-  bool ret = iceberg_lv2_remove(table, key, h, thread_id);
+  bool ret = iceberg_lv2_remove(table, key, &h, thread_id);
 
   unlock_block((uint64_t *)&metadata->lv1_md[pb.partition][pb.block].block_md);
   return ret;
 }
 
-static inline bool iceberg_lv3_get_value_internal(iceberg_table * table, KeyType key, ValueType *value, uint64_t level1_raw_block) {
-  uint64_t block = level1_raw_block % LEVEL3_BLOCKS;
+static inline bool iceberg_lv3_get_value_internal(iceberg_table * table, KeyType key, ValueType *value, hash *h) {
+  uint64_t block = get_level3_block(h);
 
   iceberg_metadata * metadata = &table->metadata;
   iceberg_lv3_list * lists = table->level3;
@@ -1324,29 +1341,28 @@ static inline bool iceberg_lv3_get_value_internal(iceberg_table * table, KeyType
   return false;
 }
 
-static inline bool iceberg_lv3_get_value(iceberg_table * table, KeyType key, ValueType *value, uint64_t level1_raw_block) {
-  return iceberg_lv3_get_value_internal(table, key, value, level1_raw_block);
+static inline bool iceberg_lv3_get_value(iceberg_table * table, KeyType key, ValueType *value, hash *h) {
+  return iceberg_lv3_get_value_internal(table, key, value, h);
 }
 
-static inline bool iceberg_lv2_get_value(iceberg_table * table, KeyType key, ValueType *value, hash h) {
+static inline bool iceberg_lv2_get_value(iceberg_table * table, KeyType key, ValueType *value, hash *h) {
 
   iceberg_metadata * metadata = &table->metadata;
 
-  for(uint8_t i = 0; i < D_CHOICES; ++i) {
-    uint64_t raw_block = i == 0 ? h.level2_raw_block1 : h.level2_raw_block2;
-    partition_block pb = decode_raw_block(table, raw_block);
+  for(level lvl = LEVEL2_BLOCK1; lvl < NUM_LEVELS; ++lvl) {
+    partition_block pb = get_block(table, h, lvl);
     iceberg_lv2_block * blocks = table->level2[pb.partition];
 
 #ifdef ENABLE_RESIZE
     // check if there's an active resize and block isn't fixed yet
-    if (unlikely(is_lv2_resize_active(table) && raw_block >= (table->metadata.nblocks >> 1))) {
+    if (unlikely(is_lv2_resize_active(table) && h->raw_block[lvl] >= (table->metadata.nblocks >> 1))) {
       uint64_t mask = ~(1ULL << (table->metadata.block_bits - 1));
-      uint64_t old_index = raw_block & mask;
+      uint64_t old_index = h->raw_block[lvl] & mask;
       uint64_t chunk = old_index / 8;
       partition_block chunk_pb = decode_raw_chunk(table, chunk);
       if (__atomic_load_n(&table->metadata.lv2_resize_marker[chunk_pb.partition][chunk_pb.block], __ATOMIC_SEQ_CST) == 0) { // not fixed yet
         partition_block old_pb = decode_raw_block(table, old_index);
-        __mmask32 md_mask = slot_mask_32(metadata->lv2_md[old_pb.partition][old_pb.block].block_md, h.fingerprint) & ((1 << (C_LV2 + MAX_LG_LG_N / D_CHOICES)) - 1);
+        __mmask32 md_mask = slot_mask_32(metadata->lv2_md[old_pb.partition][old_pb.block].block_md, h->fingerprint) & ((1 << (C_LV2 + MAX_LG_LG_N / D_CHOICES)) - 1);
 
         iceberg_lv2_block * blocks = table->level2[old_pb.partition];
         while (md_mask != 0) {
@@ -1360,7 +1376,7 @@ static inline bool iceberg_lv2_get_value(iceberg_table * table, KeyType key, Val
         }
       } else {
         // wait for the old block to be fixed
-        uint64_t dest_chunk = raw_block / 8;
+        uint64_t dest_chunk = h->raw_block[lvl] / 8;
         chunk_pb = decode_raw_chunk(table, dest_chunk);
         while (__atomic_load_n(&table->metadata.lv2_resize_marker[chunk_pb.partition][chunk_pb.block], __ATOMIC_SEQ_CST) == 0)
           ;
@@ -1368,7 +1384,9 @@ static inline bool iceberg_lv2_get_value(iceberg_table * table, KeyType key, Val
     }
 #endif
 
-    __mmask32 md_mask = slot_mask_32(metadata->lv2_md[pb.partition][pb.block].block_md, h.fingerprint) & ((1 << (C_LV2 + MAX_LG_LG_N / D_CHOICES)) - 1);
+    __mmask32 md_mask =
+      slot_mask_32(metadata->lv2_md[pb.partition][pb.block].block_md,
+          h->fingerprint) & ((1 << (C_LV2 + MAX_LG_LG_N / D_CHOICES)) - 1);
 
     while (md_mask != 0) {
       int slot = __builtin_ctz(md_mask);
@@ -1382,23 +1400,23 @@ static inline bool iceberg_lv2_get_value(iceberg_table * table, KeyType key, Val
 
   }
 
-  return iceberg_lv3_get_value(table, key, value, h.level1_raw_block);
+  return iceberg_lv3_get_value(table, key, value, h);
 }
 
 __attribute__ ((always_inline)) inline bool
-iceberg_get_value_internal(iceberg_table * table, KeyType key, ValueType *value, hash h, uint8_t thread_id) {
+iceberg_get_value_internal(iceberg_table * table, KeyType key, ValueType *value, hash *h, uint8_t thread_id) {
   iceberg_metadata * metadata = &table->metadata;
 
 #ifdef ENABLE_RESIZE
   // check if there's an active resize and block isn't fixed yet
-  if (unlikely(is_lv1_resize_active(table) && h.level1_raw_block >= (table->metadata.nblocks >> 1))) {
+  if (unlikely(is_lv1_resize_active(table) && h->raw_block[LEVEL1] >= (table->metadata.nblocks >> 1))) {
     uint64_t mask = ~(1ULL << (table->metadata.block_bits - 1));
-    uint64_t old_index = h.level1_raw_block & mask;
+    uint64_t old_index = h->raw_block[LEVEL1] & mask;
     uint64_t chunk = old_index / 8;
     partition_block chunk_pb = decode_raw_chunk(table, chunk);
     if (__atomic_load_n(&table->metadata.lv1_resize_marker[chunk_pb.partition][chunk_pb.block], __ATOMIC_SEQ_CST) == 0) { // not fixed yet
       partition_block old_pb = decode_raw_block(table, old_index);
-      __mmask64 md_mask = slot_mask_64(metadata->lv1_md[old_pb.partition][old_pb.block].block_md, h.fingerprint);
+      __mmask64 md_mask = slot_mask_64(metadata->lv1_md[old_pb.partition][old_pb.block].block_md, h->fingerprint);
 
       iceberg_lv1_block * blocks = table->level1[old_pb.partition];
       while (md_mask != 0) {
@@ -1412,7 +1430,7 @@ iceberg_get_value_internal(iceberg_table * table, KeyType key, ValueType *value,
       }
     } else {
       // wait for the old block to be fixed
-      uint64_t dest_chunk = h.level1_raw_block / 8;
+      uint64_t dest_chunk = h->raw_block[LEVEL1] / 8;
       chunk_pb = decode_raw_chunk(table, dest_chunk);
       while (__atomic_load_n(&table->metadata.lv1_resize_marker[chunk_pb.partition][chunk_pb.block], __ATOMIC_SEQ_CST) == 0)
         ;
@@ -1420,9 +1438,9 @@ iceberg_get_value_internal(iceberg_table * table, KeyType key, ValueType *value,
   }
 #endif
 
-  partition_block pb = decode_raw_block(table, h.level1_raw_block);
+  partition_block pb = decode_raw_block(table, h->raw_block[LEVEL1]);
   iceberg_lv1_block * blocks = table->level1[pb.partition];
-  __mmask64 md_mask = slot_mask_64(metadata->lv1_md[pb.partition][pb.block].block_md, h.fingerprint);
+  __mmask64 md_mask = slot_mask_64(metadata->lv1_md[pb.partition][pb.block].block_md, h->fingerprint);
 
   while (md_mask != 0) {
     int slot = __builtin_ctzll(md_mask);
@@ -1444,7 +1462,7 @@ __attribute__ ((always_inline)) inline bool
 iceberg_get_value(iceberg_table * table, KeyType key, ValueType *value, uint8_t thread_id) {
   hash h = hash_key(table, &key);
 
-  return iceberg_get_value_internal(table, key, value, h, thread_id);
+  return iceberg_get_value_internal(table, key, value, &h, thread_id);
 }
 
 #ifdef ENABLE_RESIZE
@@ -1476,8 +1494,7 @@ static bool iceberg_nuke_key(iceberg_table * table, uint64_t level, uint64_t ind
 static bool iceberg_lv1_move_block(iceberg_table * table, uint64_t bnum, uint8_t thread_id) {
   // grab a block
   uint64_t bctr = __atomic_fetch_sub(&table->metadata.lv1_resize_ctr, 1, __ATOMIC_SEQ_CST);
-  if (bctr >= (table->metadata.nblocks >> 1))
-    return true;
+  assert(bctr !=  0);
 
   partition_block pb = decode_raw_block(table, bnum);
   // relocate items in level1
@@ -1490,9 +1507,9 @@ static bool iceberg_lv1_move_block(iceberg_table * table, uint64_t bnum, uint8_t
     hash h = hash_key(table, &key);
 
     // move to new location
-    if (h.level1_raw_block != bnum) {
-      partition_block local_pb = decode_raw_block(table, h.level1_raw_block);
-      if (!iceberg_insert_internal(table, key, value, h, local_pb, thread_id)) {
+    if (h.raw_block[LEVEL1] != bnum) {
+      partition_block local_pb = decode_raw_block(table, h.raw_block[LEVEL1]);
+      if (!iceberg_insert_internal(table, key, value, &h, local_pb, thread_id)) {
         printf("Failed insert during resize lv1\n");
         exit(0);
       }
@@ -1514,8 +1531,7 @@ static bool iceberg_lv1_move_block(iceberg_table * table, uint64_t bnum, uint8_t
 static bool iceberg_lv2_move_block(iceberg_table * table, uint64_t bnum, uint8_t thread_id) {
   // grab a block
   uint64_t bctr = __atomic_fetch_sub(&table->metadata.lv2_resize_ctr, 1, __ATOMIC_SEQ_CST);
-  if (bctr >= (table->metadata.nblocks >> 1))
-    return true;
+  assert(bctr != 0);
 
   partition_block pb = decode_raw_block(table, bnum);
   uint64_t mask = ~(1ULL << (table->metadata.block_bits - 1));
@@ -1528,10 +1544,10 @@ static bool iceberg_lv2_move_block(iceberg_table * table, uint64_t bnum, uint8_t
 
     hash h = hash_key(table, &key);
 
-    if ((h.level2_raw_block1 & mask) == bnum && h.level2_raw_block1 !=bnum) {
-      partition_block local_pb = decode_raw_block(table, h.level2_raw_block1);
-      if (!iceberg_lv2_insert_internal(table, key, value, h, local_pb, thread_id)) {
-        if (!iceberg_lv2_insert(table, key, value, h, thread_id)) {
+    if ((h.raw_block[LEVEL2_BLOCK1] & mask) == bnum && h.raw_block[LEVEL2_BLOCK1] != bnum) {
+      partition_block local_pb = decode_raw_block(table, h.raw_block[LEVEL2_BLOCK1]);
+      if (!iceberg_lv2_insert_internal(table, key, value, &h, local_pb, thread_id)) {
+        if (!iceberg_lv2_insert(table, key, value, &h, thread_id)) {
           printf("Failed insert during resize lv2\n");
           exit(0);
         }
@@ -1540,10 +1556,10 @@ static bool iceberg_lv2_move_block(iceberg_table * table, uint64_t bnum, uint8_t
         printf("Failed remove during resize lv2\n");
         exit(0);
       }
-    } else if ((h.level2_raw_block1 & mask) == bnum && h.level2_raw_block1 !=bnum) {
-      partition_block local_pb = decode_raw_block(table, h.level2_raw_block2);
-      if (!iceberg_lv2_insert_internal(table, key, value, h, local_pb, thread_id)) {
-        if (!iceberg_lv2_insert(table, key, value, h, thread_id)) {
+    } else if ((h.raw_block[LEVEL2_BLOCK2] & mask) == bnum && h.raw_block[LEVEL2_BLOCK2] != bnum) {
+      partition_block local_pb = decode_raw_block(table, h.raw_block[LEVEL2_BLOCK2]);
+      if (!iceberg_lv2_insert_internal(table, key, value, &h, local_pb, thread_id)) {
+        if (!iceberg_lv2_insert(table, key, value, &h, thread_id)) {
           printf("Failed insert during resize lv2\n");
           exit(0);
         }
