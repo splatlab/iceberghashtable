@@ -22,14 +22,12 @@ extern "C" {
   typedef uint64_t KeyType;
   typedef uint64_t ValueType;
 
-  typedef struct __attribute__ ((__packed__)) kv_pair {
+  typedef struct kv_pair {
     KeyType key;
     ValueType val;
   } kv_pair;
 
-  typedef struct __attribute__ ((__packed__)) iceberg_lv1_block {
-    kv_pair slots[1 << SLOT_BITS];
-  } iceberg_lv1_block;
+  _Static_assert(sizeof(kv_pair) == 16, "kv_pair needs to be 16B for atomic loads and stores");
 
   typedef struct __attribute__ ((__packed__)) iceberg_lv1_block_md {
     uint8_t block_md[1 << SLOT_BITS];
@@ -46,20 +44,11 @@ extern "C" {
   typedef struct iceberg_lv3_node {
     KeyType key;
     ValueType val;
-#ifdef PMEM
-    bool in_use;
-    ptrdiff_t next_idx;
-#else
     struct iceberg_lv3_node * next_node;
-#endif
   } iceberg_lv3_node;
 
   typedef struct iceberg_lv3_list {
-#ifdef PMEM
-    ptrdiff_t head_idx;
-#else
     iceberg_lv3_node * head;
-#endif
   } iceberg_lv3_list;
 
   typedef struct iceberg_metadata {
@@ -94,13 +83,9 @@ extern "C" {
 
   typedef struct iceberg_table {
     iceberg_metadata metadata;
-    /* Only things that are persisted on PMEM */
-    iceberg_lv1_block *level1[MAX_RESIZES];
+    kv_pair * level1[MAX_RESIZES];
     iceberg_lv2_block *level2[MAX_RESIZES];
     iceberg_lv3_list *level3;
-#ifdef PMEM
-    iceberg_lv3_node * level3_nodes;
-#endif
   } iceberg_table;
 
   uint64_t lv1_balls(iceberg_table * table);
@@ -117,11 +102,6 @@ extern "C" {
   bool iceberg_remove(iceberg_table * table, KeyType key, uint8_t thread_id);
 
   bool iceberg_get_value(iceberg_table * table, KeyType key, ValueType *value, uint8_t thread_id);
-
-#ifdef PMEM
-  uint64_t iceberg_dismount(iceberg_table *table);
-  int iceberg_mount(iceberg_table *table, uint64_t log_slots, uint64_t resize_cnt);
-#endif
 
 #ifdef ENABLE_RESIZE
   void iceberg_end(iceberg_table * table);

@@ -29,11 +29,7 @@ ifdef LATENCY
 	LATENCY_POLICY = -DLATENCY
 endif
 
-ifdef PMEM
-	PMEM_POLICY = -DPMEM
-endif
-
-OPT += $(RESIZE_POLICY) $(BLOCK_LOCKING) $(THRPT_POLICY) $(LATENCY_POLICY) $(PMEM_POLICY)
+OPT += $(RESIZE_POLICY) $(BLOCK_LOCKING) $(THRPT_POLICY) $(LATENCY_POLICY)
 
 CC = clang
 CPP = clang++
@@ -42,11 +38,6 @@ CPPFLAGS = $(OPT) -Wall -march=native -pthread -Werror -Wfatal-errors $(HUGE) -s
 INCLUDE = -I ./include -I ./src -I ./xxhash
 SOURCES = src/iceberg_table.c src/hashutil.c src/partitioned_counter.c src/lock.c
 OBJECTS = $(subst src/,obj/,$(subst .c,.o,$(SOURCES)))
-
-ifdef PMEM
-INCLUDE += -I ./pmdk/src/PMDK/src/include
-LIBS +=  -L ./pmdk/src/PMDK/src/nondebug -lpmem -lpmemobj
-endif
 
 all: micro ycsb
 
