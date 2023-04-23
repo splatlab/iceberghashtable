@@ -130,14 +130,15 @@ int main (int argc, char** argv) {
   }
 
   bool is_benchmark = false;
-  if (argc == 4) {
+  if (argc == 5) {
     assert(strcmp(argv[3], "-b") == 0);
     is_benchmark = true;
   }
 
   uint64_t tbits = atoi(argv[1]);
-  uint64_t threads = atoi(argv[2]);
-  uint64_t N = (1ULL << tbits) * 1.07;
+  uint64_t resizes = atoi(argv[2]);
+  uint64_t threads = atoi(argv[3]);
+  uint64_t N = (1ULL << (tbits + resizes)) * 1.07;
   //uint64_t N = (1ULL << tbits) * 1.07 * 1.90;
 
   high_resolution_clock::time_point t1 = high_resolution_clock::now();
