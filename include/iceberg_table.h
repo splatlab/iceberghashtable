@@ -11,11 +11,10 @@
 extern "C" {
 #endif
 
-#define LEVEL1_BLOCK_WIDTH 6
-#define LEVEL2_BLOCK_WIDTH 3
-#define LEVEL3_BLOCKS 1024
-#define FPRINT_WIDTH 8
-#define MAX_PARTITIONS 8
+#define LEVEL1_BLOCK_WIDTH 6ULL
+#define LEVEL3_BLOCKS 1024ULL
+#define FPRINT_WIDTH 8ULL
+#define MAX_PARTITIONS 8ULL
 
   typedef uint64_t KeyType;
   typedef uint64_t ValueType;
@@ -28,7 +27,7 @@ extern "C" {
   _Static_assert(sizeof(kv_pair) == 16, "kv_pair needs to be 16B for atomic loads and stores");
 
 #define L1_SLOTS_PER_BLOCK (1 << LEVEL1_BLOCK_WIDTH)
-#define L2_SLOTS_PER_BLOCK (1 << LEVEL2_BLOCK_WIDTH)
+#define L2_SLOTS_PER_BLOCK 8ULL
 
   typedef struct __attribute__ ((__packed__)) iceberg_lv1_block_md {
     uint8_t block_md[L1_SLOTS_PER_BLOCK];
