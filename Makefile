@@ -1,7 +1,11 @@
-ifdef D
+ifdef DEBUG
    OPT= -g
 else
    OPT= -g -flto -Ofast
+endif
+
+ifdef VERBOSE
+   OPT += -DVERBOSE
 endif
 
 ifdef H

@@ -39,21 +39,17 @@ void do_inserts(uint8_t id, uint64_t *keys, uint64_t *values, uint64_t start, ui
       printf("Failed insert\n");
       exit(0);
     }
-    //printf("\rInsert %ld", i);
-    //fflush(stdout);
 #ifdef LATENCY
     high_resolution_clock::time_point t2 = high_resolution_clock::now();
     times.emplace_back(duration_cast<nanoseconds>(t2-t1).count());
 #endif
-    /*
-       uint64_t *val;
-       for(uint64_t j = start; j < i; ++j) {
-       if (iceberg_get_value(&table, keys[j], &val, id) != true) {
-       printf("False negative query key: " "%" PRIu64 "\n", keys[j]);
-       exit(0);
-       }
-       }
-       */
+    //uint64_t val;
+    //for(uint64_t j = start; j <= i; ++j) {
+    //  if (iceberg_get_value(&table, keys[j], &val, id) != true) {
+    //    printf("False negative query key: 0x%" PRIx64 "\n", keys[j]);
+    //    assert(0);
+    //  }
+    //}
   }
 #ifdef LATENCY
   std::ofstream f;
@@ -258,7 +254,7 @@ int main (int argc, char** argv) {
   }
 
   if (!is_benchmark) {
-    printf("Average list size: %f\n", sum_sizes / (double)table.metadata.nblocks);
+    printf("Average list size: %f\n", sum_sizes / (double)LEVEL3_BLOCKS);
     printf("Max list size: %" PRIu64 "\n", max_size);
 
     printf("\nQUERIES\n");
