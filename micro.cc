@@ -244,15 +244,15 @@ int main (int argc, char** argv) {
     printf("Total inserts: %" PRIu64 "\n", tot_balls(&table));
   }
 
-  uint64_t max_size = 0, sum_sizes = 0;
-  for(uint64_t i = 0; i < LEVEL3_BLOCKS; ++i) {
-    max_size = std::max(max_size, table.metadata.lv3_sizes[i]);
-    sum_sizes += table.metadata.lv3_sizes[i];
-  }
+  //uint64_t max_size = 0, sum_sizes = 0;
+  //for(uint64_t i = 0; i < LEVEL3_BLOCKS; ++i) {
+  //  max_size = std::max(max_size, table.metadata.lv3_sizes[i]);
+  //  sum_sizes += table.metadata.lv3_sizes[i];
+  //}
 
   if (!is_benchmark) {
-    printf("Average list size: %f\n", sum_sizes / (double)LEVEL3_BLOCKS);
-    printf("Max list size: %" PRIu64 "\n", max_size);
+    printf("Average list size: %f\n", lv3_balls(&table) / (double)LEVEL3_BLOCKS);
+    //printf("Max list size: %" PRIu64 "\n", max_size);
 
     printf("\nQUERIES\n");
   }

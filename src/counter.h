@@ -18,11 +18,11 @@ static inline void
 counter_add(counter *cntr, uint64_t batch, int64_t count_to_add, uint64_t tid)
 {
   cntr->local_counters[tid].count[batch] += count_to_add;
-  //int64_t local_count = cntr->local_counters[tid].count[batch];
-  //if (llabs(local_count) > THRESHOLD) {
-  //  cntr->local_counters[tid].count[batch] = 0;
-  //  __atomic_fetch_add(&cntr->global[batch], local_count, __ATOMIC_SEQ_CST);
-  //}
+  int64_t local_count = cntr->local_counters[tid].count[batch];
+  if (llabs(local_count) > THRESHOLD) {
+    cntr->local_counters[tid].count[batch] = 0;
+    __atomic_fetch_add(&cntr->global[batch], local_count, __ATOMIC_SEQ_CST);
+  }
 }
 
 /*

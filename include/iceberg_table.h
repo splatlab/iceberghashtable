@@ -32,6 +32,7 @@ extern "C" {
 
   typedef struct iceberg_lv3_list {
     iceberg_lv3_node * head;
+    volatile bool lock;
   } iceberg_lv3_list;
 
   typedef struct iceberg_metadata {
@@ -39,8 +40,6 @@ extern "C" {
     uint64_t log_num_blocks;
     uint64_t log_initial_num_blocks;
 
-    uint64_t *lv3_sizes;
-    uint8_t *lv3_locks;
 #ifdef ENABLE_RESIZE
     volatile bool lock;
     uint64_t resize_threshold;
