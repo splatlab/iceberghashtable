@@ -62,7 +62,7 @@ verbose_print_sketch(uint8_t *sketch, uint64_t sketch_size)
     ((byte)&0x02 ? '1' : '0'), ((byte)&0x01 ? '1' : '0')
 
 static inline void
-verbose_print_mask8(uint8_t mask)
+verbose_print_mask_8(uint8_t mask)
 {
 #ifdef VERBOSE
   printf(BYTE_TO_BINARY_PATTERN, BYTE_TO_BINARY(mask));
@@ -71,7 +71,16 @@ verbose_print_mask8(uint8_t mask)
 }
 
 static inline void
-verbose_print_mask64(uint64_t mask)
+verbose_print_double_mask_8(uint16_t mask)
+{
+#ifdef VERBOSE
+  verbose_print_mask_8(mask);
+  verbose_print_mask_8(mask >> 8);
+#endif
+}
+
+static inline void
+verbose_print_mask_64(uint64_t mask)
 {
 #ifdef VERBOSE
   for (uint64_t i = 0; i < 8; i++) {

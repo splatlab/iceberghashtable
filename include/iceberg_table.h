@@ -25,16 +25,16 @@ typedef struct kv_pair {
 _Static_assert(sizeof(kv_pair) == 16,
                "kv_pair needs to be 16B for atomic loads and stores");
 
-typedef struct iceberg_lv3_node {
-  iceberg_key_t            key;
-  iceberg_value_t          val;
-  struct iceberg_lv3_node *next_node;
-} iceberg_lv3_node;
+typedef struct iceberg_level3_node {
+  iceberg_key_t               key;
+  iceberg_value_t             val;
+  struct iceberg_level3_node *next_node;
+} iceberg_level3_node;
 
-typedef struct iceberg_lv3_list {
-  iceberg_lv3_node *head;
-  volatile bool     lock;
-} iceberg_lv3_list;
+typedef struct iceberg_level3_list {
+  iceberg_level3_node *head;
+  volatile bool        lock;
+} iceberg_level3_list;
 
 typedef struct iceberg_table {
   // Level 1
@@ -46,7 +46,7 @@ typedef struct iceberg_table {
   fingerprint_t *level2_sketch[MAX_PARTITIONS];
 
   // Level 3
-  iceberg_lv3_list level3[LEVEL3_BLOCKS];
+  iceberg_level3_list level3[LEVEL3_BLOCKS];
 
   // Metadata
   uint64_t nblocks;
@@ -58,18 +58,18 @@ typedef struct iceberg_table {
   volatile bool lock;
   uint64_t      resize_threshold;
   uint64_t      num_partitions;
-  uint64_t      lv1_resize_ctr;
-  uint64_t      lv2_resize_ctr;
+  uint64_t      level1_resize_ctr;
+  uint64_t      level2_resize_ctr;
   uint64_t      marker_sizes[MAX_PARTITIONS];
-  uint8_t      *lv1_resize_marker[MAX_PARTITIONS];
-  uint8_t      *lv2_resize_marker[MAX_PARTITIONS];
+  uint8_t      *level1_resize_marker[MAX_PARTITIONS];
+  uint8_t      *level2_resize_marker[MAX_PARTITIONS];
 #endif
 } iceberg_table;
 
-uint64_t lv1_balls(iceberg_table *table);
-uint64_t lv2_balls(iceberg_table *table);
-uint64_t lv3_balls(iceberg_table *table);
-uint64_t tot_balls(iceberg_table *table);
+uint64_t level1_load(iceberg_table *table);
+uint64_t level2_load(iceberg_table *table);
+uint64_t level3_load(iceberg_table *table);
+uint64_t iceberg_load(iceberg_table *table);
 
 void iceberg_init(iceberg_table *table, uint64_t log_slots);
 
@@ -80,12 +80,12 @@ bool iceberg_insert(iceberg_table  *table,
                     iceberg_value_t value,
                     uint64_t        tid);
 
-bool iceberg_remove(iceberg_table *table, iceberg_key_t key, uint64_t tid);
+bool iceberg_delete(iceberg_table *table, iceberg_key_t key, uint64_t tid);
 
-bool iceberg_get_value(iceberg_table   *table,
-                       iceberg_key_t    key,
-                       iceberg_value_t *value,
-                       uint64_t         tid);
+bool iceberg_query(iceberg_table   *table,
+                   iceberg_key_t    key,
+                   iceberg_value_t *value,
+                   uint64_t         tid);
 
 #ifdef ENABLE_RESIZE
 void iceberg_end(iceberg_table *table);

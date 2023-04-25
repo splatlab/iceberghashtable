@@ -54,7 +54,7 @@ do_inserts(uint8_t   id,
 #endif
     // uint64_t val;
     // for(uint64_t j = start; j <= i; ++j) {
-    //   if (iceberg_get_value(&table, keys[j], &val, id) != true) {
+    //   if (iceberg_query(&table, keys[j], &val, id) != true) {
     //     printf("False negative query key: 0x%" PRIx64 "\n", keys[j]);
     //     assert(0);
     //   }
@@ -86,7 +86,7 @@ do_queries(uint8_t   id,
 #ifdef LATENCY
     high_resolution_clock::time_point t1 = high_resolution_clock::now();
 #endif
-    if (iceberg_get_value(&table, keys[i], &val, id) != positive) {
+    if (iceberg_query(&table, keys[i], &val, id) != positive) {
       if (positive)
         printf("False negative query key: %8" PRIu64 " : "
                "%" PRIu64 "\n",
@@ -113,12 +113,12 @@ do_queries(uint8_t   id,
 }
 
 void
-do_removals(uint8_t id, uint64_t *keys, uint64_t start, uint64_t n)
+do_deletions(uint8_t id, uint64_t *keys, uint64_t start, uint64_t n)
 {
   // uint64_t val;
   for (uint64_t i = start; i < start + n; ++i)
-    if (!iceberg_remove(&table, keys[i], id)) {
-      printf("Failed removal\n");
+    if (!iceberg_delete(&table, keys[i], id)) {
+      printf("Failed deletion\n");
       exit(0);
     }
 }
@@ -141,8 +141,8 @@ do_mixed(uint8_t   id,
 {
   uint64_t val;
   for (uint64_t i = start; i < start + n; ++i)
-    if (iceberg_get_value(&table, keys[i], &val, id))
-      iceberg_remove(&table, keys[i], id);
+    if (iceberg_query(&table, keys[i], &val, id))
+      iceberg_delete(&table, keys[i], id);
     else
       iceberg_insert(&table, keys[i], values[i], id);
 }
@@ -272,10 +272,10 @@ main(int argc, char **argv)
     printf("Insertions: %f\n", N / elapsed(t1, t2));
 
     printf("Load factor: %f\n", iceberg_load_factor(&table));
-    printf("Number level 1 inserts: %" PRIu64 "\n", lv1_balls(&table));
-    printf("Number level 2 inserts: %" PRIu64 "\n", lv2_balls(&table));
-    printf("Number level 3 inserts: %" PRIu64 "\n", lv3_balls(&table));
-    printf("Total inserts: %" PRIu64 "\n", tot_balls(&table));
+    printf("Number level 1 inserts: %" PRIu64 "\n", level1_load(&table));
+    printf("Number level 2 inserts: %" PRIu64 "\n", level2_load(&table));
+    printf("Number level 3 inserts: %" PRIu64 "\n", level3_load(&table));
+    printf("Total inserts: %" PRIu64 "\n", iceberg_load(&table));
   }
 
   // uint64_t max_size = 0, sum_sizes = 0;
@@ -286,7 +286,7 @@ main(int argc, char **argv)
 
   if (!is_benchmark) {
     printf("Average list size: %f\n",
-           lv3_balls(&table) / (double)LEVEL3_BLOCKS);
+           level3_load(&table) / (double)LEVEL3_BLOCKS);
     // printf("Max list size: %" PRIu64 "\n", max_size);
 
     printf("\nQUERIES\n");
@@ -335,30 +335,30 @@ main(int argc, char **argv)
     printf("\nREMOVALS\n");
   }
 
-  uint64_t  num_removed = N / 2 / threads * threads;
-  uint64_t *removed     = in_keys;
-  uint64_t *non_removed = in_keys + num_removed;
+  uint64_t  num_deleted = N / 2 / threads * threads;
+  uint64_t *deleted     = in_keys;
+  uint64_t *non_deleted = in_keys + num_deleted;
 
-  shuffle(&removed[0], &removed[num_removed], g);
-  shuffle(&non_removed[0], &non_removed[N - num_removed], g);
+  shuffle(&deleted[0], &deleted[num_deleted], g);
+  shuffle(&non_deleted[0], &non_deleted[N - num_deleted], g);
 
   t1 = high_resolution_clock::now();
 
   for (uint64_t i = 0; i < threads; ++i)
     thread_list.emplace_back(
-      do_removals, i, removed, i * (N / 2 / threads), N / 2 / threads);
+      do_deletions, i, deleted, i * (N / 2 / threads), N / 2 / threads);
   for (uint64_t i = 0; i < threads; ++i)
     thread_list[i].join();
 
   t2                        = high_resolution_clock::now();
-  double removal_throughput = num_removed / elapsed(t1, t2);
+  double deletion_throughput = num_deleted / elapsed(t1, t2);
   if (!is_benchmark) {
-    printf("Removals: %f /sec\n", num_removed / elapsed(t1, t2));
+    printf("Removals: %f /sec\n", num_deleted / elapsed(t1, t2));
     printf("Load factor: %f\n", iceberg_load_factor(&table));
   }
   thread_list.clear();
 
-  shuffle(&removed[0], &removed[num_removed], g);
+  shuffle(&deleted[0], &deleted[num_deleted], g);
 
   t1 = high_resolution_clock::now();
 
@@ -367,31 +367,31 @@ main(int argc, char **argv)
            insert_throughput,
            negative_throughput,
            positive_throughput,
-           removal_throughput);
+           deletion_throughput);
     return 0;
   }
 
   for (uint64_t i = 0; i < threads; ++i)
     thread_list.emplace_back(
-      do_queries, i, removed, i * (N / 2 / threads), N / 2 / threads, false);
+      do_queries, i, deleted, i * (N / 2 / threads), N / 2 / threads, false);
   for (uint64_t i = 0; i < threads; ++i)
     thread_list[i].join();
 
   t2 = high_resolution_clock::now();
-  printf("Negative queries after removals: %f /sec\n",
-         num_removed / elapsed(t1, t2));
+  printf("Negative queries after deletions: %f /sec\n",
+         num_deleted / elapsed(t1, t2));
   thread_list.clear();
 
   t1 = high_resolution_clock::now();
 
   for (uint64_t i = 0; i < threads; ++i)
     thread_list.emplace_back(
-      do_queries, i, non_removed, i * (N / 2 / threads), N / 2 / threads, true);
+      do_queries, i, non_deleted, i * (N / 2 / threads), N / 2 / threads, true);
   for (uint64_t i = 0; i < threads; ++i)
     thread_list[i].join();
 
   t2 = high_resolution_clock::now();
-  printf("Positive queries after removals: %f /sec\n",
-         num_removed / elapsed(t1, t2));
+  printf("Positive queries after deletions: %f /sec\n",
+         num_deleted / elapsed(t1, t2));
   thread_list.clear();
 }
