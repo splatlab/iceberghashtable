@@ -1,17 +1,17 @@
 #pragma once
 
-#include <inttypes.h>
 #include "public_counter.h"
 #include "util.h"
+#include <inttypes.h>
 
 #define NUM_COUNTERS 64
-#define THRESHOLD 1024
+#define THRESHOLD    1024
 
 static inline void
 counter_init(counter *cntr)
 {
   size_t local_counter_bytes = NUM_COUNTERS * sizeof(local_counter);
-  cntr->local_counters = util_mmap(local_counter_bytes);
+  cntr->local_counters       = util_mmap(local_counter_bytes);
 }
 
 static inline void
