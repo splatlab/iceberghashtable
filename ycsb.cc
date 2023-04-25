@@ -252,7 +252,7 @@ void ycsb_load_run_randint(int index_type, int wl, int kt, int ap, int num_threa
                         insert_times.emplace_back(std::chrono::duration_cast<std::chrono::nanoseconds>(t2-t1).count());
 #endif
                     } else if (ops[i] == OP_READ) {
-                        ValueType val;
+                        iceberg_value_t val;
 #ifdef LATENCY
                         std::chrono::high_resolution_clock::time_point t1 = std::chrono::high_resolution_clock::now();
 #endif
