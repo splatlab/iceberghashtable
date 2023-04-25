@@ -21,10 +21,10 @@
 /*#define RESIZE_THRESHOLD 0.85 // For YCSB*/
 #define MAX_PROCS 64
 #define LEVEL1_BLOCK_SIZE 64ULL
+#define LEVEL1_LOG_BLOCK_SIZE 6ULL
 #define LEVEL2_BLOCK_SIZE 8ULL
-#define LEVEL1_BLOCK_WIDTH 6ULL
 
-_Static_assert((1 << LEVEL1_BLOCK_WIDTH) == LEVEL1_BLOCK_SIZE, "Level1 block width inconsistent with level1 block size");
+_Static_assert((1 << LEVEL1_LOG_BLOCK_SIZE) == LEVEL1_BLOCK_SIZE, "Level1 block width inconsistent with level1 block size");
 
 #if __linux__
 #include <linux/version.h>
@@ -208,9 +208,9 @@ static inline void unlock_block(fingerprint_t *sketch)
 
 static inline uint32_t slot_mask_32(uint8_t * metadata, uint8_t fprint) {
   __m256i bcast = _mm256_set1_epi8(fprint);
-  __m256i block = _mm256_loadu_si256((const __m256i *)(metadata));
+  __m256i block = _mm256_maskz_loadu_epi64(1, (const __m256i *)(metadata));
 #if defined __AVX512BW__ && defined __AVX512VL__
-  return _mm256_cmp_epi8_mask(bcast, block, _MM_CMPINT_EQ);
+  return _mm256_mask_cmp_epi8_mask(0xff, bcast, block, _MM_CMPINT_EQ);
 #else
   __m256i cmp = _mm256_cmpeq_epi8(bcast, block);
   return _mm256_movemask_epi8(cmp);
@@ -220,10 +220,10 @@ static inline uint32_t slot_mask_32(uint8_t * metadata, uint8_t fprint) {
 #if defined __AVX512F__ && defined __AVX512BW__
 static inline uint64_t
 slot_mask_64(fingerprint_t *sketch, fingerprint_t fp) {
-  __m512i mask = _mm512_loadu_si512((const __m512i *)(broadcast_mask));
+  __m512i mask = _mm512_load_si512((const __m512i *)(broadcast_mask));
   __m512i bcast = _mm512_set1_epi8(fp);
   bcast = _mm512_or_epi64(bcast, mask);
-  __m512i block = _mm512_loadu_si512((const __m512i *)(sketch));
+  __m512i block = _mm512_load_si512((const __m512i *)(sketch));
   block = _mm512_or_epi64(block, mask);
   return _mm512_cmp_epi8_mask(bcast, block, _MM_CMPINT_EQ);
 }
@@ -240,12 +240,12 @@ static inline uint64_t
 slot_mask_64(fingerprint_t *sketch, fingerprint_t fp) {
   __m256i fprint   = _mm256_set1_epi8(fp);
 
-  __m256i  md1     = _mm256_loadu_si256((const __m256i *)(sketch));
-  __m256i  mask1   = _mm256_loadu_si256((const __m256i *)(broadcast_mask));
+  __m256i  md1     = _mm256_load_si256((const __m256i *)(sketch));
+  __m256i  mask1   = _mm256_load_si256((const __m256i *)(broadcast_mask));
   uint64_t result1 = slot_mask_64_half(fprint, md1, mask1);
 
-  __m256i  md2     = _mm256_loadu_si256((const __m256i *)(&sketch[32]));
-  __m256i  mask2   = _mm256_loadu_si256((const __m256i *)(&broadcast_mask[32]));
+  __m256i  md2     = _mm256_load_si256((const __m256i *)(&sketch[32]));
+  __m256i  mask2   = _mm256_load_si256((const __m256i *)(&broadcast_mask[32]));
   uint64_t result2 = slot_mask_64_half(fprint, md2, mask2);
 
   return ((uint64_t)result2 << 32) | result1;
@@ -311,16 +311,16 @@ static inline uint64_t compute_level1_sketch_bytes(uint64_t blocks)
 
 static inline uint64_t compute_level2_sketch_bytes(uint64_t blocks)
 {
-  return blocks * LEVEL2_BLOCK_SIZE * sizeof(fingerprint_t) + 24;
+  return blocks * LEVEL2_BLOCK_SIZE * sizeof(fingerprint_t);
 }
 
 int iceberg_init(iceberg_table *table, uint64_t log_slots) {
   assert(table);
   memset(table, 0, sizeof(*table));
 
-  uint64_t num_blocks = 1 << (log_slots - LEVEL1_BLOCK_WIDTH);
+  uint64_t num_blocks = 1 << (log_slots - LEVEL1_LOG_BLOCK_SIZE);
   table->metadata.nblocks = num_blocks;
-  table->metadata.log_num_blocks = log_slots - LEVEL1_BLOCK_WIDTH;
+  table->metadata.log_num_blocks = log_slots - LEVEL1_LOG_BLOCK_SIZE;
   table->metadata.log_initial_num_blocks = log2(num_blocks);
   table->metadata.resize_threshold = RESIZE_THRESHOLD * total_capacity(table);
 
@@ -579,9 +579,8 @@ static inline bool
 iceberg_lv2_insert_internal(iceberg_table * table, iceberg_value_t key, iceberg_value_t value, hash *h, partition_block pb, uint8_t thread_id) {
   iceberg_metadata * metadata = &table->metadata;
 
-start: ;
   fingerprint_t *sketch = get_level2_sketch(table, pb);
-  __mmask32 md_mask = slot_mask_32(sketch, 0) & ((1 << LEVEL2_BLOCK_SIZE) - 1);
+  __mmask32 md_mask = slot_mask_32(sketch, 0);
   verbose_print_sketch(sketch, 8);
   verbose_print_mask8(md_mask);
   uint8_t popct = __builtin_popcountll(md_mask);
@@ -589,8 +588,9 @@ start: ;
   if (unlikely(!popct))
     return false;
 
-  uint64_t start = 0;
-  uint64_t slot = word_select(md_mask, start);
+start: ;
+  uint64_t slot = __builtin_ctzll(md_mask);
+  md_mask = md_mask & ~(1ULL << slot);
 
   if(__sync_bool_compare_and_swap(&sketch[slot], 0, 1)) {
     pc_add(&metadata->lv2_balls, 1, thread_id);
@@ -618,13 +618,13 @@ iceberg_lv2_insert(iceberg_table * table, iceberg_value_t key, iceberg_value_t v
   partition_block pb1 = get_block(table, h, LEVEL2_BLOCK1);
   fingerprint_t *sketch1 = get_level2_sketch(table, pb1);
   verbose_print_sketch(sketch1, 8);
-  __mmask32 md_mask1 = slot_mask_32(sketch1, 0) & ((1 << LEVEL2_BLOCK_SIZE) - 1);
+  __mmask32 md_mask1 = slot_mask_32(sketch1, 0);
   verbose_print_mask8(md_mask1);
   uint8_t popct1 = __builtin_popcountll(md_mask1);
 
   partition_block pb2 = get_block(table, h, LEVEL2_BLOCK2);
   fingerprint_t *sketch2 = get_level2_sketch(table, pb2);
-  __mmask32 md_mask2 = slot_mask_32(sketch2, 0) & ((1 << LEVEL2_BLOCK_SIZE) - 1);
+  __mmask32 md_mask2 = slot_mask_32(sketch2, 0);
   verbose_print_sketch(sketch2, 8);
   verbose_print_mask8(md_mask2);
   uint8_t popct2 = __builtin_popcountll(md_mask2);
@@ -678,8 +678,7 @@ iceberg_insert_internal(iceberg_table * table, iceberg_value_t key, iceberg_valu
     return false;
   }
 
-  uint64_t start = 0;
-  uint64_t slot = word_select(md_mask, start);
+  uint64_t slot = __builtin_ctzll(md_mask);
 
   pc_add(&metadata->lv1_balls, 1, thread_id);
   kv_pair *kv = get_level1_kv_pair(table, pb, slot);
@@ -821,7 +820,7 @@ static inline bool iceberg_lv2_remove(iceberg_table * table, iceberg_value_t key
       if (__atomic_load_n(&table->metadata.lv2_resize_marker[pb.partition][pb.block], __ATOMIC_SEQ_CST) == 0) { // not fixed yet
         partition_block old_pb = decode_raw_chunk(table, old_index);
         fingerprint_t *sketch = get_level2_sketch(table, old_pb);
-        __mmask32 md_mask = slot_mask_32(sketch, h->fingerprint) & ((1 << LEVEL2_BLOCK_SIZE) - 1);
+        __mmask32 md_mask = slot_mask_32(sketch, h->fingerprint);
         verbose_print_sketch(sketch, 8);
         verbose_print_mask8(md_mask);
         uint8_t popct = __builtin_popcount(md_mask);
@@ -850,7 +849,7 @@ static inline bool iceberg_lv2_remove(iceberg_table * table, iceberg_value_t key
 #endif
 
     fingerprint_t *sketch = get_level2_sketch(table, pb);
-    __mmask32 md_mask = slot_mask_32(sketch, h->fingerprint) & ((1 << LEVEL2_BLOCK_SIZE) - 1);
+    __mmask32 md_mask = slot_mask_32(sketch, h->fingerprint);
     verbose_print_sketch(sketch, 8);
     verbose_print_mask8(md_mask);
     uint8_t popct = __builtin_popcount(md_mask);
@@ -997,12 +996,12 @@ static inline bool iceberg_lv2_get_value(iceberg_table * table, iceberg_value_t 
       if (__atomic_load_n(&table->metadata.lv2_resize_marker[chunk_pb.partition][chunk_pb.block], __ATOMIC_SEQ_CST) == 0) { // not fixed yet
         partition_block old_pb = decode_raw_block(table, old_index);
         fingerprint_t *sketch = get_level2_sketch(table, old_pb);
-        __mmask32 md_mask = slot_mask_32(sketch, h->fingerprint) & ((1 << LEVEL2_BLOCK_SIZE) - 1);
+        __mmask32 md_mask = slot_mask_32(sketch, h->fingerprint);
         verbose_print_sketch(sketch, 8);
         verbose_print_mask8(md_mask);
 
         while (md_mask != 0) {
-          int slot = __builtin_ctz(md_mask);
+          uint32_t slot = __builtin_ctz(md_mask);
           md_mask = md_mask & ~(1U << slot);
 
           kv_pair *candidate_kv = get_level2_kv_pair(table, old_pb, slot);
@@ -1023,7 +1022,7 @@ static inline bool iceberg_lv2_get_value(iceberg_table * table, iceberg_value_t 
 #endif
 
     fingerprint_t *sketch = get_level2_sketch(table, pb);
-    __mmask32 md_mask = slot_mask_32(sketch, h->fingerprint) & ((1 << LEVEL2_BLOCK_SIZE) - 1);
+    __mmask32 md_mask = slot_mask_32(sketch, h->fingerprint);
     verbose_print_sketch(sketch, 8);
     verbose_print_mask8(md_mask);
 
