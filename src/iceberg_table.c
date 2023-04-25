@@ -437,8 +437,8 @@ static bool iceberg_setup_resize(iceberg_table * table) {
   return true;
 }
 
-static bool iceberg_lv1_move_block(iceberg_table * table, uint64_t bnum, uint8_t thread_id);
-static bool iceberg_lv2_move_block(iceberg_table * table, uint64_t bnum, uint8_t thread_id);
+static bool iceberg_lv1_move_block(iceberg_table * table, uint64_t bnum, uint64_t tid);
+static bool iceberg_lv2_move_block(iceberg_table * table, uint64_t bnum, uint64_t tid);
 
 // finish moving blocks that are left during the last resize.
 void iceberg_end(iceberg_table * table) {
@@ -478,7 +478,7 @@ void iceberg_end(iceberg_table * table) {
 #endif
 
 static inline bool
-iceberg_lv3_insert(iceberg_table * table, iceberg_value_t key, iceberg_value_t value, hash *h, uint8_t thread_id) {
+iceberg_lv3_insert(iceberg_table * table, iceberg_value_t key, iceberg_value_t value, hash *h, uint64_t tid) {
   uint64_t block = get_level3_block(h);
   iceberg_metadata * metadata = &table->metadata;
 
@@ -499,14 +499,14 @@ iceberg_lv3_insert(iceberg_table * table, iceberg_value_t key, iceberg_value_t v
   table->level3[block].head = new_node;
 
   metadata->lv3_sizes[block]++;
-  counter_add(&table->num_items_per_level, LEVEL3, 1, thread_id);
+  counter_add(&table->num_items_per_level, LEVEL3, 1, tid);
   metadata->lv3_locks[block] = 0;
 
   return true;
 }
 
 static inline bool
-iceberg_lv2_insert_internal(iceberg_table * table, iceberg_value_t key, iceberg_value_t value, hash *h, partition_block pb, uint8_t thread_id)
+iceberg_lv2_insert_internal(iceberg_table * table, iceberg_value_t key, iceberg_value_t value, hash *h, partition_block pb, uint64_t tid)
 {
   fingerprint_t *sketch = get_level2_sketch(table, pb);
   __mmask32 md_mask = slot_mask_32(sketch, 0);
@@ -522,7 +522,7 @@ start: ;
   md_mask = md_mask & ~(1ULL << slot);
 
   if(__sync_bool_compare_and_swap(&sketch[slot], 0, 1)) {
-    counter_add(&table->num_items_per_level, LEVEL2, 1, thread_id);
+    counter_add(&table->num_items_per_level, LEVEL2, 1, tid);
     kv_pair *kv = get_level2_kv_pair(table, pb, slot);
     verbose_print_location(2, pb.partition, pb.block, slot, kv);
     atomic_write_128(key, value, kv);
@@ -536,10 +536,10 @@ start: ;
 }
 
 static inline bool
-iceberg_lv2_insert(iceberg_table * table, iceberg_value_t key, iceberg_value_t value, hash *h, uint8_t thread_id)
+iceberg_lv2_insert(iceberg_table * table, iceberg_value_t key, iceberg_value_t value, hash *h, uint64_t tid)
 {
   //if (lv2_balls(table) == (int64_t)(6 * metadata->nblocks)) {
-  //  return iceberg_lv3_insert(table, key, value, h, thread_id);
+  //  return iceberg_lv3_insert(table, key, value, h, tid);
   //}
 
   partition_block pb1 = get_block(table, h, LEVEL2_BLOCK1);
@@ -572,7 +572,7 @@ iceberg_lv2_insert(iceberg_table * table, iceberg_value_t key, iceberg_value_t v
       for (uint8_t i = 0; i < 8; ++i) {
         uint64_t idx = chunk * 8 + i;
         /*printf("LV2 Before: Moving block: %ld load: %f\n", idx, iceberg_block_load(table, idx, 2));*/
-        iceberg_lv2_move_block(table, idx, thread_id);
+        iceberg_lv2_move_block(table, idx, tid);
         /*printf("LV2 After: Moving block: %ld load: %f\n", idx, iceberg_block_load(table, idx, 2));*/
       }
       // set the marker for the dest block
@@ -583,15 +583,15 @@ iceberg_lv2_insert(iceberg_table * table, iceberg_value_t key, iceberg_value_t v
   }
 #endif
 
-  if (iceberg_lv2_insert_internal(table, key, value, h, pb1, thread_id)) {
+  if (iceberg_lv2_insert_internal(table, key, value, h, pb1, tid)) {
     return true;
   }
 
-  return iceberg_lv3_insert(table, key, value, h, thread_id);
+  return iceberg_lv3_insert(table, key, value, h, tid);
 }
 
 static inline bool
-iceberg_insert_internal(iceberg_table * table, iceberg_value_t key, iceberg_value_t value, hash *h, partition_block pb, uint8_t thread_id)
+iceberg_insert_internal(iceberg_table * table, iceberg_value_t key, iceberg_value_t value, hash *h, partition_block pb, uint64_t tid)
 {
   fingerprint_t *sketch = get_level1_sketch(table, pb);
   __mmask64 md_mask = slot_mask_64(sketch, 0);
@@ -605,7 +605,7 @@ iceberg_insert_internal(iceberg_table * table, iceberg_value_t key, iceberg_valu
   }
 
   uint64_t slot = __builtin_ctzll(md_mask);
-  counter_add(&table->num_items_per_level, LEVEL1, 1, thread_id);
+  counter_add(&table->num_items_per_level, LEVEL1, 1, tid);
   kv_pair *kv = get_level1_kv_pair(table, pb, slot);
   verbose_print_location(1, pb.partition, pb.block, slot, kv);
   atomic_write_128(key, value, kv);
@@ -615,10 +615,10 @@ iceberg_insert_internal(iceberg_table * table, iceberg_value_t key, iceberg_valu
 }
 
 static inline bool
-iceberg_get_value_internal(iceberg_table * table, iceberg_value_t key, iceberg_value_t *value, hash *h, uint8_t thread_id);
+iceberg_get_value_internal(iceberg_table * table, iceberg_value_t key, iceberg_value_t *value, hash *h, uint64_t tid);
 
 __attribute__ ((always_inline)) inline bool
-iceberg_insert(iceberg_table * table, iceberg_value_t key, iceberg_value_t value, uint8_t thread_id) {
+iceberg_insert(iceberg_table * table, iceberg_value_t key, iceberg_value_t value, uint64_t tid) {
   verbose_print_operation("INSERT:", key, value);
 
 #ifdef ENABLE_RESIZE
@@ -639,7 +639,7 @@ iceberg_insert(iceberg_table * table, iceberg_value_t key, iceberg_value_t value
       for (uint8_t i = 0; i < 8; ++i) {
         uint64_t idx = chunk * 8 + i;
         /*printf("LV1 Before: Moving block: %ld load: %f\n", idx, iceberg_block_load(table, idx, 1));*/
-        iceberg_lv1_move_block(table, idx, thread_id);
+        iceberg_lv1_move_block(table, idx, tid);
         /*printf("LV1 After: Moving block: %ld load: %f\n", idx, iceberg_block_load(table, idx, 1));*/
       }
       // set the marker for the dest block
@@ -657,15 +657,15 @@ iceberg_insert(iceberg_table * table, iceberg_value_t key, iceberg_value_t value
   iceberg_value_t v;
   verbose_print_operation("INTERNAL QUERY:", key, value);
   bool ret = true;
-  if (unlikely(iceberg_get_value_internal(table, key, &v, &h, thread_id))) {
+  if (unlikely(iceberg_get_value_internal(table, key, &v, &h, tid))) {
     ret = true;
     goto out;
   }
   verbose_end("INTERNAL QUERY", true);
 
-  ret = iceberg_insert_internal(table, key, value, &h, pb, thread_id);
+  ret = iceberg_insert_internal(table, key, value, &h, pb, tid);
   if (!ret) {
-    ret = iceberg_lv2_insert(table, key, value, &h, thread_id);
+    ret = iceberg_lv2_insert(table, key, value, &h, tid);
   }
 
 out:
@@ -675,7 +675,7 @@ out:
   return ret;
 }
 
-static inline bool iceberg_lv3_remove_internal(iceberg_table * table, iceberg_value_t key, hash *h, uint8_t thread_id) {
+static inline bool iceberg_lv3_remove_internal(iceberg_table * table, iceberg_value_t key, hash *h, uint64_t tid) {
   uint64_t block = get_level3_block(h);
 
   iceberg_metadata *metadata = &table->metadata;
@@ -695,7 +695,7 @@ static inline bool iceberg_lv3_remove_internal(iceberg_table * table, iceberg_va
     free(old_head);
 
     metadata->lv3_sizes[block]--;
-    counter_add(&table->num_items_per_level, LEVEL3, -1, thread_id);
+    counter_add(&table->num_items_per_level, LEVEL3, -1, tid);
     metadata->lv3_locks[block] = 0;
 
     return true;
@@ -712,7 +712,7 @@ static inline bool iceberg_lv3_remove_internal(iceberg_table * table, iceberg_va
       free(old_node);
 
       metadata->lv3_sizes[block]--;
-      counter_add(&table->num_items_per_level, LEVEL3, -1, thread_id);
+      counter_add(&table->num_items_per_level, LEVEL3, -1, tid);
       metadata->lv3_locks[block] = 0;
 
       return true;
@@ -725,12 +725,12 @@ static inline bool iceberg_lv3_remove_internal(iceberg_table * table, iceberg_va
   return false;
 }
 
-static inline bool iceberg_lv3_remove(iceberg_table * table, iceberg_value_t key, hash *h, uint8_t thread_id) {
-  return iceberg_lv3_remove_internal(table, key, h, thread_id);
+static inline bool iceberg_lv3_remove(iceberg_table * table, iceberg_value_t key, hash *h, uint64_t tid) {
+  return iceberg_lv3_remove_internal(table, key, h, tid);
 }
 
 static inline bool
-iceberg_lv2_remove(iceberg_table * table, iceberg_value_t key, hash *h, uint8_t thread_id)
+iceberg_lv2_remove(iceberg_table * table, iceberg_value_t key, hash *h, uint64_t tid)
 {
   for(block_type lvl = LEVEL2_BLOCK1; lvl < NUM_LEVELS; ++lvl) {
     partition_block pb = get_block(table, h, lvl);
@@ -759,7 +759,7 @@ iceberg_lv2_remove(iceberg_table * table, iceberg_value_t key, hash *h, uint8_t 
             candidate_kv->key = 0;
             candidate_kv->val = 0;
             sketch[slot] = 0;
-            counter_add(&table->num_items_per_level, LEVEL2, -1, thread_id);
+            counter_add(&table->num_items_per_level, LEVEL2, -1, tid);
             return true;
           }
         }
@@ -788,16 +788,16 @@ iceberg_lv2_remove(iceberg_table * table, iceberg_value_t key, hash *h, uint8_t 
         candidate_kv->key = 0;
         candidate_kv->val = 0;
         sketch[slot] = 0;
-        counter_add(&table->num_items_per_level, LEVEL2, -1, thread_id);
+        counter_add(&table->num_items_per_level, LEVEL2, -1, tid);
         return true;
       }
     }
   }
 
-  return iceberg_lv3_remove(table, key, h, thread_id);
+  return iceberg_lv3_remove(table, key, h, tid);
 }
 
-bool iceberg_remove(iceberg_table * table, iceberg_value_t key, uint8_t thread_id)
+bool iceberg_remove(iceberg_table * table, iceberg_value_t key, uint64_t tid)
 {
   verbose_print_operation("DELETE:", key, 0);
   bool ret = true;
@@ -828,7 +828,7 @@ bool iceberg_remove(iceberg_table * table, iceberg_value_t key, uint8_t thread_i
           verbose_print_location(1, old_pb.partition, old_pb.block, slot, candidate_kv);
           candidate_kv->key = 0;
           candidate_kv->val = 0;
-          counter_add(&table->num_items_per_level, LEVEL1, -1, thread_id);
+          counter_add(&table->num_items_per_level, LEVEL1, -1, tid);
           sketch[slot] = 0;
           verbose_print_sketch(sketch, 64);
           goto out;
@@ -859,14 +859,14 @@ bool iceberg_remove(iceberg_table * table, iceberg_value_t key, uint8_t thread_i
       verbose_print_location(1, pb.partition, pb.block, slot, candidate_kv);
       candidate_kv->key = 0;
       candidate_kv->val = 0;
-      counter_add(&table->num_items_per_level, LEVEL1, -1, thread_id);
+      counter_add(&table->num_items_per_level, LEVEL1, -1, tid);
       sketch[slot] = 0;
       verbose_print_sketch(sketch, 64);
       goto unlock_out;
     }
   }
 
-  ret = iceberg_lv2_remove(table, key, &h, thread_id);
+  ret = iceberg_lv2_remove(table, key, &h, tid);
 
 unlock_out:
   unlock_block(sketch);
@@ -969,7 +969,7 @@ static inline bool iceberg_lv2_get_value(iceberg_table * table, iceberg_value_t 
 }
 
 __attribute__ ((always_inline)) inline bool
-iceberg_get_value_internal(iceberg_table * table, iceberg_value_t key, iceberg_value_t *value, hash *h, uint8_t thread_id) {
+iceberg_get_value_internal(iceberg_table * table, iceberg_value_t key, iceberg_value_t *value, hash *h, uint64_t tid) {
 
 #ifdef ENABLE_RESIZE
   // check if there's an active resize and block isn't fixed yet
@@ -1031,19 +1031,19 @@ iceberg_get_value_internal(iceberg_table * table, iceberg_value_t key, iceberg_v
 
 
 __attribute__ ((always_inline)) inline bool
-iceberg_get_value(iceberg_table * table, iceberg_value_t key, iceberg_value_t *value, uint8_t thread_id) {
+iceberg_get_value(iceberg_table * table, iceberg_value_t key, iceberg_value_t *value, uint64_t tid) {
   verbose_print_operation("QUERY:", key, 0);
   bool ret = true;
 
   hash h = hash_key(table, &key);
-  ret = iceberg_get_value_internal(table, key, value, &h, thread_id);
+  ret = iceberg_get_value_internal(table, key, value, &h, tid);
   verbose_end("QUERY", false);
   return ret;
 }
 
 #ifdef ENABLE_RESIZE
 static inline bool
-iceberg_nuke_key(iceberg_table * table, uint64_t level, uint64_t index, uint64_t slot, uint64_t thread_id)
+iceberg_nuke_key(iceberg_table * table, uint64_t level, uint64_t index, uint64_t slot, uint64_t tid)
 {
   partition_block pb = decode_raw_block(table, index);
 
@@ -1053,21 +1053,21 @@ iceberg_nuke_key(iceberg_table * table, uint64_t level, uint64_t index, uint64_t
     kv->val = 0;
     fingerprint_t *sketch = get_level1_sketch(table, pb);
     sketch[slot] = 0;
-    counter_add(&table->num_items_per_level, LEVEL1, -1, thread_id);
+    counter_add(&table->num_items_per_level, LEVEL1, -1, tid);
   } else if (level == 2) {
     kv_pair *kv = get_level2_kv_pair(table, pb, slot);
     kv->key = 0;
     kv->val = 0;
     fingerprint_t *sketch = get_level2_sketch(table, pb);
     sketch[slot] = 0;
-    counter_add(&table->num_items_per_level, LEVEL2, -1, thread_id);
+    counter_add(&table->num_items_per_level, LEVEL2, -1, tid);
   }
 
   return true;
 }
 
 static bool
-iceberg_lv1_move_block(iceberg_table * table, uint64_t bnum, uint8_t thread_id) {
+iceberg_lv1_move_block(iceberg_table * table, uint64_t bnum, uint64_t tid) {
   // grab a block
   uint64_t bctr = __atomic_fetch_sub(&table->metadata.lv1_resize_ctr, 1, __ATOMIC_SEQ_CST);
   assert(bctr !=  0);
@@ -1085,16 +1085,16 @@ iceberg_lv1_move_block(iceberg_table * table, uint64_t bnum, uint8_t thread_id) 
     // move to new location
     if (h.raw_block[LEVEL1_BLOCK] != bnum) {
       partition_block local_pb = decode_raw_block(table, h.raw_block[LEVEL1_BLOCK]);
-      if (!iceberg_insert_internal(table, kv->key, kv->val, &h, local_pb, thread_id)) {
+      if (!iceberg_insert_internal(table, kv->key, kv->val, &h, local_pb, tid)) {
         printf("Failed insert during resize lv1\n");
         exit(0);
       }
-      if (!iceberg_nuke_key(table, 1, bnum, j, thread_id)) {
+      if (!iceberg_nuke_key(table, 1, bnum, j, tid)) {
         printf("Failed remove during resize lv1. key: %" PRIu64 ", block: %" PRIu64"\n", kv->key, bnum);
         exit(0);
       }
       //iceberg_value_t *val;
-      //if (!iceberg_get_value(table, key, &val, thread_id)) {
+      //if (!iceberg_get_value(table, key, &val, tid)) {
       // printf("Key not found during resize lv1: %ld\n", key);
       //exit(0);
       //}
@@ -1104,7 +1104,7 @@ iceberg_lv1_move_block(iceberg_table * table, uint64_t bnum, uint8_t thread_id) 
   return false;
 }
 
-static bool iceberg_lv2_move_block(iceberg_table * table, uint64_t bnum, uint8_t thread_id) {
+static bool iceberg_lv2_move_block(iceberg_table * table, uint64_t bnum, uint64_t tid) {
   // grab a block
   uint64_t bctr = __atomic_fetch_sub(&table->metadata.lv2_resize_ctr, 1, __ATOMIC_SEQ_CST);
   assert(bctr != 0);
@@ -1122,25 +1122,25 @@ static bool iceberg_lv2_move_block(iceberg_table * table, uint64_t bnum, uint8_t
 
     if ((h.raw_block[LEVEL2_BLOCK1] & mask) == bnum && h.raw_block[LEVEL2_BLOCK1] != bnum) {
       partition_block local_pb = decode_raw_block(table, h.raw_block[LEVEL2_BLOCK1]);
-      if (!iceberg_lv2_insert_internal(table, kv->key, kv->val, &h, local_pb, thread_id)) {
-        if (!iceberg_lv2_insert(table, kv->key, kv->val, &h, thread_id)) {
+      if (!iceberg_lv2_insert_internal(table, kv->key, kv->val, &h, local_pb, tid)) {
+        if (!iceberg_lv2_insert(table, kv->key, kv->val, &h, tid)) {
           printf("Failed insert during resize lv2\n");
           exit(0);
         }
       }
-      if (!iceberg_nuke_key(table, 2, bnum, j, thread_id)) {
+      if (!iceberg_nuke_key(table, 2, bnum, j, tid)) {
         printf("Failed remove during resize lv2\n");
         exit(0);
       }
     } else if ((h.raw_block[LEVEL2_BLOCK2] & mask) == bnum && h.raw_block[LEVEL2_BLOCK2] != bnum) {
       partition_block local_pb = decode_raw_block(table, h.raw_block[LEVEL2_BLOCK2]);
-      if (!iceberg_lv2_insert_internal(table, kv->key, kv->val, &h, local_pb, thread_id)) {
-        if (!iceberg_lv2_insert(table, kv->key, kv->val, &h, thread_id)) {
+      if (!iceberg_lv2_insert_internal(table, kv->key, kv->val, &h, local_pb, tid)) {
+        if (!iceberg_lv2_insert(table, kv->key, kv->val, &h, tid)) {
           printf("Failed insert during resize lv2\n");
           exit(0);
         }
       }
-      if (!iceberg_nuke_key(table, 2, bnum, j, thread_id)) {
+      if (!iceberg_nuke_key(table, 2, bnum, j, tid)) {
         printf("Failed remove during resize lv2\n");
         exit(0);
       }

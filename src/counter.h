@@ -15,7 +15,7 @@ counter_init(counter *cntr)
 }
 
 static inline void
-counter_add(counter *cntr, uint64_t batch, int64_t count_to_add, uint8_t tid)
+counter_add(counter *cntr, uint64_t batch, int64_t count_to_add, uint64_t tid)
 {
   cntr->local_counters[tid].count[batch] += count_to_add;
   //int64_t local_count = cntr->local_counters[tid].count[batch];

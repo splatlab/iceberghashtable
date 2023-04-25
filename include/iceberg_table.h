@@ -80,11 +80,11 @@ extern "C" {
 
   double iceberg_load_factor(iceberg_table * table);
 
-  bool iceberg_insert(iceberg_table * table, iceberg_key_t key, iceberg_value_t value, uint8_t thread_id);
+  bool iceberg_insert(iceberg_table * table, iceberg_key_t key, iceberg_value_t value, uint64_t tid);
 
-  bool iceberg_remove(iceberg_table * table, iceberg_key_t key, uint8_t thread_id);
+  bool iceberg_remove(iceberg_table * table, iceberg_key_t key, uint64_t tid);
 
-  bool iceberg_get_value(iceberg_table * table, iceberg_key_t key, iceberg_value_t *value, uint8_t thread_id);
+  bool iceberg_get_value(iceberg_table * table, iceberg_key_t key, iceberg_value_t *value, uint64_t tid);
 
 #ifdef ENABLE_RESIZE
   void iceberg_end(iceberg_table * table);
