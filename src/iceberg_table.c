@@ -22,7 +22,7 @@
 #define MAX_PROCS 64
 #define LEVEL1_BLOCK_SIZE 64ULL
 #define LEVEL2_BLOCK_SIZE 8ULL
-//#define LEVEL1_BLOCK_WIDTH 6ULL
+#define LEVEL1_BLOCK_WIDTH 6ULL
 
 _Static_assert((1 << LEVEL1_BLOCK_WIDTH) == LEVEL1_BLOCK_SIZE, "Level1 block width inconsistent with level1 block size");
 
@@ -131,7 +131,7 @@ ensure_nonzero_fingerprint(raw_hash *h)
 static inline uint64_t
 truncate_to_current_num_raw_blocks(iceberg_table *table, uint64_t raw_block)
 {
-  return raw_block & ((1 << table->metadata.block_bits) - 1);
+  return raw_block & ((1 << table->metadata.log_num_blocks) - 1);
 }
 
 static inline hash
@@ -168,7 +168,7 @@ decode_raw_internal(uint64_t init_log, uint64_t raw_block)
 static inline partition_block
 decode_raw_block(iceberg_table *table, uint64_t raw_block)
 {
-   return decode_raw_internal(table->metadata.log_init_size, raw_block);
+   return decode_raw_internal(table->metadata.log_initial_num_blocks, raw_block);
 }
 
 static inline partition_block
@@ -186,7 +186,7 @@ get_level3_block(hash *h)
 static inline partition_block
 decode_raw_chunk(iceberg_table *table, uint64_t raw_chunk)
 {
-   return decode_raw_internal(table->metadata.log_init_size - 3, raw_chunk);
+   return decode_raw_internal(table->metadata.log_initial_num_blocks - 3, raw_chunk);
 }
 
 #define LOCK_MASK 1
@@ -287,6 +287,13 @@ get_level1_sketch(iceberg_table *table, partition_block pb)
   return &table->level1_sketch[pb.partition][offset];
 }
 
+static inline fingerprint_t *
+get_level2_sketch(iceberg_table *table, partition_block pb)
+{
+  uint64_t offset = pb.block * LEVEL2_BLOCK_SIZE * sizeof(fingerprint_t);
+  return &table->level2_sketch[pb.partition][offset];
+}
+
 static inline uint64_t compute_level1_bytes(uint64_t blocks)
 {
    return blocks * LEVEL1_BLOCK_SIZE * sizeof(kv_pair);
@@ -302,52 +309,52 @@ static inline uint64_t compute_level1_sketch_bytes(uint64_t blocks)
   return blocks * LEVEL1_BLOCK_SIZE * sizeof(fingerprint_t);
 }
 
+static inline uint64_t compute_level2_sketch_bytes(uint64_t blocks)
+{
+  return blocks * LEVEL2_BLOCK_SIZE * sizeof(fingerprint_t) + 24;
+}
+
 int iceberg_init(iceberg_table *table, uint64_t log_slots) {
+  assert(table);
   memset(table, 0, sizeof(*table));
 
-  uint64_t total_blocks = 1 << (log_slots - LEVEL1_BLOCK_WIDTH);
-  uint64_t level1_bytes = compute_level1_bytes(total_blocks);
-  uint64_t level2_bytes = compute_level2_bytes(total_blocks);
-  uint64_t level1_sketch_bytes = compute_level1_sketch_bytes(total_blocks);
-  uint64_t total_size_in_bytes = level1_bytes + level2_bytes + level1_sketch_bytes + (sizeof(iceberg_lv2_block_md)) * total_blocks;
-
-  assert(table);
-
-  table->level1[0] = (kv_pair *)mmap(NULL, level1_bytes, PROT_READ | PROT_WRITE, MMAP_FLAGS, 0, 0);
-  if (!table->level1[0]) {
-    perror("level1 malloc failed");
-    exit(1);
-  }
-  table->level2[0] = (kv_pair *)mmap(NULL, level2_bytes, PROT_READ | PROT_WRITE, MMAP_FLAGS, 0, 0);
-  if (!table->level2[0]) {
-    perror("level2 malloc failed");
-    exit(1);
-  }
-
-  table->metadata.total_size_in_bytes = total_size_in_bytes;
-  table->metadata.nslots = 1 << log_slots;
-  table->metadata.nblocks = total_blocks;
-  table->metadata.block_bits = log_slots - LEVEL1_BLOCK_WIDTH;
-  table->metadata.init_size = total_blocks;
-  table->metadata.log_init_size = log2(total_blocks);
-  table->metadata.nblocks_parts[0] = total_blocks;
+  uint64_t num_blocks = 1 << (log_slots - LEVEL1_BLOCK_WIDTH);
+  table->metadata.nblocks = num_blocks;
+  table->metadata.log_num_blocks = log_slots - LEVEL1_BLOCK_WIDTH;
+  table->metadata.log_initial_num_blocks = log2(num_blocks);
   table->metadata.resize_threshold = RESIZE_THRESHOLD * total_capacity(table);
 
-  pc_init(&table->metadata.lv1_balls, &table->metadata.lv1_ctr, MAX_PROCS, 1000);
-  pc_init(&table->metadata.lv2_balls, &table->metadata.lv2_ctr, MAX_PROCS, 1000);
-  pc_init(&table->metadata.lv3_balls, &table->metadata.lv3_ctr, MAX_PROCS, 1000);
 
+
+  uint64_t level1_bytes = compute_level1_bytes(num_blocks);
+  table->level1[0] = (kv_pair *)mmap(NULL, level1_bytes, PROT_READ | PROT_WRITE, MMAP_FLAGS, 0, 0);
+  if (!table->level1[0]) {
+    perror("level1 mmap failed");
+    exit(1);
+  }
+  uint64_t level2_bytes = compute_level2_bytes(num_blocks);
+  table->level2[0] = (kv_pair *)mmap(NULL, level2_bytes, PROT_READ | PROT_WRITE, MMAP_FLAGS, 0, 0);
+  if (!table->level2[0]) {
+    perror("level2 mmap failed");
+    exit(1);
+  }
+  uint64_t level1_sketch_bytes = compute_level1_sketch_bytes(num_blocks);
   table->level1_sketch[0] = (fingerprint_t *)mmap(NULL, level1_sketch_bytes, PROT_READ | PROT_WRITE, MMAP_FLAGS, 0, 0);
   if (!table->level1_sketch[0]) {
     perror("level1 sketch mmap failed");
     exit(1);
   }
-  size_t lv2_md_size = sizeof(iceberg_lv2_block_md) * total_blocks + 32;
-  table->metadata.lv2_md[0] = (iceberg_lv2_block_md *)mmap(NULL, lv2_md_size, PROT_READ | PROT_WRITE, MMAP_FLAGS, 0, 0);
-  if (!table->metadata.lv2_md[0]) {
-    perror("lv2_md malloc failed");
+  uint64_t level2_sketch_bytes = compute_level2_sketch_bytes(num_blocks);
+  table->level2_sketch[0] = (fingerprint_t *)mmap(NULL, level2_sketch_bytes, PROT_READ | PROT_WRITE, MMAP_FLAGS, 0, 0);
+  if (!table->level2_sketch[0]) {
+    perror("level2 sketch mmap failed");
     exit(1);
   }
+
+  pc_init(&table->metadata.lv1_balls, &table->metadata.lv1_ctr, MAX_PROCS, 1000);
+  pc_init(&table->metadata.lv2_balls, &table->metadata.lv2_ctr, MAX_PROCS, 1000);
+  pc_init(&table->metadata.lv3_balls, &table->metadata.lv3_ctr, MAX_PROCS, 1000);
+
   table->metadata.lv3_sizes = (uint64_t *)mmap(NULL, sizeof(uint64_t) * LEVEL3_BLOCKS, PROT_READ | PROT_WRITE, MMAP_FLAGS, 0, 0);
   if (!table->metadata.lv3_sizes) {
     perror("lv3_sizes malloc failed");
@@ -360,12 +367,12 @@ int iceberg_init(iceberg_table *table, uint64_t log_slots) {
   }
 
 #ifdef ENABLE_RESIZE
-  table->metadata.resize_cnt = 0;
+  table->metadata.num_partitions = 0;
   table->metadata.lv1_resize_ctr = 0;
   table->metadata.lv2_resize_ctr = 0;
 
   // create one marker for 8 blocks.
-  size_t resize_marker_size = sizeof(uint8_t) * total_blocks / 8;
+  size_t resize_marker_size = sizeof(uint8_t) * num_blocks / 8;
   table->metadata.lv1_resize_marker[0] = (uint8_t *)mmap(NULL, resize_marker_size, PROT_READ | PROT_WRITE, MMAP_FLAGS, 0, 0);
   if (!table->metadata.lv1_resize_marker[0]) {
     perror("level1 resize ctr malloc failed");
@@ -424,75 +431,71 @@ static bool iceberg_setup_resize(iceberg_table * table) {
 
   // compute new sizes
   uint64_t cur_blocks = table->metadata.nblocks;
-  uint64_t resize_cnt = table->metadata.resize_cnt + 1;
+  uint64_t new_partition = table->metadata.num_partitions + 1;
 
   // Allocate new table and metadata
   // alloc level1
   size_t level1_bytes = compute_level1_bytes(cur_blocks);
-  table->level1[resize_cnt] = (kv_pair *)mmap(NULL, level1_bytes, PROT_READ | PROT_WRITE, MMAP_FLAGS, 0, 0);
-  if (table->level1[resize_cnt] == (void *)-1) {
+  table->level1[new_partition] = (kv_pair *)mmap(NULL, level1_bytes, PROT_READ | PROT_WRITE, MMAP_FLAGS, 0, 0);
+  if (table->level1[new_partition] == (void *)-1) {
     perror("level1 resize failed");
     exit(1);
   }
 
   // alloc level2
   size_t level2_bytes = compute_level2_bytes(cur_blocks);
-  table->level2[resize_cnt] = (kv_pair *)mmap(NULL, level2_bytes, PROT_READ | PROT_WRITE, MMAP_FLAGS, 0, 0);
-  if (table->level2[resize_cnt] == (void *)-1) {
+  table->level2[new_partition] = (kv_pair *)mmap(NULL, level2_bytes, PROT_READ | PROT_WRITE, MMAP_FLAGS, 0, 0);
+  if (table->level2[new_partition] == (void *)-1) {
     perror("level2 resize failed");
     exit(1);
   }
 
   // alloc level1 metadata
   size_t level1_sketch_bytes = compute_level1_sketch_bytes(cur_blocks);
-  table->level1_sketch[resize_cnt] = (fingerprint_t *)mmap(NULL, level1_sketch_bytes, PROT_READ | PROT_WRITE, MMAP_FLAGS, 0, 0);
-  if (!table->level1_sketch[resize_cnt]) {
+  table->level1_sketch[new_partition] = (fingerprint_t *)mmap(NULL, level1_sketch_bytes, PROT_READ | PROT_WRITE, MMAP_FLAGS, 0, 0);
+  if (!table->level1_sketch[new_partition]) {
     perror("level1 sketch mmap failed");
     exit(1);
   }
 
   // alloc level2 metadata
-  size_t lv2_md_size = sizeof(iceberg_lv2_block_md) * cur_blocks + 32;
-  table->metadata.lv2_md[resize_cnt] = (iceberg_lv2_block_md *)mmap(NULL, lv2_md_size, PROT_READ | PROT_WRITE, MMAP_FLAGS, 0, 0);
-  if (table->metadata.lv2_md[resize_cnt] == (void *)-1) {
-    perror("lv2_md resize failed");
+  size_t level2_sketch_bytes = compute_level2_sketch_bytes(cur_blocks);
+  table->level2_sketch[new_partition] = (fingerprint_t *)mmap(NULL, level2_sketch_bytes, PROT_READ | PROT_WRITE, MMAP_FLAGS, 0, 0);
+  if (!table->level2_sketch[new_partition]) {
+    perror("level2 sketch mmap failed");
     exit(1);
   }
 
   // alloc resize markers
   // resize_marker_size
   size_t resize_marker_size = sizeof(uint8_t) * cur_blocks / 8;
-  table->metadata.lv1_resize_marker[resize_cnt] = (uint8_t *)mmap(NULL, resize_marker_size, PROT_READ | PROT_WRITE, MMAP_FLAGS, 0, 0);
-  if (table->metadata.lv1_resize_marker[resize_cnt] == (void *)-1) {
+  table->metadata.lv1_resize_marker[new_partition] = (uint8_t *)mmap(NULL, resize_marker_size, PROT_READ | PROT_WRITE, MMAP_FLAGS, 0, 0);
+  if (table->metadata.lv1_resize_marker[new_partition] == (void *)-1) {
     perror("level1 resize failed");
     exit(1);
   }
 
-  table->metadata.lv2_resize_marker[resize_cnt] = (uint8_t *)mmap(NULL, resize_marker_size, PROT_READ | PROT_WRITE, MMAP_FLAGS, 0, 0);
-  if (table->metadata.lv2_resize_marker[resize_cnt] == (void *)-1) {
+  table->metadata.lv2_resize_marker[new_partition] = (uint8_t *)mmap(NULL, resize_marker_size, PROT_READ | PROT_WRITE, MMAP_FLAGS, 0, 0);
+  if (table->metadata.lv2_resize_marker[new_partition] == (void *)-1) {
     perror("level1 resize failed");
     exit(1);
   }
 
-  table->metadata.marker_sizes[resize_cnt] = resize_marker_size;
+  table->metadata.marker_sizes[new_partition] = resize_marker_size;
   // resetting the resize markers.
-  for (uint64_t i = 0;  i <= resize_cnt; ++i) {
+  for (uint64_t i = 0;  i <= new_partition; ++i) {
     memset(table->metadata.lv1_resize_marker[i], 0, table->metadata.marker_sizes[i]);
     memset(table->metadata.lv2_resize_marker[i], 0, table->metadata.marker_sizes[i]);
   }
 
   uint64_t total_blocks = table->metadata.nblocks * 2;
-  uint64_t total_size_in_bytes = level1_bytes + level2_bytes + level1_sketch_bytes + (sizeof(iceberg_lv2_block_md)) * total_blocks;
 
   // increment resize cnt
-  table->metadata.resize_cnt += 1;
+  table->metadata.num_partitions += 1;
 
   // update metadata
-  table->metadata.total_size_in_bytes = total_size_in_bytes;
-  table->metadata.nslots *= 2;
   table->metadata.nblocks = total_blocks;
-  table->metadata.block_bits += 1;
-  table->metadata.nblocks_parts[resize_cnt] = total_blocks;
+  table->metadata.log_num_blocks += 1;
   table->metadata.resize_threshold = RESIZE_THRESHOLD * total_capacity(table);
 
   // reset the block ctr
@@ -577,8 +580,9 @@ iceberg_lv2_insert_internal(iceberg_table * table, iceberg_value_t key, iceberg_
   iceberg_metadata * metadata = &table->metadata;
 
 start: ;
-  __mmask32 md_mask = slot_mask_32(metadata->lv2_md[pb.partition][pb.block].block_md, 0) & ((1 << LEVEL2_BLOCK_SIZE) - 1);
-  verbose_print_sketch(metadata->lv2_md[pb.partition][pb.block].block_md, 8);
+  fingerprint_t *sketch = get_level2_sketch(table, pb);
+  __mmask32 md_mask = slot_mask_32(sketch, 0) & ((1 << LEVEL2_BLOCK_SIZE) - 1);
+  verbose_print_sketch(sketch, 8);
   verbose_print_mask8(md_mask);
   uint8_t popct = __builtin_popcountll(md_mask);
 
@@ -588,13 +592,13 @@ start: ;
   uint64_t start = 0;
   uint64_t slot = word_select(md_mask, start);
 
-  if(__sync_bool_compare_and_swap(metadata->lv2_md[pb.partition][pb.block].block_md + slot, 0, 1)) {
+  if(__sync_bool_compare_and_swap(&sketch[slot], 0, 1)) {
     pc_add(&metadata->lv2_balls, 1, thread_id);
     kv_pair *kv = get_level2_kv_pair(table, pb, slot);
     verbose_print_location(2, pb.partition, pb.block, slot, kv);
     atomic_write_128(key, value, kv);
-    metadata->lv2_md[pb.partition][pb.block].block_md[slot] = h->fingerprint;
-    verbose_print_sketch(metadata->lv2_md[pb.partition][pb.block].block_md, 8);
+    sketch[slot] = h->fingerprint;
+    verbose_print_sketch(sketch, 8);
     return true;
   }
   goto start;
@@ -612,16 +616,17 @@ iceberg_lv2_insert(iceberg_table * table, iceberg_value_t key, iceberg_value_t v
   }
 
   partition_block pb1 = get_block(table, h, LEVEL2_BLOCK1);
-  partition_block pb2 = get_block(table, h, LEVEL2_BLOCK2);
-
-  __mmask32 md_mask1 = slot_mask_32(metadata->lv2_md[pb1.partition][pb1.block].block_md, 0) & ((1 << LEVEL2_BLOCK_SIZE) - 1);
-  __mmask32 md_mask2 = slot_mask_32(metadata->lv2_md[pb2.partition][pb2.block].block_md, 0) & ((1 << LEVEL2_BLOCK_SIZE) - 1);
-    verbose_print_sketch(metadata->lv2_md[pb1.partition][pb1.block].block_md, 8);
-    verbose_print_mask8(md_mask1);
-    verbose_print_sketch(metadata->lv2_md[pb2.partition][pb2.block].block_md, 8);
-    verbose_print_mask8(md_mask2);
-
+  fingerprint_t *sketch1 = get_level2_sketch(table, pb1);
+  verbose_print_sketch(sketch1, 8);
+  __mmask32 md_mask1 = slot_mask_32(sketch1, 0) & ((1 << LEVEL2_BLOCK_SIZE) - 1);
+  verbose_print_mask8(md_mask1);
   uint8_t popct1 = __builtin_popcountll(md_mask1);
+
+  partition_block pb2 = get_block(table, h, LEVEL2_BLOCK2);
+  fingerprint_t *sketch2 = get_level2_sketch(table, pb2);
+  __mmask32 md_mask2 = slot_mask_32(sketch2, 0) & ((1 << LEVEL2_BLOCK_SIZE) - 1);
+  verbose_print_sketch(sketch2, 8);
+  verbose_print_mask8(md_mask2);
   uint8_t popct2 = __builtin_popcountll(md_mask2);
 
   uint64_t raw_block = h->raw_block[LEVEL2_BLOCK1];
@@ -809,14 +814,15 @@ static inline bool iceberg_lv2_remove(iceberg_table * table, iceberg_value_t key
 #ifdef ENABLE_RESIZE
     // check if there's an active resize and block isn't fixed yet
     if (unlikely(is_lv2_resize_active(table) && h->raw_block[lvl] >= (table->metadata.nblocks >> 1))) {
-      uint64_t mask = ~(1ULL << (table->metadata.block_bits - 1));
+      uint64_t mask = ~(1ULL << (table->metadata.log_num_blocks - 1));
       uint64_t old_index = h->raw_block[lvl] & mask;
       uint64_t chunk = old_index / 8;
       partition_block pb = decode_raw_chunk(table, chunk);
       if (__atomic_load_n(&table->metadata.lv2_resize_marker[pb.partition][pb.block], __ATOMIC_SEQ_CST) == 0) { // not fixed yet
         partition_block old_pb = decode_raw_chunk(table, old_index);
-        __mmask32 md_mask = slot_mask_32(metadata->lv2_md[old_pb.partition][old_pb.block].block_md, h->fingerprint) & ((1 << LEVEL2_BLOCK_SIZE) - 1);
-        verbose_print_sketch(metadata->lv2_md[old_pb.partition][old_pb.block].block_md, 8);
+        fingerprint_t *sketch = get_level2_sketch(table, old_pb);
+        __mmask32 md_mask = slot_mask_32(sketch, h->fingerprint) & ((1 << LEVEL2_BLOCK_SIZE) - 1);
+        verbose_print_sketch(sketch, 8);
         verbose_print_mask8(md_mask);
         uint8_t popct = __builtin_popcount(md_mask);
 
@@ -828,7 +834,7 @@ static inline bool iceberg_lv2_remove(iceberg_table * table, iceberg_value_t key
             verbose_print_location(2, old_pb.partition, old_pb.block, slot, candidate_kv);
             candidate_kv->key = 0;
             candidate_kv->val = 0;
-            metadata->lv2_md[old_pb.partition][old_pb.block].block_md[slot] = 0;
+            sketch[slot] = 0;
             pc_add(&metadata->lv2_balls, -1, thread_id);
             return true;
           }
@@ -843,8 +849,9 @@ static inline bool iceberg_lv2_remove(iceberg_table * table, iceberg_value_t key
     }
 #endif
 
-    __mmask32 md_mask = slot_mask_32(metadata->lv2_md[pb.partition][pb.block].block_md, h->fingerprint) & ((1 << LEVEL2_BLOCK_SIZE) - 1);
-    verbose_print_sketch(metadata->lv2_md[pb.partition][pb.block].block_md, 8);
+    fingerprint_t *sketch = get_level2_sketch(table, pb);
+    __mmask32 md_mask = slot_mask_32(sketch, h->fingerprint) & ((1 << LEVEL2_BLOCK_SIZE) - 1);
+    verbose_print_sketch(sketch, 8);
     verbose_print_mask8(md_mask);
     uint8_t popct = __builtin_popcount(md_mask);
 
@@ -856,7 +863,7 @@ static inline bool iceberg_lv2_remove(iceberg_table * table, iceberg_value_t key
         verbose_print_location(2, pb.partition, pb.block, slot, candidate_kv);
         candidate_kv->key = 0;
         candidate_kv->val = 0;
-        metadata->lv2_md[pb.partition][pb.block].block_md[slot] = 0;
+        sketch[slot] = 0;
         pc_add(&metadata->lv2_balls, -1, thread_id);
         return true;
       }
@@ -877,7 +884,7 @@ bool iceberg_remove(iceberg_table * table, iceberg_value_t key, uint8_t thread_i
 #ifdef ENABLE_RESIZE
   // check if there's an active resize and block isn't fixed yet
   if (unlikely(is_lv1_resize_active(table) && h.raw_block[LEVEL1] >= (table->metadata.nblocks >> 1))) {
-    uint64_t mask = ~(1ULL << (table->metadata.block_bits - 1));
+    uint64_t mask = ~(1ULL << (table->metadata.log_num_blocks - 1));
     uint64_t old_index = h.raw_block[LEVEL1] & mask;
     uint64_t chunk = old_index / 8;
     partition_block chunk_pb = decode_raw_chunk(table, chunk);
@@ -977,23 +984,21 @@ static inline bool iceberg_lv3_get_value(iceberg_table * table, iceberg_value_t 
 }
 
 static inline bool iceberg_lv2_get_value(iceberg_table * table, iceberg_value_t key, iceberg_value_t *value, hash *h) {
-
-  iceberg_metadata * metadata = &table->metadata;
-
   for(level lvl = LEVEL2_BLOCK1; lvl < NUM_LEVELS; ++lvl) {
     partition_block pb = get_block(table, h, lvl);
 
 #ifdef ENABLE_RESIZE
     // check if there's an active resize and block isn't fixed yet
     if (unlikely(is_lv2_resize_active(table) && h->raw_block[lvl] >= (table->metadata.nblocks >> 1))) {
-      uint64_t mask = ~(1ULL << (table->metadata.block_bits - 1));
+      uint64_t mask = ~(1ULL << (table->metadata.log_num_blocks - 1));
       uint64_t old_index = h->raw_block[lvl] & mask;
       uint64_t chunk = old_index / 8;
       partition_block chunk_pb = decode_raw_chunk(table, chunk);
       if (__atomic_load_n(&table->metadata.lv2_resize_marker[chunk_pb.partition][chunk_pb.block], __ATOMIC_SEQ_CST) == 0) { // not fixed yet
         partition_block old_pb = decode_raw_block(table, old_index);
-        __mmask32 md_mask = slot_mask_32(metadata->lv2_md[old_pb.partition][old_pb.block].block_md, h->fingerprint) & ((1 << LEVEL2_BLOCK_SIZE) - 1);
-        verbose_print_sketch(metadata->lv2_md[old_pb.partition][old_pb.block].block_md, 8);
+        fingerprint_t *sketch = get_level2_sketch(table, old_pb);
+        __mmask32 md_mask = slot_mask_32(sketch, h->fingerprint) & ((1 << LEVEL2_BLOCK_SIZE) - 1);
+        verbose_print_sketch(sketch, 8);
         verbose_print_mask8(md_mask);
 
         while (md_mask != 0) {
@@ -1017,10 +1022,9 @@ static inline bool iceberg_lv2_get_value(iceberg_table * table, iceberg_value_t 
     }
 #endif
 
-    __mmask32 md_mask =
-      slot_mask_32(metadata->lv2_md[pb.partition][pb.block].block_md,
-          h->fingerprint) & ((1 << LEVEL2_BLOCK_SIZE) - 1);
-    verbose_print_sketch(metadata->lv2_md[pb.partition][pb.block].block_md, 8);
+    fingerprint_t *sketch = get_level2_sketch(table, pb);
+    __mmask32 md_mask = slot_mask_32(sketch, h->fingerprint) & ((1 << LEVEL2_BLOCK_SIZE) - 1);
+    verbose_print_sketch(sketch, 8);
     verbose_print_mask8(md_mask);
 
     while (md_mask != 0) {
@@ -1046,7 +1050,7 @@ iceberg_get_value_internal(iceberg_table * table, iceberg_value_t key, iceberg_v
 #ifdef ENABLE_RESIZE
   // check if there's an active resize and block isn't fixed yet
   if (unlikely(is_lv1_resize_active(table) && h->raw_block[LEVEL1] >= (table->metadata.nblocks >> 1))) {
-    uint64_t mask = ~(1ULL << (table->metadata.block_bits - 1));
+    uint64_t mask = ~(1ULL << (table->metadata.log_num_blocks - 1));
     uint64_t old_index = h->raw_block[LEVEL1] & mask;
     uint64_t chunk = old_index / 8;
     partition_block chunk_pb = decode_raw_chunk(table, chunk);
@@ -1129,7 +1133,8 @@ static bool iceberg_nuke_key(iceberg_table * table, uint64_t level, uint64_t ind
     kv_pair *kv = get_level2_kv_pair(table, pb, slot);
     kv->key = 0;
     kv->val = 0;
-    metadata->lv2_md[pb.partition][pb.block].block_md[slot] = 0;
+    fingerprint_t *sketch = get_level2_sketch(table, pb);
+    sketch[slot] = 0;
     pc_add(&metadata->lv2_balls, -1, thread_id);
   }
 
@@ -1180,7 +1185,7 @@ static bool iceberg_lv2_move_block(iceberg_table * table, uint64_t bnum, uint8_t
   assert(bctr != 0);
 
   partition_block pb = decode_raw_block(table, bnum);
-  uint64_t mask = ~(1ULL << (table->metadata.block_bits - 1));
+  uint64_t mask = ~(1ULL << (table->metadata.log_num_blocks - 1));
   // relocate items in level2
   for (uint64_t j = 0; j < LEVEL2_BLOCK_SIZE; ++j) {
     kv_pair *kv = get_level2_kv_pair(table, pb, j);
