@@ -4,7 +4,7 @@
 #include <inttypes.h>
 #include <stdbool.h>
 #include <stddef.h>
-#include "lock.h"
+#include "public_counter.h"
 
 #ifdef __cplusplus
 #define __restrict__
@@ -17,7 +17,6 @@ extern "C" {
   typedef uint64_t iceberg_key_t;
   typedef uint64_t iceberg_value_t;
   typedef uint8_t fingerprint_t;
-
   typedef struct kv_pair {
     iceberg_key_t key;
     iceberg_value_t val;
@@ -40,16 +39,10 @@ extern "C" {
     uint64_t log_num_blocks;
     uint64_t log_initial_num_blocks;
 
-    int64_t lv1_ctr;
-    int64_t lv2_ctr;
-    int64_t lv3_ctr;
-    pc_t lv1_balls;
-    pc_t lv2_balls;
-    pc_t lv3_balls;
     uint64_t *lv3_sizes;
     uint8_t *lv3_locks;
 #ifdef ENABLE_RESIZE
-    volatile int lock;
+    volatile bool lock;
     uint64_t resize_threshold;
     uint64_t num_partitions;
     uint64_t marker_sizes[MAX_PARTITIONS];
@@ -62,11 +55,20 @@ extern "C" {
 
   typedef struct iceberg_table {
     iceberg_metadata metadata;
-    fingerprint_t *level1_sketch[MAX_PARTITIONS];
-    fingerprint_t *level2_sketch[MAX_PARTITIONS];
+
+    // Level 1
     kv_pair *level1[MAX_PARTITIONS];
+    fingerprint_t *level1_sketch[MAX_PARTITIONS];
+
+    // Level2
     kv_pair *level2[MAX_PARTITIONS];
+    fingerprint_t *level2_sketch[MAX_PARTITIONS];
+
+    // Level 3
     iceberg_lv3_list level3[LEVEL3_BLOCKS];
+
+    // Metadata
+    counter num_items_per_level;
   } iceberg_table;
 
   uint64_t lv1_balls(iceberg_table * table);
@@ -74,7 +76,7 @@ extern "C" {
   uint64_t lv3_balls(iceberg_table * table);
   uint64_t tot_balls(iceberg_table * table);
 
-  int iceberg_init(iceberg_table *table, uint64_t log_slots);
+  void iceberg_init(iceberg_table *table, uint64_t log_slots);
 
   double iceberg_load_factor(iceberg_table * table);
 

@@ -35,10 +35,18 @@ CPP = clang++
 CFLAGS = $(OPT) -Wall -march=native -pthread -Werror -Wfatal-errors $(HUGE) -DXXH_INLINE_ALL
 CPPFLAGS = $(OPT) -Wall -march=native -pthread -Werror -Wfatal-errors $(HUGE) -std=c++11
 INCLUDE = -I ./include -I ./src -I ./xxhash
-SOURCES = src/iceberg_table.c src/hashutil.c src/partitioned_counter.c src/lock.c
+SOURCES = src/iceberg_table.c
 OBJECTS = $(subst src/,obj/,$(subst .c,.o,$(SOURCES)))
 
-all: micro ycsb
+all: depend micro ycsb
+
+depend: .depend
+
+.depend: $(SOURCES)
+	rm -f "$@"
+	$(CC) $(CFLAGS) $(INCLUDE) -MM $^ -MF "$@"
+
+include .depend
 
 obj/%.o: src/%.c
 	@ mkdir -p obj
