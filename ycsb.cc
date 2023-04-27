@@ -228,7 +228,9 @@ ycsb_load_run_randint(int                    index_type,
       for (int i = 0; i < num_thread; i++)
         thread_group[i].join();
 
+#ifdef ENABLE_RESIZE
       iceberg_end(&hashtable);
+#endif
       auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
         std::chrono::system_clock::now() - starttime);
       printf("Throughput: load, %f ,ops/us\n",

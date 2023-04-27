@@ -208,11 +208,13 @@ get_level3_block(hash *h)
   return h->raw_block[LEVEL1_BLOCK] % LEVEL3_BLOCKS;
 }
 
+#ifdef ENABLE_RESIZE
 static inline partition_block
 decode_raw_chunk(iceberg_table *table, uint64_t raw_chunk)
 {
   return decode_raw_internal(table->log_initial_num_blocks - 3, raw_chunk);
 }
+#endif
 
 #define LOCK_MASK   1
 #define UNLOCK_MASK ~1
@@ -444,11 +446,12 @@ is_resize_active(iceberg_table *table)
 {
   return level2_resize_active(table) || level1_resize_active(table);
 }
+#endif
 
 static void
 maybe_create_new_partition(iceberg_table *table)
 {
-#  ifdef ENABLE_RESIZE
+#ifdef ENABLE_RESIZE
   if (likely(!needs_resize(table))) {
     return;
   }
@@ -502,6 +505,7 @@ maybe_create_new_partition(iceberg_table *table)
 #  endif
 }
 
+#ifdef ENABLE_RESIZE
 static bool level1_move_block(iceberg_table *table,
                               uint64_t       bnum,
                               uint64_t       tid);
@@ -620,6 +624,7 @@ start:;
   return false;
 }
 
+#ifdef ENABLE_RESIZE
 static inline bool
 level2_insert_internal(iceberg_table  *table,
                        iceberg_key_t   key,
@@ -637,6 +642,7 @@ level2_insert_internal(iceberg_table  *table,
   return level2_insert_internal_with_mask(
     table, key, value, h, pb, sketch, match_mask, popcnt, tid);
 }
+#endif
 
 static inline bool
 level2_insert(iceberg_table  *table,
@@ -982,6 +988,7 @@ iceberg_delete(iceberg_table *table, iceberg_key_t key, uint64_t tid)
 
 unlock_out:
   unlock_block(sketch);
+  goto out;
 out:
   verbose_end("DELETE", false);
   return ret;
