@@ -413,7 +413,6 @@ iceberg_init(iceberg_table *table, uint64_t log_slots)
   table->nblocks                = num_blocks;
   table->log_num_blocks         = log_slots - LEVEL1_LOG_BLOCK_SIZE;
   table->log_initial_num_blocks = log2(num_blocks);
-  table->resize_threshold       = RESIZE_THRESHOLD * capacity(table);
 
   iceberg_allocate(table, 0, num_blocks);
 
@@ -423,6 +422,7 @@ iceberg_init(iceberg_table *table, uint64_t log_slots)
   table->num_partitions    = 0;
   table->level1_resize_ctr = 0;
   table->level2_resize_ctr = 0;
+  table->resize_threshold  = RESIZE_THRESHOLD * capacity(table);
 #endif
 }
 
@@ -582,7 +582,7 @@ level3_insert(iceberg_table  *table,
   new_node->val             = value;
   new_node->next_node       = table->level3[block].head;
   table->level3[block].head = new_node;
-  counter_add(&table->num_items_per_level, LEVEL3, 1, tid);
+  counter_increment(&table->num_items_per_level, LEVEL3, tid);
   level3_unlock_block(table, block);
   return true;
 }
@@ -607,7 +607,7 @@ start:;
   match_mask    = match_mask & ~(1ULL << slot);
 
   if (__sync_bool_compare_and_swap(&sketch[slot], 0, 1)) {
-    counter_add(&table->num_items_per_level, LEVEL2, 1, tid);
+    counter_increment(&table->num_items_per_level, LEVEL2, tid);
     kv_pair *kv = get_level2_kv_pair(table, pb, slot);
     verbose_print_location(2, pb.partition, pb.block, slot, kv);
     atomic_write_128(key, value, kv);
@@ -722,7 +722,7 @@ level1_insert_internal(iceberg_table  *table,
   }
 
   uint64_t slot = __builtin_ctzll(match_mask);
-  counter_add(&table->num_items_per_level, LEVEL1, 1, tid);
+  counter_increment(&table->num_items_per_level, LEVEL1, tid);
   kv_pair *kv = get_level1_kv_pair(table, pb, slot);
   verbose_print_location(1, pb.partition, pb.block, slot, kv);
   atomic_write_128(key, value, kv);
@@ -799,7 +799,7 @@ out:
   return ret;
 }
 
-__attribute__((unused)) static inline bool
+static bool
 level3_delete(iceberg_table *table, iceberg_key_t key, hash *h, uint64_t tid)
 {
   uint64_t block = get_level3_block(h);
@@ -817,7 +817,7 @@ level3_delete(iceberg_table *table, iceberg_key_t key, hash *h, uint64_t tid)
       iceberg_level3_node *dead_node = *node;
       *node                          = (*node)->next_node;
       free(dead_node);
-      counter_add(&table->num_items_per_level, LEVEL3, -1, tid);
+      counter_decrement(&table->num_items_per_level, LEVEL3, tid);
       ret = true;
       goto unlock_out;
     }
@@ -829,7 +829,7 @@ unlock_out:
   return ret;
 }
 
-__attribute__((unused)) static inline bool
+static inline bool
 level2_delete(iceberg_table *table, iceberg_key_t key, hash *h, uint64_t tid)
 {
   for (block_type lvl = LEVEL2_BLOCK1; lvl < NUM_LEVELS; ++lvl) {
@@ -862,7 +862,7 @@ level2_delete(iceberg_table *table, iceberg_key_t key, hash *h, uint64_t tid)
             candidate_kv->key = 0;
             candidate_kv->val = 0;
             sketch[slot]      = 0;
-            counter_add(&table->num_items_per_level, LEVEL2, -1, tid);
+            counter_decrement(&table->num_items_per_level, LEVEL2, tid);
             return true;
           }
         }
@@ -893,7 +893,7 @@ level2_delete(iceberg_table *table, iceberg_key_t key, hash *h, uint64_t tid)
         candidate_kv->key = 0;
         candidate_kv->val = 0;
         sketch[slot]      = 0;
-        counter_add(&table->num_items_per_level, LEVEL2, -1, tid);
+        counter_decrement(&table->num_items_per_level, LEVEL2, tid);
         return true;
       }
     }
@@ -938,7 +938,7 @@ iceberg_delete(iceberg_table *table, iceberg_key_t key, uint64_t tid)
             1, old_pb.partition, old_pb.block, slot, candidate_kv);
           candidate_kv->key = 0;
           candidate_kv->val = 0;
-          counter_add(&table->num_items_per_level, LEVEL1, -1, tid);
+          counter_decrement(&table->num_items_per_level, LEVEL1, tid);
           sketch[slot] = 0;
           verbose_print_sketch(sketch, 64);
           goto out;
@@ -971,7 +971,7 @@ iceberg_delete(iceberg_table *table, iceberg_key_t key, uint64_t tid)
       verbose_print_location(1, pb.partition, pb.block, slot, candidate_kv);
       candidate_kv->key = 0;
       candidate_kv->val = 0;
-      counter_add(&table->num_items_per_level, LEVEL1, -1, tid);
+      counter_decrement(&table->num_items_per_level, LEVEL1, tid);
       sketch[slot] = 0;
       verbose_print_sketch(sketch, 64);
       goto unlock_out;
@@ -1202,14 +1202,14 @@ iceberg_nuke_key(iceberg_table *table,
     kv->val               = 0;
     fingerprint_t *sketch = get_level1_sketch(table, pb);
     sketch[slot]          = 0;
-    counter_add(&table->num_items_per_level, LEVEL1, -1, tid);
+    counter_decrement(&table->num_items_per_level, LEVEL1, tid);
   } else if (level == 2) {
     kv_pair *kv           = get_level2_kv_pair(table, pb, slot);
     kv->key               = 0;
     kv->val               = 0;
     fingerprint_t *sketch = get_level2_sketch(table, pb);
     sketch[slot]          = 0;
-    counter_add(&table->num_items_per_level, LEVEL2, -1, tid);
+    counter_decrement(&table->num_items_per_level, LEVEL2, tid);
   }
 
   return true;
