@@ -22,6 +22,14 @@
 #define LEVEL1_LOG_BLOCK_SIZE 6ULL
 #define LEVEL2_BLOCK_SIZE     8ULL
 
+#define FREE_FP 0
+#define LEVEL2_CHOICE1_MASK 0xff
+#define LEVEL2_CHOICE2_MASK 0xff00
+
+#define LEVEL2_BLOCKS_PER_RESIZE_CHUNK 8
+
+#define KEY_FREE 0ULL
+
 _Static_assert((1 << LEVEL1_LOG_BLOCK_SIZE) == LEVEL1_BLOCK_SIZE,
                "Level1 block width inconsistent with level1 block size");
 
@@ -180,13 +188,13 @@ typedef struct {
 static inline partition_block
 decode_raw_internal(uint64_t init_log, uint64_t raw_block)
 {
-  partition_block pb  = {0};
-  uint64_t        shf = raw_block >> init_log;
-  pb.partition        = 64 - _lzcnt_u64(shf);
-  uint64_t adj        = 1ULL << pb.partition;
-  adj                 = adj >> 1;
-  adj                 = adj << init_log;
-  pb.block            = raw_block - adj;
+  partition_block pb        = {0};
+  uint64_t        high_bits = raw_block >> init_log;
+  pb.partition              = 64 - _lzcnt_u64(high_bits);
+  uint64_t adj              = 1ULL << pb.partition;
+  adj                       = adj >> 1;
+  adj                       = adj << init_log;
+  pb.block                  = raw_block - adj;
   return pb;
 }
 
@@ -422,8 +430,8 @@ iceberg_init(iceberg_table *table, uint64_t log_slots)
 
 #ifdef ENABLE_RESIZE
   table->num_partitions    = 0;
-  table->level1_resize_ctr = 0;
-  table->level2_resize_ctr = 0;
+  table->level1_resize_counter = 0;
+  table->level2_resize_counter = 0;
   table->resize_threshold  = RESIZE_THRESHOLD * capacity(table);
 #endif
 }
@@ -432,13 +440,13 @@ iceberg_init(iceberg_table *table, uint64_t log_slots)
 static inline bool
 level1_resize_active(iceberg_table *table)
 {
-  return table->level1_resize_ctr;
+  return table->level1_resize_counter;
 }
 
 static inline bool
 level2_resize_active(iceberg_table *table)
 {
-  return table->level2_resize_ctr;
+  return table->level2_resize_counter;
 }
 
 static inline bool
@@ -496,9 +504,9 @@ maybe_create_new_partition(iceberg_table *table)
   table->log_num_blocks += 1;
   table->resize_threshold = RESIZE_THRESHOLD * capacity(table);
 
-  // reset the block ctr
-  table->level1_resize_ctr = table->nblocks / 2;
-  table->level2_resize_ctr = table->nblocks / 2;
+  // reset the block counter
+  table->level1_resize_counter = table->nblocks / 2;
+  table->level2_resize_counter = table->nblocks / 2;
 
   /*printf("Setting up finished\n");*/
   unlock(&table->lock);
@@ -592,15 +600,15 @@ level3_insert(iceberg_table  *table,
 }
 
 static inline bool
-level2_insert_internal_with_mask(iceberg_table  *table,
-                                 iceberg_key_t   key,
-                                 iceberg_value_t value,
-                                 hash           *h,
-                                 partition_block pb,
-                                 uint8_t        *sketch,
-                                 uint32_t        match_mask,
-                                 uint32_t        popcnt,
-                                 uint64_t        tid)
+level2_insert_into_block_with_mask(iceberg_table  *table,
+                                   iceberg_key_t   key,
+                                   iceberg_value_t value,
+                                   hash           *h,
+                                   partition_block pb,
+                                   uint8_t        *sketch,
+                                   uint32_t        match_mask,
+                                   uint32_t        popcnt,
+                                   uint64_t        tid)
 {
   if (unlikely(!popcnt)) {
     return false;
@@ -626,12 +634,12 @@ start:;
 
 #ifdef ENABLE_RESIZE
 static inline bool
-level2_insert_internal(iceberg_table  *table,
-                       iceberg_key_t   key,
-                       iceberg_value_t value,
-                       hash           *h,
-                       partition_block pb,
-                       uint64_t        tid)
+level2_insert_into_block(iceberg_table  *table,
+                         iceberg_key_t   key,
+                         iceberg_value_t value,
+                         hash           *h,
+                         partition_block pb,
+                         uint64_t        tid)
 {
   fingerprint_t *sketch     = get_level2_sketch(table, pb);
   uint32_t       match_mask = sketch_match_8(sketch, 0);
@@ -639,40 +647,34 @@ level2_insert_internal(iceberg_table  *table,
   verbose_print_mask_8(match_mask);
   uint8_t popcnt = __builtin_popcountll(match_mask);
 
-  return level2_insert_internal_with_mask(
+  return level2_insert_into_block_with_mask(
     table, key, value, h, pb, sketch, match_mask, popcnt, tid);
 }
 #endif
 
 static inline bool
-level2_insert(iceberg_table  *table,
-              iceberg_key_t   key,
-              iceberg_value_t value,
-              hash           *h,
-              uint64_t        tid)
+level2_try_set_marker(iceberg_table *table, partition_block chunk_pb)
 {
+  uint8_t *marker = &table->level2_resize_marker[chunk_pb.partition][chunk_pb.block];
+  return __sync_lock_test_and_set(marker, 1);
 
-  partition_block pb1     = get_block(table, h, LEVEL2_BLOCK1);
-  fingerprint_t  *sketch1 = get_level2_sketch(table, pb1);
-  verbose_print_sketch(sketch1, 8);
+static inline void
+level2_maybe_move_chunk(iceberg_table *table, partition_block chunk_pb)
+{
+  if (level2_try_set_marker(table, chunk_pb)) {
+    for (uint64_t i = 0; i < LEVEL2_BLOCKS_PER_RESIZE_CHUNK; i++) {
+      partition_block pb = chunk_to_block(chunk_pb, i);
+      level2_move_block(table, pb);
 
-  partition_block pb2     = get_block(table, h, LEVEL2_BLOCK2);
-  fingerprint_t  *sketch2 = get_level2_sketch(table, pb2);
-  verbose_print_sketch(sketch2, 8);
 
-  uint32_t match_mask = double_sketch_match_8(sketch1, sketch2, 0);
-  verbose_print_double_mask_8(match_mask);
-  uint8_t popcnt1 = __builtin_popcount(match_mask & 0xff);
-  uint8_t popcnt2 = __builtin_popcount(match_mask & 0xff00);
-
-  uint64_t raw_block = h->raw_block[LEVEL2_BLOCK1];
-  if (popcnt2 > popcnt1) {
-    pb1       = pb2;
-    raw_block = h->raw_block[LEVEL2_BLOCK2];
-    sketch1   = sketch2;
-    match_mask >>= 8;
-    popcnt1 = popcnt2;
+static inline void
+level2_maybe_move(iceberg_table *table, partition_block pb1, partition_block pb2)
+{
+  if (likely(!level2_resize_active(table))) {
+    return;
   }
+
+
 
 #ifdef ENABLE_RESIZE
   // move blocks if resize is active and not already moved.
@@ -700,7 +702,38 @@ level2_insert(iceberg_table  *table,
   }
 #endif
 
-  if (level2_insert_internal_with_mask(
+static inline bool
+level2_insert(iceberg_table  *table,
+              iceberg_key_t   key,
+              iceberg_value_t value,
+              hash           *h,
+              uint64_t        tid)
+{
+
+  partition_block pb1     = get_block(table, h, LEVEL2_BLOCK1);
+  fingerprint_t  *sketch1 = get_level2_sketch(table, pb1);
+  verbose_print_sketch(sketch1, LEVEL2_BLOCK_SIZE);
+
+  partition_block pb2     = get_block(table, h, LEVEL2_BLOCK2);
+  fingerprint_t  *sketch2 = get_level2_sketch(table, pb2);
+  verbose_print_sketch(sketch2, LEVEL2_BLOCK_SIZE);
+
+  uint32_t match_mask = double_sketch_match_8(sketch1, sketch2, FREE_FP);
+  verbose_print_double_mask_8(match_mask);
+  uint8_t popcnt1 = __builtin_popcount(match_mask & LEVEL2_CHOICE1_MASK);
+  uint8_t popcnt2 = __builtin_popcount(match_mask & LEVEL2_CHOICE2_MASK);
+
+  uint64_t raw_block = h->raw_block[LEVEL2_BLOCK1];
+  if (popcnt2 > popcnt1) {
+    pb1       = pb2;
+    raw_block = h->raw_block[LEVEL2_BLOCK2];
+    sketch1   = sketch2;
+    match_mask >>= 8;
+    popcnt1 = popcnt2;
+  }
+
+
+  if (level2_insert_into_block_with_mask(
         table, key, value, h, pb1, sketch1, match_mask, popcnt1, tid)) {
     return true;
   }
@@ -1226,9 +1259,9 @@ static bool
 level1_move_block(iceberg_table *table, uint64_t bnum, uint64_t tid)
 {
   // grab a block
-  uint64_t bctr =
-    __atomic_fetch_sub(&table->level1_resize_ctr, 1, __ATOMIC_SEQ_CST);
-  assert(bctr != 0);
+  uint64_t bcounter =
+    __atomic_fetch_sub(&table->level1_resize_counter, 1, __ATOMIC_SEQ_CST);
+  assert(bcounter != 0);
 
   partition_block pb = decode_raw_block(table, bnum);
   // relocate items in level1
@@ -1266,36 +1299,44 @@ level1_move_block(iceberg_table *table, uint64_t bnum, uint64_t tid)
   return false;
 }
 
-static bool
-level2_move_block(iceberg_table *table, uint64_t bnum, uint64_t tid)
+static inline void
+level2_decrement_resize_counter(iceberg_table *table)
 {
-  // grab a block
-  uint64_t bctr =
-    __atomic_fetch_sub(&table->level2_resize_ctr, 1, __ATOMIC_SEQ_CST);
-  assert(bctr != 0);
+  uint64_t counter_value_pre =
+    __atomic_fetch_sub(&table->level2_resize_counter, 1, __ATOMIC_SEQ_CST);
+  assert(counter_value_pre != 0);
+}
 
-  partition_block pb   = decode_raw_block(table, bnum);
-  uint64_t        mask = ~(1ULL << (table->log_num_blocks - 1));
-  // relocate items in level2
-  for (uint64_t j = 0; j < LEVEL2_BLOCK_SIZE; ++j) {
-    kv_pair *kv = get_level2_kv_pair(table, pb, j);
-    if (kv->key == 0) {
+static inline bool
+level2_key_should_move(iceberg_table *table, partition_block pb)
+{
+
+
+static inline bool
+level2_move_block(iceberg_table *table, partition_block pb, uint64_t tid)
+{
+  for (uint64_t i = 0; i < LEVEL2_BLOCK_SIZE; i++) {
+    kv_pair *kv = get_level2_kv_pair(table, pb, i);
+    if (kv->key == KEY_FREE) {
       continue;
     }
 
     hash h = hash_key(table, &kv->key);
 
+    if(
+
+
     if ((h.raw_block[LEVEL2_BLOCK1] & mask) == bnum &&
         h.raw_block[LEVEL2_BLOCK1] != bnum) {
       partition_block local_pb =
         decode_raw_block(table, h.raw_block[LEVEL2_BLOCK1]);
-      if (!level2_insert_internal(table, kv->key, kv->val, &h, local_pb, tid)) {
+      if (!level2_insert_into_block(table, kv->key, kv->val, &h, local_pb, tid)) {
         if (!level2_insert(table, kv->key, kv->val, &h, tid)) {
           printf("Failed insert during resize level2\n");
           exit(0);
         }
       }
-      if (!iceberg_nuke_key(table, 2, bnum, j, tid)) {
+      if (!iceberg_nuke_key(table, 2, bnum, i, tid)) {
         printf("Failed delete during resize level2\n");
         exit(0);
       }
@@ -1303,18 +1344,21 @@ level2_move_block(iceberg_table *table, uint64_t bnum, uint64_t tid)
                h.raw_block[LEVEL2_BLOCK2] != bnum) {
       partition_block local_pb =
         decode_raw_block(table, h.raw_block[LEVEL2_BLOCK2]);
-      if (!level2_insert_internal(table, kv->key, kv->val, &h, local_pb, tid)) {
+      if (!level2_insert_into_block(table, kv->key, kv->val, &h, local_pb, tid)) {
         if (!level2_insert(table, kv->key, kv->val, &h, tid)) {
           printf("Failed insert during resize level2\n");
           exit(0);
         }
       }
-      if (!iceberg_nuke_key(table, 2, bnum, j, tid)) {
+      if (!iceberg_nuke_key(table, 2, bnum, i, tid)) {
         printf("Failed delete during resize level2\n");
         exit(0);
       }
     }
   }
+
+  level2_decrement_resize_counter(table);
+
   return false;
 }
 

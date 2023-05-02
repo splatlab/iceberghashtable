@@ -58,8 +58,8 @@ typedef struct iceberg_table {
   volatile bool lock;
   uint64_t      resize_threshold;
   uint64_t      num_partitions;
-  uint64_t      level1_resize_ctr;
-  uint64_t      level2_resize_ctr;
+  uint64_t      level1_resize_counter;
+  uint64_t      level2_resize_counter;
   uint64_t      marker_sizes[MAX_PARTITIONS];
   uint8_t      *level1_resize_marker[MAX_PARTITIONS];
   uint8_t      *level2_resize_marker[MAX_PARTITIONS];
