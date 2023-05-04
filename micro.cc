@@ -261,7 +261,7 @@ main(int argc, char **argv)
   }
 
 #ifdef ENABLE_RESIZE
-  iceberg_end(&table);
+  iceberg_end(&table, 0);
 #endif
   t2 = high_resolution_clock::now();
 

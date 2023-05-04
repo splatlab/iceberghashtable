@@ -229,7 +229,7 @@ ycsb_load_run_randint(int                    index_type,
         thread_group[i].join();
 
 #ifdef ENABLE_RESIZE
-      iceberg_end(&hashtable);
+      iceberg_end(&hashtable, 0);
 #endif
       auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
         std::chrono::system_clock::now() - starttime);
