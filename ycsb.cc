@@ -1,3 +1,4 @@
+#include <assert.h>
 #include <atomic>
 #include <chrono>
 #include <cstring>
@@ -7,7 +8,6 @@
 #include <stdlib.h>
 #include <thread>
 #include <vector>
-#include <assert.h>
 
 #include "iceberg_table.h"
 
@@ -191,7 +191,7 @@ ycsb_load_run_randint(int                    index_type,
 
   if (index_type == TYPE_ICEBERG) {
     iceberg_table *hashtable;
-    int rc = iceberg_create(&hashtable, 24);
+    int            rc = iceberg_create(&hashtable, 24);
     assert(!rc);
 
     thread_data_t *tds =
@@ -237,7 +237,6 @@ ycsb_load_run_randint(int                    index_type,
         std::chrono::system_clock::now() - starttime);
       printf("Throughput: load, %f ,ops/us\n",
              (LOAD_SIZE * 1.0) / duration.count());
-
     }
 
     {

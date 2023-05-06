@@ -75,4 +75,4 @@ clean:
 	rm -f micro ycsb $(OBJECTS) obj/micro.o obj/ycsb.o
 
 format:
-	clang-format-13 -style=file -i $(SOURCES) $(HEADERS)
+	clang-format-13 -style=file -i $(SOURCES) $(HEADERS) test.c micro.cc ycsb.cc

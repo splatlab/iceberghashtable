@@ -1,7 +1,7 @@
 #include <assert.h>
-#include <stdio.h>
 #include <errno.h>
 #include <stdarg.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "iceberg_table.h"
@@ -11,7 +11,7 @@
 int
 open(iceberg_table **table, uint64_t *capacity)
 {
-  int rc = iceberg_create(table, TEST_LOG_SLOTS);
+  int rc    = iceberg_create(table, TEST_LOG_SLOTS);
   *capacity = iceberg_capacity(*table);
   return rc;
 }
@@ -26,7 +26,7 @@ void
 print_start_message(const char *test_name)
 {
   size_t len = strnlen(test_name, 24);
-  assert (len <= 24);
+  assert(len <= 24);
   printf("Starting test %s...%*s", test_name, (int)(24 - len), "");
 }
 
@@ -52,10 +52,11 @@ run_open_close()
 {
   print_start_message("Open and Close");
   iceberg_table *table;
-  uint64_t capacity;
-  int rc = open(&table, &capacity);
+  uint64_t       capacity;
+  int            rc = open(&table, &capacity);
   if (rc) {
-    print_fail_message("iceberg_create failed with error: %d -- %s", rc, strerror(rc));
+    print_fail_message(
+      "iceberg_create failed with error: %d -- %s", rc, strerror(rc));
     return;
   }
   close(&table);
@@ -67,17 +68,18 @@ run_basic()
 {
   print_start_message("Basic Operations");
   iceberg_table *table;
-  uint64_t capacity;
-  int rc = open(&table, &capacity);
+  uint64_t       capacity;
+  int            rc = open(&table, &capacity);
   if (rc) {
-    print_fail_message("iceberg_create failed with error: %d -- %s", rc, strerror(rc));
+    print_fail_message(
+      "iceberg_create failed with error: %d -- %s", rc, strerror(rc));
     return;
   }
 
   // Insert a kv pair
-  iceberg_key_t key = 1ULL;
-  iceberg_value_t value = 1ULL;
-  bool inserted = iceberg_insert(table, key, value, 0);
+  iceberg_key_t   key      = 1ULL;
+  iceberg_value_t value    = 1ULL;
+  bool            inserted = iceberg_insert(table, key, value, 0);
   if (!inserted) {
     print_fail_message("iceberg_insert failed to insert key: %" PRIx64, key);
     goto out;
@@ -85,13 +87,17 @@ run_basic()
 
   // Query for the kv pair, should be found
   iceberg_value_t returned_value;
-  bool found = iceberg_query(table, key, &returned_value, 0);
+  bool            found = iceberg_query(table, key, &returned_value, 0);
   if (!found) {
-    print_fail_message("iceberg_query failed to find inserted key: %" PRIx64, key);
+    print_fail_message("iceberg_query failed to find inserted key: %" PRIx64,
+                       key);
     goto out;
   }
   if (returned_value != value) {
-    print_fail_message("iceberg_query returned incorrect value: %" PRIx64", expected %" PRIx64, returned_value, value);
+    print_fail_message("iceberg_query returned incorrect value: %" PRIx64
+                       ", expected %" PRIx64,
+                       returned_value,
+                       value);
     goto out;
   }
 
@@ -99,7 +105,8 @@ run_basic()
   iceberg_key_t another_key = 2ULL;
   found = iceberg_query(table, another_key, &returned_value, 0);
   if (found) {
-    print_fail_message("iceberg_query found a non-inserted key: %" PRIx64, another_key);
+    print_fail_message("iceberg_query found a non-inserted key: %" PRIx64,
+                       another_key);
     goto out;
   }
 
@@ -113,7 +120,8 @@ run_basic()
   // Check the load
   uint64_t load = iceberg_load(table);
   if (load != 1) {
-    print_fail_message("iceberg_load reported incorrect load: %" PRIx64", expected 1", load);
+    print_fail_message(
+      "iceberg_load reported incorrect load: %" PRIx64 ", expected 1", load);
     goto out;
   }
 
@@ -137,7 +145,8 @@ out:
 }
 
 
-int main(int argc, char *argv[])
+int
+main(int argc, char *argv[])
 {
   run_open_close();
 

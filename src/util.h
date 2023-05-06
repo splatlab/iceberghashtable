@@ -37,8 +37,8 @@ util_mmap(size_t length)
 }
 
 static inline void
-util_munmap(void *addr, size_t length)
+util_munmap(volatile void *addr, size_t length)
 {
-  __attribute__ ((unused)) int ret = munmap(addr, length);
+  __attribute__((unused)) int ret = munmap((void *)addr, length);
   assert(ret == 0);
 }

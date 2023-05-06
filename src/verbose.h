@@ -117,6 +117,9 @@ static inline void
 verbose_print_move(uint64_t partition, uint64_t block)
 {
 #ifdef VERBOSE
-  printf("%-15s partition: %" PRIu64 ", block: %" PRIx64 "\n", "MOVE", partition, block);
+  printf("%-15s partition: %" PRIu64 ", block: %" PRIx64 "\n",
+         "MOVE",
+         partition,
+         block);
 #endif
 }

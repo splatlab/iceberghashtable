@@ -348,7 +348,7 @@ main(int argc, char **argv)
   for (uint64_t i = 0; i < threads; ++i)
     thread_list[i].join();
 
-  t2                        = high_resolution_clock::now();
+  t2                         = high_resolution_clock::now();
   double deletion_throughput = num_deleted / elapsed(t1, t2);
   if (!is_benchmark) {
     printf("Removals: %f /sec\n", num_deleted / elapsed(t1, t2));
