@@ -173,7 +173,7 @@ main(int argc, char **argv)
   assert(!ret);
 
   uint64_t capacity = iceberg_capacity(table);
-  uint64_t N        = capacity * (resizes + 1);
+  uint64_t N        = capacity << resizes;
 
   high_resolution_clock::time_point t2 = high_resolution_clock::now();
   if (!is_benchmark) {

@@ -48,16 +48,16 @@ typedef struct kv_pair {
 _Static_assert(sizeof(kv_pair) == 16,
                "kv_pair needs to be 16B for atomic loads and stores");
 
-typedef struct iceberg_level3_node {
+typedef struct level3_node {
   iceberg_key_t               key;
   iceberg_value_t             val;
-  struct iceberg_level3_node *next_node;
-} iceberg_level3_node;
+  struct level3_node *next;
+} level3_node;
 
-typedef struct iceberg_level3_list {
-  iceberg_level3_node *head;
+typedef struct level3_list {
+  level3_node *head;
   volatile bool        lock;
-} iceberg_level3_list;
+} level3_list;
 
 typedef struct iceberg_table {
   // Level 1
@@ -69,7 +69,7 @@ typedef struct iceberg_table {
   fingerprint_t *level2_sketch[MAX_PARTITIONS];
 
   // Level 3
-  iceberg_level3_list level3[LEVEL3_BLOCKS];
+  level3_list level3[LEVEL3_BLOCKS];
 
   // Metadata
   uint64_t num_blocks;
@@ -457,8 +457,9 @@ allocate_partition(iceberg_table *table,
 static inline void
 deallocate_partitions(iceberg_table *table)
 {
-  uint64_t num_blocks = table->num_blocks;
   for (uint64_t i = 0; i <= table->max_partition_num; i++) {
+    uint64_t partition_size_class = i == 0 ? 0 : i - 1;
+    uint64_t num_blocks = 1ULL << (table->log_initial_num_blocks + partition_size_class);
     // Level 1
     uint64_t level1_bytes = compute_level1_bytes(num_blocks);
     util_munmap(table->level1[i], level1_bytes);
@@ -474,11 +475,11 @@ deallocate_partitions(iceberg_table *table)
 
   // Level 3
   for (uint64_t i = 0; i < LEVEL3_BLOCKS; i++) {
-    iceberg_level3_node *node = table->level3[i].head;
+    level3_node *node = table->level3[i].head;
     while (node != NULL) {
-      iceberg_level3_node *next_node = node;
+      level3_node *next = node->next;
       free(node);
-      node = next_node;
+      node = next;
     }
   }
 }
@@ -486,12 +487,12 @@ deallocate_partitions(iceberg_table *table)
 static inline void
 allocate_resize_metadata(iceberg_table *table, uint64_t num_blocks)
 {
-#ifdef enable_resize
+#ifdef ENABLE_RESIZE
   size_t level1_marker_size =
-    sizeof(uint8_t) * num_blocks / level1_blocks_per_resize_chunk;
+    sizeof(uint8_t) * num_blocks / LEVEL1_BLOCKS_PER_RESIZE_CHUNK;
   table->level1_resize_marker = util_mmap(level1_marker_size);
   size_t level2_marker_size =
-    sizeof(uint8_t) * num_blocks / level2_blocks_per_resize_chunk;
+    sizeof(uint8_t) * num_blocks / LEVEL2_BLOCKS_PER_RESIZE_CHUNK;
   table->level2_resize_marker = util_mmap(level2_marker_size);
 #endif
 }
@@ -529,7 +530,7 @@ iceberg_create(iceberg_table **out_table, uint64_t log_slots)
   uint64_t num_blocks           = 1 << (log_slots - LEVEL1_LOG_BLOCK_SIZE);
   table->num_blocks             = num_blocks;
   table->log_num_blocks         = log_slots - LEVEL1_LOG_BLOCK_SIZE;
-  table->log_initial_num_blocks = log2(num_blocks);
+  table->log_initial_num_blocks = table->log_num_blocks;
 
   allocate_partition(table, 0, num_blocks);
   counter_init(&table->num_items_per_level);
@@ -977,12 +978,12 @@ level3_insert(iceberg_table  *table,
 {
   uint64_t block = get_level3_block(h);
   level3_lock_block(table, block);
-  iceberg_level3_node *new_node = malloc(sizeof(iceberg_level3_node));
+  level3_node *new_node = malloc(sizeof(level3_node));
   assert(new_node);
   verbose_print_location(3, 0, block, 0, new_node);
   new_node->key             = key;
   new_node->val             = value;
-  new_node->next_node       = table->level3[block].head;
+  new_node->next       = table->level3[block].head;
   table->level3[block].head = new_node;
   counter_increment(&table->num_items_per_level, LEVEL3, tid);
   level3_unlock_block(table, block);
@@ -1146,18 +1147,18 @@ level3_delete(iceberg_table *table, iceberg_key_t key, hash *h, uint64_t tid)
 
   bool ret = false;
   level3_lock_block(table, block);
-  iceberg_level3_node **node = &table->level3[block].head;
+  level3_node **node = &table->level3[block].head;
 
   while (*node != NULL) {
     if ((*node)->key == key) {
-      iceberg_level3_node *dead_node = *node;
-      *node                          = (*node)->next_node;
+      level3_node *dead_node = *node;
+      *node                          = (*node)->next;
       free(dead_node);
       counter_decrement(&table->num_items_per_level, LEVEL3, tid);
       ret = true;
       goto unlock_out;
     }
-    node = &(*node)->next_node;
+    node = &(*node)->next;
   }
 
 unlock_out:
@@ -1269,14 +1270,14 @@ level3_query(iceberg_table   *table,
 
   bool ret = false;
   level3_lock_block(table, block);
-  iceberg_level3_node *node = table->level3[block].head;
+  level3_node *node = table->level3[block].head;
   while (node != NULL) {
     if (node->key == key) {
       *value = node->val;
       ret    = true;
       goto unlock_out;
     }
-    node = node->next_node;
+    node = node->next;
   }
 
 unlock_out:
