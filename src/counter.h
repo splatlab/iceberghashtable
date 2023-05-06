@@ -1,11 +1,19 @@
 #pragma once
 
-#include "public_counter.h"
 #include "util.h"
 #include <inttypes.h>
 
 #define NUM_COUNTERS 64
 #define THRESHOLD    1024
+
+typedef __attribute__((aligned(64))) struct {
+  volatile int64_t count[8];
+} local_counter;
+
+typedef __attribute__((aligned(64))) struct counter {
+  int64_t        global[8];
+  local_counter *local_counters;
+} counter;
 
 static inline void
 counter_init(counter *cntr)

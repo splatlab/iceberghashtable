@@ -1,7 +1,6 @@
 #ifndef _POTC_TABLE_H_
 #define _POTC_TABLE_H_
 
-#include "public_counter.h"
 #include <inttypes.h>
 #include <stdbool.h>
 #include <stddef.h>
