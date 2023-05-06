@@ -15,7 +15,7 @@
 #include "verbose.h"
 #include "xxhash.h"
 
-#define RESIZE_THRESHOLD 0.96
+#define RESIZE_THRESHOLD 0.94
 /*#define RESIZE_THRESHOLD 0.85 // For YCSB*/
 #define MAX_PROCS             64
 #define LEVEL1_BLOCK_SIZE     64ULL
@@ -111,15 +111,21 @@ iceberg_load_approx(iceberg_table *table)
 }
 
 static inline uint64_t
-capacity(iceberg_table *table)
+raw_capacity(iceberg_table *table)
 {
   return table->num_blocks * (LEVEL1_BLOCK_SIZE + LEVEL2_BLOCK_SIZE);
+}
+
+uint64_t
+iceberg_capacity(iceberg_table *table)
+{
+  return table->resize_threshold;
 }
 
 inline double
 iceberg_load_factor(iceberg_table *table)
 {
-  return (double)iceberg_load(table) / (double)capacity(table);
+  return (double)iceberg_load(table) / (double)raw_capacity(table);
 }
 
 #ifdef ENABLE_RESIZE
@@ -432,7 +438,7 @@ initialize_resize_metadata(iceberg_table *table)
   table->max_partition_num     = 0;
   table->level1_resize_counter = 0;
   table->level2_resize_counter = 0;
-  table->resize_threshold      = RESIZE_THRESHOLD * capacity(table);
+  table->resize_threshold      = RESIZE_THRESHOLD * raw_capacity(table);
 #endif
 }
 
@@ -511,7 +517,7 @@ maybe_create_new_partition(iceberg_table *table, uint64_t tid)
   table->level1_resize_counter = table->num_blocks / 2;
   table->level2_resize_counter = table->num_blocks / 2;
 
-  table->resize_threshold = RESIZE_THRESHOLD * capacity(table);
+  table->resize_threshold = RESIZE_THRESHOLD * raw_capacity(table);
 
   unlock(&table->lock);
 #endif
@@ -839,14 +845,14 @@ void
 iceberg_end(iceberg_table *table, uint64_t tid)
 {
   if (level1_resize_active(table)) {
-    uint64_t num_chunks = level1_num_chunks(table);
+    uint64_t num_chunks = level1_num_chunks(table) / 2;
     for (uint64_t chunk_num = 0; chunk_num < num_chunks; chunk_num++) {
       level1_maybe_move_chunk(table, chunk_num, tid);
     }
   }
 
   if (level2_resize_active(table)) {
-    uint64_t num_chunks = level2_num_chunks(table);
+    uint64_t num_chunks = level2_num_chunks(table) / 2;
     for (uint64_t chunk_num = 0; chunk_num < num_chunks; chunk_num++) {
       level2_maybe_move_chunk(table, chunk_num, tid);
     }

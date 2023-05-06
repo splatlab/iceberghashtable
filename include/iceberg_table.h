@@ -70,6 +70,8 @@ uint64_t level2_load(iceberg_table *table);
 uint64_t level3_load(iceberg_table *table);
 uint64_t iceberg_load(iceberg_table *table);
 
+uint64_t iceberg_capacity(iceberg_table *table);
+
 void iceberg_init(iceberg_table *table, uint64_t log_slots);
 
 double iceberg_load_factor(iceberg_table *table);
