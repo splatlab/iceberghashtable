@@ -39,9 +39,13 @@ SOURCES = src/iceberg_table.c
 HEADERS = include/iceberg_table.h src/iceberg_precompute.h src/lock.h src/counter.h src/util.h src/verbose.h
 OBJECTS = $(subst src/,obj/,$(subst .c,.o,$(SOURCES)))
 
-all: micro ycsb
+all: test micro ycsb
 
 obj/iceberg_table.o: src/iceberg_table.c $(HEADERS)
+	@ mkdir -p obj
+	$(CC) $(CFLAGS) $(INCLUDE) -c $< -o $@
+
+obj/test.o: test.c obj/iceberg_table.o
 	@ mkdir -p obj
 	$(CC) $(CFLAGS) $(INCLUDE) -c $< -o $@
 
@@ -52,6 +56,9 @@ obj/micro.o: micro.cc obj/iceberg_table.o
 obj/ycsb.o: ycsb.cc obj/iceberg_table.o
 	@ mkdir -p obj
 	$(CPP) $(CPPFLAGS) $(INCLUDE) -c $< -o $@
+
+test: $(OBJECTS) obj/test.o
+	$(CC) $(CFLAGS) $^ -o $@ $(LIBS)
 
 micro: $(OBJECTS) obj/micro.o
 	$(CPP) $(CFLAGS) $^ -o $@ $(LIBS)

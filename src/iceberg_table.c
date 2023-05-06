@@ -15,14 +15,20 @@
 #include "verbose.h"
 #include "xxhash.h"
 
-#define RESIZE_THRESHOLD 0.94
-/*#define RESIZE_THRESHOLD 0.85 // For YCSB*/
+#define MAX_PARTITIONS        8ULL
+#define RESIZE_THRESHOLD      0.94
 #define MAX_PROCS             64
 #define LEVEL1_BLOCK_SIZE     64ULL
 #define LEVEL1_LOG_BLOCK_SIZE 6ULL
 #define LEVEL2_BLOCK_SIZE     8ULL
+#define LEVEL3_BLOCKS         1024ULL
+
+_Static_assert((1 << LEVEL1_LOG_BLOCK_SIZE) == LEVEL1_BLOCK_SIZE,
+               "Level1 block width inconsistent with level1 block size");
 
 #define FP_FREE             0
+#define KEY_FREE            0ULL
+#define VALUE_FREE          0ULL
 #define LEVEL2_CHOICE1_MASK 0xff
 #define LEVEL2_CHOICE2_MASK 0xff00
 
@@ -30,12 +36,6 @@
 #define LEVEL1_LOG_BLOCKS_PER_RESIZE_CHUNK 3
 #define LEVEL2_BLOCKS_PER_RESIZE_CHUNK     8
 #define LEVEL2_LOG_BLOCKS_PER_RESIZE_CHUNK 3
-
-#define KEY_FREE   0ULL
-#define VALUE_FREE 0ULL
-
-_Static_assert((1 << LEVEL1_LOG_BLOCK_SIZE) == LEVEL1_BLOCK_SIZE,
-               "Level1 block width inconsistent with level1 block size");
 
 uint64_t seed = 12351327692179052ll;
 
@@ -455,14 +455,43 @@ allocate_partition(iceberg_table *table,
 }
 
 static inline void
+deallocate_partitions(iceberg_table *table)
+{
+  uint64_t num_blocks = table->num_blocks;
+  for (uint64_t i = 0; i <= table->max_partition_num; i++) {
+    // Level 1
+    uint64_t level1_bytes = compute_level1_bytes(num_blocks);
+    util_munmap(table->level1[i], level1_bytes);
+    uint64_t level1_sketch_bytes = compute_level1_sketch_bytes(num_blocks);
+    util_munmap(table->level1_sketch[i], level1_sketch_bytes);
+
+    // Level 2
+    uint64_t level2_bytes = compute_level2_bytes(num_blocks);
+    util_munmap(table->level2[i], level2_bytes);
+    uint64_t level2_sketch_bytes = compute_level2_sketch_bytes(num_blocks);
+    util_munmap(table->level2_sketch[i], level2_sketch_bytes);
+  }
+
+  // Level 3
+  for (uint64_t i = 0; i < LEVEL3_BLOCKS; i++) {
+    iceberg_level3_node *node = table->level3[i].head;
+    while (node != NULL) {
+      iceberg_level3_node *next_node = node;
+      free(node);
+      node = next_node;
+    }
+  }
+}
+
+static inline void
 allocate_resize_metadata(iceberg_table *table, uint64_t num_blocks)
 {
-#ifdef ENABLE_RESIZE
+#ifdef enable_resize
   size_t level1_marker_size =
-    sizeof(uint8_t) * num_blocks / LEVEL1_BLOCKS_PER_RESIZE_CHUNK;
+    sizeof(uint8_t) * num_blocks / level1_blocks_per_resize_chunk;
   table->level1_resize_marker = util_mmap(level1_marker_size);
   size_t level2_marker_size =
-    sizeof(uint8_t) * num_blocks / LEVEL2_BLOCKS_PER_RESIZE_CHUNK;
+    sizeof(uint8_t) * num_blocks / level2_blocks_per_resize_chunk;
   table->level2_resize_marker = util_mmap(level2_marker_size);
 #endif
 }
@@ -504,11 +533,22 @@ iceberg_create(iceberg_table **out_table, uint64_t log_slots)
 
   allocate_partition(table, 0, num_blocks);
   counter_init(&table->num_items_per_level);
-  allocate_resize_metadata(table, num_blocks);
   initialize_resize_metadata(table);
 
   *out_table = table;
   return 0;
+}
+
+void
+iceberg_destroy(iceberg_table **table)
+{
+  assert(table);
+
+  deallocate_partitions(*table);
+  deallocate_resize_metadata(*table, (*table)->num_blocks);
+
+  free(*table);
+  *table = NULL;
 }
 
 #ifdef ENABLE_RESIZE
@@ -558,7 +598,9 @@ maybe_create_new_partition(iceberg_table *table, uint64_t tid)
 
   allocate_partition(table, new_partition_num, new_partition_num_blocks);
 
-  deallocate_resize_metadata(table, table->num_blocks);
+  if (table->max_partition_num != 0) {
+    deallocate_resize_metadata(table, table->num_blocks);
+  }
   uint64_t num_blocks = table->num_blocks * 2;
   allocate_resize_metadata(table, num_blocks);
 

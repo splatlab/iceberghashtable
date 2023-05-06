@@ -10,16 +10,15 @@
 extern "C" {
 #endif
 
-#define LEVEL3_BLOCKS  1024ULL
-#define MAX_PARTITIONS 8ULL
-
 typedef uint64_t iceberg_key_t;
 typedef uint64_t iceberg_value_t;
 
 typedef struct iceberg_table iceberg_table;
 
 int
-iceberg_create(iceberg_table **, uint64_t log_slots);
+iceberg_create(iceberg_table **table, uint64_t log_slots);
+
+void iceberg_destroy(iceberg_table **table);
 
 bool iceberg_insert(iceberg_table  *table,
                     iceberg_key_t   key,

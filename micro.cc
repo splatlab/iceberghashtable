@@ -287,10 +287,6 @@ main(int argc, char **argv)
   // }
 
   if (!is_benchmark) {
-    printf("Average list size: %f\n",
-           level3_load(table) / (double)LEVEL3_BLOCKS);
-    // printf("Max list size: %" PRIu64 "\n", max_size);
-
     printf("\nQUERIES\n");
   }
 
@@ -396,4 +392,6 @@ main(int argc, char **argv)
   printf("Positive queries after deletions: %f /sec\n",
          num_deleted / elapsed(t1, t2));
   thread_list.clear();
+
+  iceberg_destroy(&table);
 }
