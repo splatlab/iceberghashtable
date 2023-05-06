@@ -21,7 +21,7 @@ using namespace std::chrono;
 // vectors of key/value pairs in the table and not in the table
 std::vector<std::pair<uint64_t, uint64_t>> in_table, not_in_table;
 
-iceberg_table table;
+iceberg_table *table;
 
 double
 elapsed(high_resolution_clock::time_point t1,
@@ -44,7 +44,7 @@ do_inserts(uint8_t   id,
 #ifdef LATENCY
     high_resolution_clock::time_point t1 = high_resolution_clock::now();
 #endif
-    if (!iceberg_insert(&table, keys[i], values[i], id)) {
+    if (!iceberg_insert(table, keys[i], values[i], id)) {
       printf("Failed insert\n");
       exit(0);
     }
@@ -54,7 +54,7 @@ do_inserts(uint8_t   id,
 #endif
     // uint64_t val;
     // for(uint64_t j = start; j <= i; ++j) {
-    //   if (iceberg_query(&table, keys[j], &val, id) != true) {
+    //   if (iceberg_query(table, keys[j], &val, id) != true) {
     //     printf("False negative query key: 0x%" PRIx64 "\n", keys[j]);
     //     assert(0);
     //   }
@@ -86,7 +86,7 @@ do_queries(uint8_t   id,
 #ifdef LATENCY
     high_resolution_clock::time_point t1 = high_resolution_clock::now();
 #endif
-    if (iceberg_query(&table, keys[i], &val, id) != positive) {
+    if (iceberg_query(table, keys[i], &val, id) != positive) {
       if (positive)
         printf("False negative query key: %8" PRIu64 " : "
                "%" PRIu64 "\n",
@@ -117,7 +117,7 @@ do_deletions(uint8_t id, uint64_t *keys, uint64_t start, uint64_t n)
 {
   // uint64_t val;
   for (uint64_t i = start; i < start + n; ++i)
-    if (!iceberg_delete(&table, keys[i], id)) {
+    if (!iceberg_delete(table, keys[i], id)) {
       printf("Failed deletion\n");
       exit(0);
     }
@@ -141,10 +141,10 @@ do_mixed(uint8_t   id,
 {
   uint64_t val;
   for (uint64_t i = start; i < start + n; ++i)
-    if (iceberg_query(&table, keys[i], &val, id))
-      iceberg_delete(&table, keys[i], id);
+    if (iceberg_query(table, keys[i], &val, id))
+      iceberg_delete(table, keys[i], id);
     else
-      iceberg_insert(&table, keys[i], values[i], id);
+      iceberg_insert(table, keys[i], values[i], id);
 }
 
 int
@@ -169,9 +169,10 @@ main(int argc, char **argv)
 
   high_resolution_clock::time_point t1 = high_resolution_clock::now();
 
-  iceberg_init(&table, tbits - resizes);
+  int ret = iceberg_create(&table, tbits - resizes);
+  assert(!ret);
 
-  uint64_t capacity = iceberg_capacity(&table);
+  uint64_t capacity = iceberg_capacity(table);
   uint64_t N        = capacity * (resizes + 1);
 
   high_resolution_clock::time_point t2 = high_resolution_clock::now();
@@ -262,7 +263,7 @@ main(int argc, char **argv)
   }
 
 #ifdef ENABLE_RESIZE
-  iceberg_end(&table, 0);
+  iceberg_end(table, 0);
 #endif
   t2 = high_resolution_clock::now();
 
@@ -272,11 +273,11 @@ main(int argc, char **argv)
   if (!is_benchmark) {
     printf("Insertions: %f\n", N / elapsed(t1, t2));
 
-    printf("Load factor: %f\n", iceberg_load_factor(&table));
-    printf("Number level 1 inserts: %" PRIu64 "\n", level1_load(&table));
-    printf("Number level 2 inserts: %" PRIu64 "\n", level2_load(&table));
-    printf("Number level 3 inserts: %" PRIu64 "\n", level3_load(&table));
-    printf("Total inserts: %" PRIu64 "\n", iceberg_load(&table));
+    printf("Load factor: %f\n", iceberg_load_factor(table));
+    printf("Number level 1 inserts: %" PRIu64 "\n", level1_load(table));
+    printf("Number level 2 inserts: %" PRIu64 "\n", level2_load(table));
+    printf("Number level 3 inserts: %" PRIu64 "\n", level3_load(table));
+    printf("Total inserts: %" PRIu64 "\n", iceberg_load(table));
   }
 
   // uint64_t max_size = 0, sum_sizes = 0;
@@ -287,7 +288,7 @@ main(int argc, char **argv)
 
   if (!is_benchmark) {
     printf("Average list size: %f\n",
-           level3_load(&table) / (double)LEVEL3_BLOCKS);
+           level3_load(table) / (double)LEVEL3_BLOCKS);
     // printf("Max list size: %" PRIu64 "\n", max_size);
 
     printf("\nQUERIES\n");
@@ -355,7 +356,7 @@ main(int argc, char **argv)
   double deletion_throughput = num_deleted / elapsed(t1, t2);
   if (!is_benchmark) {
     printf("Removals: %f /sec\n", num_deleted / elapsed(t1, t2));
-    printf("Load factor: %f\n", iceberg_load_factor(&table));
+    printf("Load factor: %f\n", iceberg_load_factor(table));
   }
   thread_list.clear();
 

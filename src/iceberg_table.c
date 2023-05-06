@@ -39,6 +39,55 @@ _Static_assert((1 << LEVEL1_LOG_BLOCK_SIZE) == LEVEL1_BLOCK_SIZE,
 
 uint64_t seed = 12351327692179052ll;
 
+typedef uint8_t fingerprint_t;
+typedef struct kv_pair {
+  iceberg_key_t   key;
+  iceberg_value_t val;
+} kv_pair;
+
+_Static_assert(sizeof(kv_pair) == 16,
+               "kv_pair needs to be 16B for atomic loads and stores");
+
+typedef struct iceberg_level3_node {
+  iceberg_key_t               key;
+  iceberg_value_t             val;
+  struct iceberg_level3_node *next_node;
+} iceberg_level3_node;
+
+typedef struct iceberg_level3_list {
+  iceberg_level3_node *head;
+  volatile bool        lock;
+} iceberg_level3_list;
+
+typedef struct iceberg_table {
+  // Level 1
+  kv_pair       *level1[MAX_PARTITIONS];
+  fingerprint_t *level1_sketch[MAX_PARTITIONS];
+
+  // Level 2
+  kv_pair       *level2[MAX_PARTITIONS];
+  fingerprint_t *level2_sketch[MAX_PARTITIONS];
+
+  // Level 3
+  iceberg_level3_list level3[LEVEL3_BLOCKS];
+
+  // Metadata
+  uint64_t num_blocks;
+  uint64_t log_num_blocks;
+  uint64_t log_initial_num_blocks;
+  counter  num_items_per_level;
+
+#ifdef ENABLE_RESIZE
+  volatile bool lock;
+  uint64_t      resize_threshold;
+  uint64_t      max_partition_num;
+  uint64_t      level1_resize_counter;
+  uint64_t      level2_resize_counter;
+  uint8_t      *level1_resize_marker;
+  uint8_t      *level2_resize_marker;
+#endif
+} iceberg_table;
+
 static inline uint8_t
 word_select(uint64_t val, int rank)
 {
@@ -442,10 +491,10 @@ initialize_resize_metadata(iceberg_table *table)
 #endif
 }
 
-void
-iceberg_init(iceberg_table *table, uint64_t log_slots)
+int
+iceberg_create(iceberg_table **out_table, uint64_t log_slots)
 {
-  assert(table);
+  iceberg_table *table = malloc(sizeof(*table));
   memset(table, 0, sizeof(*table));
 
   uint64_t num_blocks           = 1 << (log_slots - LEVEL1_LOG_BLOCK_SIZE);
@@ -457,6 +506,9 @@ iceberg_init(iceberg_table *table, uint64_t log_slots)
   counter_init(&table->num_items_per_level);
   allocate_resize_metadata(table, num_blocks);
   initialize_resize_metadata(table);
+
+  *out_table = table;
+  return 0;
 }
 
 #ifdef ENABLE_RESIZE

@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <thread>
 #include <vector>
+#include <assert.h>
 
 #include "iceberg_table.h"
 
@@ -189,8 +190,9 @@ ycsb_load_run_randint(int                    index_type,
   range_incomplete.store(0);
 
   if (index_type == TYPE_ICEBERG) {
-    iceberg_table hashtable;
-    iceberg_init(&hashtable, 24);
+    iceberg_table *hashtable;
+    int rc = iceberg_create(&hashtable, 24);
+    assert(!rc);
 
     thread_data_t *tds =
       (thread_data_t *)malloc(num_thread * sizeof(thread_data_t));
@@ -204,7 +206,7 @@ ycsb_load_run_randint(int                    index_type,
       auto func = [&]() {
         int thread_id     = next_thread_id.fetch_add(1);
         tds[thread_id].id = thread_id;
-        tds[thread_id].ht = &hashtable;
+        tds[thread_id].ht = hashtable;
 
         uint64_t start_key = LOAD_SIZE / num_thread * (uint64_t)thread_id;
         uint64_t end_key   = start_key + LOAD_SIZE / num_thread;
@@ -229,7 +231,7 @@ ycsb_load_run_randint(int                    index_type,
         thread_group[i].join();
 
 #ifdef ENABLE_RESIZE
-      iceberg_end(&hashtable, 0);
+      iceberg_end(hashtable, 0);
 #endif
       auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
         std::chrono::system_clock::now() - starttime);
@@ -245,7 +247,7 @@ ycsb_load_run_randint(int                    index_type,
       auto func = [&]() {
         int thread_id     = next_thread_id.fetch_add(1);
         tds[thread_id].id = thread_id;
-        tds[thread_id].ht = &hashtable;
+        tds[thread_id].ht = hashtable;
 
         uint64_t start_key = txn_count / num_thread * (uint64_t)thread_id;
         uint64_t end_key   = start_key + txn_count / num_thread;
