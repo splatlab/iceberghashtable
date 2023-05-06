@@ -166,12 +166,12 @@ main(int argc, char **argv)
   uint64_t tbits   = atoi(argv[1]);
   uint64_t resizes = atoi(argv[2]);
   uint64_t threads = atoi(argv[3]);
-  uint64_t N       = (1ULL << (tbits + resizes)) * 1.07;
+  uint64_t N       = (1ULL << tbits) * 1.07;
   // uint64_t N = (1ULL << tbits) * 1.07 * 1.90;
 
   high_resolution_clock::time_point t1 = high_resolution_clock::now();
 
-  iceberg_init(&table, tbits);
+  iceberg_init(&table, tbits - resizes);
 
   high_resolution_clock::time_point t2 = high_resolution_clock::now();
   if (!is_benchmark) {

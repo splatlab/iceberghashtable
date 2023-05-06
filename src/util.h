@@ -35,3 +35,10 @@ util_mmap(size_t length)
   }
   return ret;
 }
+
+static inline void
+util_munmap(void *addr, size_t length)
+{
+  int ret = munmap(addr, length);
+  assert(ret == 0);
+}

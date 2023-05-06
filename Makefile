@@ -36,7 +36,7 @@ CFLAGS = $(OPT) -Wall -march=native -pthread -Werror -Wfatal-errors $(HUGE) -DXX
 CPPFLAGS = $(OPT) -Wall -march=native -pthread -Werror -Wfatal-errors $(HUGE) -std=c++11
 INCLUDE = -I ./include -I ./src -I ./xxhash
 SOURCES = src/iceberg_table.c
-HEADERS = include/iceberg_table.h src/iceberg_precompute.h src/lock.h src/counter.h src/util.h src/verbose.h
+HEADERS = include/iceberg_table.h include/public_counter.h src/iceberg_precompute.h src/lock.h src/counter.h src/util.h src/verbose.h
 OBJECTS = $(subst src/,obj/,$(subst .c,.o,$(SOURCES)))
 
 all: micro ycsb
@@ -58,6 +58,9 @@ micro: $(OBJECTS) obj/micro.o
 
 ycsb: $(OBJECTS) obj/ycsb.o
 	$(CPP) $(CFLAGS) $^ -o $@ $(LIBS)
+
+tags: $(SOURCES) $(HEADERS)
+	ctags -R .
 
 .PHONY: clean format
 
