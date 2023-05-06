@@ -39,6 +39,6 @@ util_mmap(size_t length)
 static inline void
 util_munmap(void *addr, size_t length)
 {
-  int ret = munmap(addr, length);
+  __attribute__ ((unused)) int ret = munmap(addr, length);
   assert(ret == 0);
 }
