@@ -1073,16 +1073,10 @@ level2_insert(iceberg_table  *table,
     pb1     = pb2;
     sketch1 = sketch2;
     match_mask >>= 8;
-    popcnt1 = popcnt2;
   }
 
-
-  if (level2_insert_into_block_with_mask(
-        table, key, value, h, pb1, sketch1, match_mask, tid)) {
-    return true;
-  }
-
-  return level3_insert(table, key, value, h, tid);
+  return level2_insert_into_block_with_mask(
+    table, key, value, h, pb1, sketch1, match_mask, tid);
 }
 
 static inline bool iceberg_query_internal(iceberg_table   *table,
@@ -1142,17 +1136,23 @@ iceberg_insert(iceberg_table  *table,
 
   iceberg_value_t v;
   verbose_print_operation("INTERNAL QUERY:", key, value);
-  bool ret = true;
+  bool ret = false;
   if (unlikely(iceberg_query_internal(table, key, &v, &h, tid))) {
-    ret = true;
     goto out;
   }
   verbose_end("INTERNAL QUERY", true);
 
   ret = level1_insert_into_block(table, key, value, &h, pb, tid);
-  if (!ret) {
-    ret = level2_insert(table, key, value, &h, tid);
+  if (ret) {
+    goto out;
   }
+
+  ret = level2_insert(table, key, value, &h, tid);
+  if (ret) {
+    goto out;
+  }
+
+  ret = level3_insert(table, key, value, &h, tid);
 
 out:
   verbose_end("INSERT", false);
