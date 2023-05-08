@@ -10,7 +10,7 @@
 
 #define TEST_LOG_SLOTS 20
 
-#define TEST_OP_NAME_LENGTH 26
+#define TEST_OP_NAME_LENGTH 38
 
 #define BATCH_SIZE 1024
 
@@ -192,6 +192,36 @@ query_keys_in_range(iceberg_table *table,
   return true;
 }
 
+bool
+insert_n_more_keys(iceberg_table *table, uint64_t n, iceberg_key_t *start_key, iceberg_key_t *end_key, uint64_t tid)
+{
+  iceberg_key_t current_key = *end_key;
+  *end_key = current_key + n;
+  return insert_keys_in_range(table, current_key, *end_key, tid);
+}
+
+bool
+insert_n_keys(iceberg_table *table, uint64_t n, iceberg_key_t *start_key, iceberg_key_t *end_key, uint64_t tid)
+{
+  *start_key = 1;
+  *end_key = 1;
+  return insert_n_more_keys(table, n, start_key, end_key, tid);
+}
+
+bool
+check_load(iceberg_table *table, iceberg_key_t start_key, iceberg_key_t end_key)
+{
+  uint64_t load = iceberg_load(table);
+  if (load != end_key - start_key) {
+    print_fail_message("Unexpected load reported: %" PRIu64
+                       ", expected %" PRIu64,
+                       load,
+                       end_key - start_key);
+    return false;
+  }
+  return true;
+}
+
 void
 run_resize()
 {
@@ -206,9 +236,9 @@ run_resize()
   }
 
   // Insert keys so that the initial capacity is filled
-  iceberg_key_t start_key = 1;
-  iceberg_key_t end_key   = initial_capacity + 1;
-  if (!insert_keys_in_range(table, start_key, end_key, 0)) {
+  iceberg_key_t start_key;
+  iceberg_key_t end_key;
+  if (!insert_n_keys(table, initial_capacity, &start_key, &end_key, 0)) {
     goto out;
   }
 
@@ -219,38 +249,70 @@ run_resize()
 
   // Check that a resize hasn't happened, i.e. capacity is the same
   uint64_t capacity = iceberg_capacity(table);
-  if (initial_capacity != capacity) {
+  if (initial_capacity != end_key - start_key) {
     print_fail_message("Premature resize after %" PRIu64 " insertions",
                        initial_capacity);
     goto out;
   }
 
-  uint64_t load = iceberg_load(table);
-  if (load != initial_capacity) {
-    print_fail_message("Unexpected load reported: %" PRIu64
-                       ", expected %" PRIu64,
-                       load,
-                       initial_capacity);
+  // Check load
+  if (!check_load(table, start_key, end_key)) {
     goto out;
   }
 
   // Insert one more key, should cause a resize
-  iceberg_key_t one_more_key = end_key;
-  end_key                    = end_key + 1;
-  if (!insert_keys_in_range(table, one_more_key, end_key, 0)) {
+  if (!insert_n_more_keys(table, 1, &start_key, &end_key, 0)) {
     goto out;
   }
 
-  load = iceberg_load(table);
-  if (load != initial_capacity + 1) {
-    print_fail_message("Unexpected load reported: %" PRIu64
-                       ", expected %" PRIu64,
-                       load,
-                       initial_capacity + 1);
+  // Check load
+  if (!check_load(table, start_key, end_key)) {
     goto out;
   }
 
   // Check that the resized occured, i.e. capacity has doubled
+  capacity = iceberg_capacity(table);
+  if (capacity != initial_capacity * 2) {
+    print_fail_message("Unexpected initial_capacity after resize: %" PRIu64
+                       ", expected %" PRIu64,
+                       capacity,
+                       initial_capacity);
+    goto out;
+  }
+
+  // Check that all keys are found
+  if (!query_keys_in_range(table, start_key, end_key, true, 0)) {
+    goto out;
+  }
+
+  // Insert enough keys to cause a constant fraction of block moves
+  if (!insert_n_more_keys(table, initial_capacity / 64 - 1, &start_key, &end_key, 0)) {
+    goto out;
+  }
+
+  // Check load
+  if (!check_load(table, start_key, end_key)) {
+    goto out;
+  }
+
+  // Check that all keys are found
+  if (!query_keys_in_range(table, start_key, end_key, true, 0)) {
+    goto out;
+  }
+
+  // Insert up to capacity
+  iceberg_key_t current_key = end_key;
+  end_key = 2 * initial_capacity;
+  if (!insert_keys_in_range(table, current_key, end_key, 0)) {
+    goto out;
+  }
+
+  // Check load
+  if (!check_load(table, start_key, end_key)) {
+    goto out;
+  }
+
+  // Check that a second resize has not occured, i.e. capacity has exactly doubled
   capacity = iceberg_capacity(table);
   if (capacity != initial_capacity * 2) {
     print_fail_message("Unexpected initial_capacity after resize: %" PRIu64
@@ -380,6 +442,91 @@ out:
   close(&table);
 }
 
+void
+run_multithreaded_inserts_with_resize(uint64_t num_threads)
+{
+  char op_name[128];
+  snprintf(op_name, 128, "Multithreaded Inserts with Resize (%" PRIu64 ")", num_threads);
+  print_start_message(op_name);
+  iceberg_table *table;
+  uint64_t       initial_capacity;
+  int            rc = open(&table, &initial_capacity);
+  if (rc) {
+    print_fail_message(
+      "iceberg_create failed with error: %d -- %s", rc, strerror(rc));
+    return;
+  }
+
+  uint64_t      num_batches = initial_capacity / BATCH_SIZE;
+  uint64_t      num_inserts = num_batches * BATCH_SIZE;
+  thread_params params[num_threads];
+  thrd_t        threads[num_threads];
+  volatile _Atomic uint64_t batch_num = 0;
+  volatile bool stop = false;
+  for (uint64_t i = 0; i < num_threads; i++) {
+    params[i].table         = table;
+    params[i].key_batch_num = &batch_num;
+    params[i].num_batches   = num_batches;
+    params[i].batch_size    = BATCH_SIZE;
+    params[i].tid           = i;
+    params[i].expect_found  = false;
+    params[i].stop          = &stop;
+    int rc = thrd_create(&threads[i], insert_thread, &params[i]);
+    assert(rc == thrd_success);
+  }
+
+  for (uint64_t i = 0; i < num_threads; i++) {
+    int res;
+    int rc = thrd_join(threads[i], &res);
+    assert(rc == thrd_success);
+  }
+
+  uint64_t load = iceberg_load(table);
+  if (load != num_inserts) {
+    print_fail_message("Unexpected load reported: %" PRIu64
+                       ", expected %" PRIu64,
+                       load,
+                       num_inserts);
+    goto out;
+  }
+
+  if (!query_keys_in_range(table, 1, num_inserts + 1, true, 0)) {
+    goto out;
+  }
+
+  num_batches *= 2;
+  num_inserts *= 2;
+  for (uint64_t i = 0; i < num_threads; i++) {
+    // Other parameters are unchanged
+    params[i].num_batches   = num_batches;
+    int rc = thrd_create(&threads[i], insert_thread, &params[i]);
+    assert(rc == thrd_success);
+  }
+
+  for (uint64_t i = 0; i < num_threads; i++) {
+    int res;
+    int rc = thrd_join(threads[i], &res);
+    assert(rc == thrd_success);
+  }
+
+  load = iceberg_load(table);
+  if (load != num_inserts) {
+    print_fail_message("Unexpected load reported: %" PRIu64
+                       ", expected %" PRIu64,
+                       load,
+                       num_inserts);
+    goto out;
+  }
+
+  if (!query_keys_in_range(table, 1, num_inserts + 1, true, 0)) {
+    goto out;
+  }
+
+  print_success();
+out:
+  close(&table);
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -392,4 +539,8 @@ main(int argc, char *argv[])
   run_multithreaded_inserts(2);
   run_multithreaded_inserts(4);
   run_multithreaded_inserts(8);
+
+  run_multithreaded_inserts_with_resize(2);
+  run_multithreaded_inserts_with_resize(4);
+  run_multithreaded_inserts_with_resize(8);
 }
