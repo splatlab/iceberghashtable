@@ -82,7 +82,7 @@ run_basic()
   bool            inserted = iceberg_insert(table, key, value, 0);
   if (!inserted) {
     print_fail_message("iceberg_insert failed to insert key: %" PRIx64, key);
-    goto out_failed;
+    goto out;
   }
 
   // Query for the kv pair, should be found
@@ -91,14 +91,14 @@ run_basic()
   if (!found) {
     print_fail_message("iceberg_query failed to find inserted key: %" PRIx64,
                        key);
-    goto out_failed;
+    goto out;
   }
   if (returned_value != value) {
     print_fail_message("iceberg_query returned incorrect value: %" PRIx64
                        ", expected %" PRIx64,
                        returned_value,
                        value);
-    goto out_failed;
+    goto out;
   }
 
   // Query for a different key, should not be found
@@ -107,14 +107,14 @@ run_basic()
   if (found) {
     print_fail_message("iceberg_query found a non-inserted key: %" PRIx64,
                        another_key);
-    goto out_failed;
+    goto out;
   }
 
   // Try to reinsert the key, should fail
   inserted = iceberg_insert(table, key, value, 0);
   if (inserted) {
     print_fail_message("iceberg_insert overwrote inserted key: %" PRIx64, key);
-    goto out_failed;
+    goto out;
   }
 
   // Check the load
@@ -122,25 +122,95 @@ run_basic()
   if (load != 1) {
     print_fail_message(
       "iceberg_load reported incorrect load: %" PRIx64 ", expected 1", load);
-    goto out_failed;
+    goto out;
   }
 
   // Delete the key
   bool deleted = iceberg_delete(table, key, 0);
   if (!deleted) {
     print_fail_message("iceberg_insert failed to delete key: %" PRIx64, key);
-    goto out_failed;
+    goto out;
   }
 
   // Query for the key, should not be fouund
   found = iceberg_query(table, key, &returned_value, 0);
   if (found) {
     print_fail_message("iceberg_query found the deleted key: %" PRIx64, key);
-    goto out_failed;
+    goto out;
   }
 
   print_success();
-out_failed:
+out:
+  close(&table);
+}
+
+void
+run_resize()
+{
+  print_start_message("Resize");
+  iceberg_table *table;
+  uint64_t       initial_capacity;
+  int            rc = open(&table, &initial_capacity);
+  if (rc) {
+    print_fail_message(
+      "iceberg_create failed with error: %d -- %s", rc, strerror(rc));
+    return;
+  }
+
+  iceberg_key_t key = 1;
+  for (uint64_t i = 0; i < initial_capacity; i++) {
+    iceberg_value_t value    = key;
+    bool            inserted = iceberg_insert(table, key, value, 0);
+    if (!inserted) {
+      print_fail_message("iceberg_insert failed to insert key: %" PRIx64, key);
+      goto out;
+    }
+    key++;
+  }
+
+  uint64_t capacity = iceberg_capacity(table);
+  if (initial_capacity != capacity) {
+    print_fail_message("Premature resize after %" PRIu64 " insertions",
+                       initial_capacity);
+    goto out;
+  }
+
+  uint64_t load = iceberg_load(table);
+  if (load != initial_capacity) {
+    print_fail_message("Unexpected load reported: %" PRIu64
+                       ", expected %" PRIu64,
+                       load,
+                       initial_capacity);
+    goto out;
+  }
+
+  iceberg_value_t value    = key;
+  bool            inserted = iceberg_insert(table, key, value, 0);
+  if (!inserted) {
+    print_fail_message("iceberg_insert failed to insert key: %" PRIx64, key);
+    goto out;
+  }
+
+  load = iceberg_load(table);
+  if (load != initial_capacity + 1) {
+    print_fail_message("Unexpected load reported: %" PRIu64
+                       ", expected %" PRIu64,
+                       load,
+                       initial_capacity + 1);
+    goto out;
+  }
+
+  capacity = iceberg_capacity(table);
+  if (capacity != initial_capacity * 2) {
+    print_fail_message("Unexpected initial_capacity after resize: %" PRIu64
+                       ", expected %" PRIu64,
+                       capacity,
+                       initial_capacity);
+    goto out;
+  }
+
+  print_success();
+out:
   close(&table);
 }
 
@@ -151,4 +221,6 @@ main(int argc, char *argv[])
   run_open_close();
 
   run_basic();
+
+  run_resize();
 }
