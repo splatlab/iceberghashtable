@@ -508,6 +508,7 @@ run_multithreaded_inserts_with_resize(uint64_t num_threads)
     goto out;
   }
 
+  atomic_store(&batch_num, num_batches);
   num_batches *= 2;
   num_inserts *= 2;
   for (uint64_t i = 0; i < num_threads; i++) {

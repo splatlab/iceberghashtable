@@ -699,12 +699,16 @@ level1_insert_into_block(iceberg_table  *table,
   }
 
   uint64_t slot = __builtin_ctzll(match_mask);
-  counter_increment(&table->num_items_per_level, LEVEL1, tid);
   kv_pair *kv = get_level1_kv_pair(table, pb, slot);
   verbose_print_location(1, pb.partition, pb.block, slot, kv);
   atomic_write_128(key, value, kv);
+  fingerprint_t fp = h->fingerprint;
+  if (slot == 63) {
+    fp |= 1;
+  }
   sketch[slot] = h->fingerprint;
   verbose_print_sketch(sketch, 64);
+  counter_increment(&table->num_items_per_level, LEVEL1, tid);
   return true;
 }
 
@@ -740,6 +744,7 @@ level1_move_block(iceberg_table *table, partition_block pb, uint64_t tid)
 
   partition_block new_block_pb = get_new_block(table, pb);
   fingerprint_t  *sketch       = get_level1_sketch(table, pb);
+  lock_block(sketch);
   for (uint64_t i = 0; i < LEVEL1_BLOCK_SIZE; i++) {
     kv_pair *kv = get_level1_kv_pair(table, pb, i);
     if (kv->key == KEY_FREE) {
@@ -756,6 +761,7 @@ level1_move_block(iceberg_table *table, partition_block pb, uint64_t tid)
       delete_from_slot(table, kv, sketch, i, LEVEL1, tid);
     }
   }
+  unlock_block(sketch);
 
   verbose_end("MOVE", true);
   level1_decrement_resize_counter(table);
@@ -799,6 +805,7 @@ level2_insert_into_block_with_mask(iceberg_table  *table,
       atomic_write_128(key, value, kv);
       sketch[slot] = h->fingerprint;
       verbose_print_sketch(sketch, 8);
+      counter_increment(&table->num_items_per_level, LEVEL2, tid);
       return true;
     }
   }

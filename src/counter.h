@@ -23,7 +23,7 @@ counter_init(counter *cntr)
 }
 
 static inline void
-counter_increment(counter *cntr, uint64_t batch, uint8_t tid)
+counter_increment(counter *cntr, uint64_t batch, uint64_t tid)
 {
   int64_t local = ++cntr->local_counters[tid].count[batch];
   if (local == THRESHOLD) {
@@ -33,13 +33,23 @@ counter_increment(counter *cntr, uint64_t batch, uint8_t tid)
 }
 
 static inline void
-counter_decrement(counter *cntr, uint64_t batch, uint8_t tid)
+counter_decrement(counter *cntr, uint64_t batch, uint64_t tid)
 {
   int64_t local = --cntr->local_counters[tid].count[batch];
   if (local == -THRESHOLD) {
     cntr->local_counters[tid].count[batch] = 0;
     __atomic_fetch_add(&cntr->global[batch], local, __ATOMIC_SEQ_CST);
   }
+}
+
+static inline int64_t
+counter_get_local(counter *cntr, uint64_t batch, uint64_t tid)
+{
+  int64_t local = cntr->local_counters[tid].count[batch];
+  if (local < 0) {
+    local += THRESHOLD;
+  }
+  return local;
 }
 
 /*
