@@ -33,7 +33,8 @@ print_start_message(const char *test_name)
 {
   size_t len = strnlen(test_name, TEST_OP_NAME_LENGTH);
   assert(len <= TEST_OP_NAME_LENGTH);
-  printf("Starting test %s...%*s", test_name, (int)(TEST_OP_NAME_LENGTH - len), "");
+  printf(
+    "Starting test %s...%*s", test_name, (int)(TEST_OP_NAME_LENGTH - len), "");
 }
 
 void
@@ -193,18 +194,26 @@ query_keys_in_range(iceberg_table *table,
 }
 
 bool
-insert_n_more_keys(iceberg_table *table, uint64_t n, iceberg_key_t *start_key, iceberg_key_t *end_key, uint64_t tid)
+insert_n_more_keys(iceberg_table *table,
+                   uint64_t       n,
+                   iceberg_key_t *start_key,
+                   iceberg_key_t *end_key,
+                   uint64_t       tid)
 {
   iceberg_key_t current_key = *end_key;
-  *end_key = current_key + n;
+  *end_key                  = current_key + n;
   return insert_keys_in_range(table, current_key, *end_key, tid);
 }
 
 bool
-insert_n_keys(iceberg_table *table, uint64_t n, iceberg_key_t *start_key, iceberg_key_t *end_key, uint64_t tid)
+insert_n_keys(iceberg_table *table,
+              uint64_t       n,
+              iceberg_key_t *start_key,
+              iceberg_key_t *end_key,
+              uint64_t       tid)
 {
   *start_key = 1;
-  *end_key = 1;
+  *end_key   = 1;
   return insert_n_more_keys(table, n, start_key, end_key, tid);
 }
 
@@ -286,7 +295,8 @@ run_resize()
   }
 
   // Insert enough keys to cause a constant fraction of block moves
-  if (!insert_n_more_keys(table, initial_capacity / 64 - 1, &start_key, &end_key, 0)) {
+  if (!insert_n_more_keys(
+        table, initial_capacity / 64 - 1, &start_key, &end_key, 0)) {
     goto out;
   }
 
@@ -302,7 +312,7 @@ run_resize()
 
   // Insert up to capacity
   iceberg_key_t current_key = end_key;
-  end_key = 2 * initial_capacity;
+  end_key                   = 2 * initial_capacity;
   if (!insert_keys_in_range(table, current_key, end_key, 0)) {
     goto out;
   }
@@ -312,7 +322,8 @@ run_resize()
     goto out;
   }
 
-  // Check that a second resize has not occured, i.e. capacity has exactly doubled
+  // Check that a second resize has not occured, i.e. capacity has exactly
+  // doubled
   capacity = iceberg_capacity(table);
   if (capacity != initial_capacity * 2) {
     print_fail_message("Unexpected initial_capacity after resize: %" PRIu64
@@ -400,12 +411,12 @@ run_multithreaded_inserts(uint64_t num_threads)
     return;
   }
 
-  uint64_t      num_batches = initial_capacity / BATCH_SIZE;
-  uint64_t      num_inserts = num_batches * BATCH_SIZE;
-  thread_params params[num_threads];
-  thrd_t        threads[num_threads];
+  uint64_t                  num_batches = initial_capacity / BATCH_SIZE;
+  uint64_t                  num_inserts = num_batches * BATCH_SIZE;
+  thread_params             params[num_threads];
+  thrd_t                    threads[num_threads];
   volatile _Atomic uint64_t batch_num = 0;
-  volatile bool stop = false;
+  volatile bool             stop      = false;
   for (uint64_t i = 0; i < num_threads; i++) {
     params[i].table         = table;
     params[i].key_batch_num = &batch_num;
@@ -446,7 +457,10 @@ void
 run_multithreaded_inserts_with_resize(uint64_t num_threads)
 {
   char op_name[128];
-  snprintf(op_name, 128, "Multithreaded Inserts with Resize (%" PRIu64 ")", num_threads);
+  snprintf(op_name,
+           128,
+           "Multithreaded Inserts with Resize (%" PRIu64 ")",
+           num_threads);
   print_start_message(op_name);
   iceberg_table *table;
   uint64_t       initial_capacity;
@@ -457,12 +471,12 @@ run_multithreaded_inserts_with_resize(uint64_t num_threads)
     return;
   }
 
-  uint64_t      num_batches = initial_capacity / BATCH_SIZE;
-  uint64_t      num_inserts = num_batches * BATCH_SIZE;
-  thread_params params[num_threads];
-  thrd_t        threads[num_threads];
+  uint64_t                  num_batches = initial_capacity / BATCH_SIZE;
+  uint64_t                  num_inserts = num_batches * BATCH_SIZE;
+  thread_params             params[num_threads];
+  thrd_t                    threads[num_threads];
   volatile _Atomic uint64_t batch_num = 0;
-  volatile bool stop = false;
+  volatile bool             stop      = false;
   for (uint64_t i = 0; i < num_threads; i++) {
     params[i].table         = table;
     params[i].key_batch_num = &batch_num;
@@ -498,8 +512,8 @@ run_multithreaded_inserts_with_resize(uint64_t num_threads)
   num_inserts *= 2;
   for (uint64_t i = 0; i < num_threads; i++) {
     // Other parameters are unchanged
-    params[i].num_batches   = num_batches;
-    int rc = thrd_create(&threads[i], insert_thread, &params[i]);
+    params[i].num_batches = num_batches;
+    int rc                = thrd_create(&threads[i], insert_thread, &params[i]);
     assert(rc == thrd_success);
   }
 
