@@ -82,7 +82,7 @@ run_basic()
   bool            inserted = iceberg_insert(table, key, value, 0);
   if (!inserted) {
     print_fail_message("iceberg_insert failed to insert key: %" PRIx64, key);
-    goto out;
+    goto out_failed;
   }
 
   // Query for the kv pair, should be found
@@ -91,14 +91,14 @@ run_basic()
   if (!found) {
     print_fail_message("iceberg_query failed to find inserted key: %" PRIx64,
                        key);
-    goto out;
+    goto out_failed;
   }
   if (returned_value != value) {
     print_fail_message("iceberg_query returned incorrect value: %" PRIx64
                        ", expected %" PRIx64,
                        returned_value,
                        value);
-    goto out;
+    goto out_failed;
   }
 
   // Query for a different key, should not be found
@@ -107,14 +107,14 @@ run_basic()
   if (found) {
     print_fail_message("iceberg_query found a non-inserted key: %" PRIx64,
                        another_key);
-    goto out;
+    goto out_failed;
   }
 
   // Try to reinsert the key, should fail
   inserted = iceberg_insert(table, key, value, 0);
-  if (!inserted) {
+  if (inserted) {
     print_fail_message("iceberg_insert overwrote inserted key: %" PRIx64, key);
-    goto out;
+    goto out_failed;
   }
 
   // Check the load
@@ -122,26 +122,26 @@ run_basic()
   if (load != 1) {
     print_fail_message(
       "iceberg_load reported incorrect load: %" PRIx64 ", expected 1", load);
-    goto out;
+    goto out_failed;
   }
 
   // Delete the key
   bool deleted = iceberg_delete(table, key, 0);
   if (!deleted) {
     print_fail_message("iceberg_insert failed to delete key: %" PRIx64, key);
-    goto out;
+    goto out_failed;
   }
 
   // Query for the key, should not be fouund
   found = iceberg_query(table, key, &returned_value, 0);
   if (found) {
     print_fail_message("iceberg_query found the deleted key: %" PRIx64, key);
-    goto out;
+    goto out_failed;
   }
 
-out:
-  close(&table);
   print_success();
+out_failed:
+  close(&table);
 }
 
 
