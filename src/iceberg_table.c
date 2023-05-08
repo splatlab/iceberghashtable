@@ -1361,8 +1361,8 @@ level2_query(iceberg_table   *table,
              iceberg_value_t *value,
              hash            *h)
 {
-  partition_block pb1   = get_block(table, h, LEVEL2_BLOCK1);
-  bool            found = level2_maybe_query_old_block(table, key, value, h, pb1);
+  partition_block pb1 = get_block(table, h, LEVEL2_BLOCK1);
+  bool found          = level2_maybe_query_old_block(table, key, value, h, pb1);
   if (found) {
     return found;
   }
@@ -1372,7 +1372,7 @@ level2_query(iceberg_table   *table,
   }
 
   partition_block pb2 = get_block(table, h, LEVEL2_BLOCK2);
-  found                 = level2_maybe_query_old_block(table, key, value, h, pb2);
+  found               = level2_maybe_query_old_block(table, key, value, h, pb2);
   if (found) {
     return found;
   }

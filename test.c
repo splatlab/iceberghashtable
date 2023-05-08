@@ -1,6 +1,7 @@
 #include <assert.h>
 #include <errno.h>
 #include <stdarg.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <string.h>
 #include <threads.h>
@@ -8,6 +9,10 @@
 #include "iceberg_table.h"
 
 #define TEST_LOG_SLOTS 20
+
+#define TEST_OP_NAME_LENGTH 26
+
+#define BATCH_SIZE 1024
 
 int
 open(iceberg_table **table, uint64_t *capacity)
@@ -26,9 +31,9 @@ close(iceberg_table **table)
 void
 print_start_message(const char *test_name)
 {
-  size_t len = strnlen(test_name, 24);
-  assert(len <= 24);
-  printf("Starting test %s...%*s", test_name, (int)(24 - len), "");
+  size_t len = strnlen(test_name, TEST_OP_NAME_LENGTH);
+  assert(len <= TEST_OP_NAME_LENGTH);
+  printf("Starting test %s...%*s", test_name, (int)(TEST_OP_NAME_LENGTH - len), "");
 }
 
 void
@@ -114,7 +119,8 @@ run_basic()
   // Try to reinsert the key, should fail
   inserted = iceberg_insert(table, key, value, 0);
   if (inserted) {
-    print_fail_message("iceberg_insert overwrote inserted key: 0x%" PRIx64, key);
+    print_fail_message("iceberg_insert overwrote inserted key: 0x%" PRIx64,
+                       key);
     goto out;
   }
 
@@ -146,13 +152,17 @@ out:
 }
 
 bool
-insert_keys_in_range(iceberg_table *table, iceberg_key_t start_key, iceberg_key_t end_key)
+insert_keys_in_range(iceberg_table *table,
+                     iceberg_key_t  start_key,
+                     iceberg_key_t  end_key,
+                     uint64_t       tid)
 {
   for (iceberg_key_t key = start_key; key < end_key; key++) {
     iceberg_value_t value    = key;
-    bool            inserted = iceberg_insert(table, key, value, 0);
+    bool            inserted = iceberg_insert(table, key, value, tid);
     if (!inserted) {
-      print_fail_message("iceberg_insert failed to insert key: 0x%" PRIx64, key);
+      print_fail_message("iceberg_insert failed to insert key: 0x%" PRIx64,
+                         key);
       return false;
     }
   }
@@ -160,16 +170,21 @@ insert_keys_in_range(iceberg_table *table, iceberg_key_t start_key, iceberg_key_
 }
 
 bool
-query_keys_in_range(iceberg_table *table, iceberg_key_t start_key, iceberg_key_t end_key, bool expect_found)
+query_keys_in_range(iceberg_table *table,
+                    iceberg_key_t  start_key,
+                    iceberg_key_t  end_key,
+                    bool           expect_found,
+                    uint64_t       tid)
 {
   for (iceberg_key_t key = start_key; key < end_key; key++) {
     iceberg_value_t value;
-    bool            found = iceberg_query(table, key, &value, 0);
+    bool            found = iceberg_query(table, key, &value, tid);
     if (found != expect_found) {
       if (expect_found) {
         print_fail_message("iceberg_query failed to find key: 0x%" PRIx64, key);
       } else {
-        print_fail_message("iceberg_query found unexpected key: 0x%" PRIx64, key);
+        print_fail_message("iceberg_query found unexpected key: 0x%" PRIx64,
+                           key);
       }
       return false;
     }
@@ -192,13 +207,13 @@ run_resize()
 
   // Insert keys so that the initial capacity is filled
   iceberg_key_t start_key = 1;
-  iceberg_key_t end_key = initial_capacity + 1;
-  if (!insert_keys_in_range(table, start_key, end_key)) {
+  iceberg_key_t end_key   = initial_capacity + 1;
+  if (!insert_keys_in_range(table, start_key, end_key, 0)) {
     goto out;
   }
 
   // Check that all keys are found
-  if (!query_keys_in_range(table, start_key, end_key, true)) {
+  if (!query_keys_in_range(table, start_key, end_key, true, 0)) {
     goto out;
   }
 
@@ -221,8 +236,8 @@ run_resize()
 
   // Insert one more key, should cause a resize
   iceberg_key_t one_more_key = end_key;
-  end_key = end_key + 1;
-  if (!insert_keys_in_range(table, one_more_key, end_key)) {
+  end_key                    = end_key + 1;
+  if (!insert_keys_in_range(table, one_more_key, end_key, 0)) {
     goto out;
   }
 
@@ -246,7 +261,7 @@ run_resize()
   }
 
   // Check that all keys are found
-  if (!query_keys_in_range(table, start_key, end_key, true)) {
+  if (!query_keys_in_range(table, start_key, end_key, true, 0)) {
     goto out;
   }
 
@@ -256,20 +271,113 @@ out:
 }
 
 typedef struct {
-  iceberg_table *table;
-  uint64_t start_key;
-  uint64_t end_key;
-  bool     expect_found;
+  iceberg_table             *table;
+  volatile _Atomic uint64_t *key_batch_num;
+  uint64_t                   num_batches;
+  uint64_t                   batch_size;
+  uint64_t                   tid;
+  bool                       expect_found;
+  volatile bool             *stop;
 } thread_params;
 
-int insert_thread(void *arg)
+int
+insert_thread(void *arg)
 {
   thread_params *params = arg;
-  assert(params->start_key < params->end_key);
 
-  bool succeeded = insert_keys_in_range(params->table, params->start_key, params->end_key);
+  uint64_t batch_num = atomic_fetch_add(params->key_batch_num, 1);
+  while (batch_num < params->num_batches) {
+    iceberg_key_t start_key = batch_num * params->batch_size + 1;
+    iceberg_key_t end_key   = start_key + params->batch_size;
+    bool          succeeded =
+      insert_keys_in_range(params->table, start_key, end_key, params->tid);
+    if (!succeeded) {
+      return -1;
+    }
+    batch_num = atomic_fetch_add(params->key_batch_num, 1);
+  }
 
-  return succeeded;
+  return 0;
+}
+
+int
+query_thread(void *arg)
+{
+  thread_params *params = arg;
+
+  do {
+    uint64_t batch_num = atomic_load(params->key_batch_num);
+    if (batch_num != 0) {
+      batch_num--;
+      iceberg_key_t start_key = batch_num * params->batch_size + 1;
+      iceberg_key_t end_key   = start_key + params->batch_size;
+      bool          succeeded = query_keys_in_range(
+        params->table, start_key, end_key, params->expect_found, params->tid);
+      if (!succeeded) {
+        return -1;
+      }
+      batch_num = atomic_load(params->key_batch_num);
+    }
+  } while (!*params->stop);
+
+  return 0;
+}
+
+void
+run_multithreaded_inserts(uint64_t num_threads)
+{
+  char op_name[128];
+  snprintf(op_name, 128, "Multithreaded Inserts (%" PRIu64 ")", num_threads);
+  print_start_message(op_name);
+  iceberg_table *table;
+  uint64_t       initial_capacity;
+  int            rc = open(&table, &initial_capacity);
+  if (rc) {
+    print_fail_message(
+      "iceberg_create failed with error: %d -- %s", rc, strerror(rc));
+    return;
+  }
+
+  uint64_t      num_batches = initial_capacity / BATCH_SIZE;
+  uint64_t      num_inserts = num_batches * BATCH_SIZE;
+  thread_params params[num_threads];
+  thrd_t        threads[num_threads];
+  volatile _Atomic uint64_t batch_num = 0;
+  volatile bool stop = false;
+  for (uint64_t i = 0; i < num_threads; i++) {
+    params[i].table         = table;
+    params[i].key_batch_num = &batch_num;
+    params[i].num_batches   = num_batches;
+    params[i].batch_size    = BATCH_SIZE;
+    params[i].tid           = i;
+    params[i].expect_found  = false;
+    params[i].stop          = &stop;
+    int rc = thrd_create(&threads[i], insert_thread, &params[i]);
+    assert(rc == thrd_success);
+  }
+
+  for (uint64_t i = 0; i < num_threads; i++) {
+    int res;
+    int rc = thrd_join(threads[i], &res);
+    assert(rc == thrd_success);
+  }
+
+  uint64_t load = iceberg_load(table);
+  if (load != num_inserts) {
+    print_fail_message("Unexpected load reported: %" PRIu64
+                       ", expected %" PRIu64,
+                       load,
+                       num_inserts);
+    goto out;
+  }
+
+  if (!query_keys_in_range(table, 1, num_inserts + 1, true, 0)) {
+    goto out;
+  }
+
+  print_success();
+out:
+  close(&table);
 }
 
 int
@@ -280,4 +388,8 @@ main(int argc, char *argv[])
   run_basic();
 
   run_resize();
+
+  run_multithreaded_inserts(2);
+  run_multithreaded_inserts(4);
+  run_multithreaded_inserts(8);
 }
