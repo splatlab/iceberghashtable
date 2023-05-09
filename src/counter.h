@@ -70,3 +70,18 @@ counter_get(counter *cntr, uint64_t batch)
 {
   return cntr->global[batch];
 }
+
+static inline int64_t
+counter_local_sum(counter *cntr, uint64_t batch_start, uint64_t batch_end, uint64_t tid)
+{
+  int64_t sum = 0;
+  for (uint64_t i = batch_start; i < batch_end; i++) {
+    sum += cntr->local_counters[tid].count[i];
+  }
+  while (sum < 0) {
+    sum += THRESHOLD;
+  }
+  sum %= THRESHOLD;
+
+  return sum;
+}

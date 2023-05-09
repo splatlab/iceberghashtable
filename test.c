@@ -183,6 +183,10 @@ query_keys_in_range(iceberg_table *table,
     if (found != expect_found) {
       if (expect_found) {
         print_fail_message("iceberg_query failed to find key: 0x%" PRIx64, key);
+        bool scan_found = iceberg_scan_for_key(table, key);
+        if (!scan_found) {
+          printf("Not found via scan\n");
+        }
       } else {
         print_fail_message("iceberg_query found unexpected key: 0x%" PRIx64,
                            key);
@@ -326,7 +330,7 @@ run_resize()
   // doubled
   capacity = iceberg_capacity(table);
   if (capacity != initial_capacity * 2) {
-    print_fail_message("Unexpected initial_capacity after resize: %" PRIu64
+    print_fail_message("Unexpected capacity after resize: %" PRIu64
                        ", expected %" PRIu64,
                        capacity,
                        initial_capacity);
@@ -530,6 +534,15 @@ run_multithreaded_inserts_with_resize(uint64_t num_threads)
                        ", expected %" PRIu64,
                        load,
                        num_inserts);
+    goto out;
+  }
+
+  uint64_t capacity = iceberg_capacity(table);
+  if (capacity != initial_capacity * 2) {
+    print_fail_message("Unexpected capacity after resize: %" PRIu64
+                       ", expected %" PRIu64,
+                       capacity,
+                       initial_capacity);
     goto out;
   }
 

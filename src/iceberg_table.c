@@ -799,7 +799,6 @@ level2_insert_into_block_with_mask(iceberg_table  *table,
     match_mask    = match_mask & ~(1ULL << slot);
 
     if (__sync_bool_compare_and_swap(&sketch[slot], 0, 1)) {
-      counter_increment(&table->num_items_per_level, LEVEL2, tid);
       kv_pair *kv = get_level2_kv_pair(table, pb, slot);
       verbose_print_location(2, pb.partition, pb.block, slot, kv);
       atomic_write_128(key, value, kv);
@@ -1468,5 +1467,29 @@ iceberg_query(iceberg_table   *table,
   hash h = hash_key(table, &key);
   ret    = iceberg_query_internal(table, key, value, &h, tid);
   verbose_end("QUERY", false);
+  return ret;
+}
+
+bool
+iceberg_scan_for_key(iceberg_table *table, iceberg_key_t key)
+{
+  bool ret = false;
+  for (uint64_t block_num = 0; block_num < table->num_blocks; block_num++) {
+    partition_block pb = decode_raw_block(table, block_num);
+    for (uint64_t slot_num = 0; slot_num < LEVEL1_BLOCK_SIZE; slot_num++) {
+      kv_pair *kv = get_level1_kv_pair(table, pb, slot_num);
+      if (kv->key == key) {
+        printf("Key found in level1 block: 0x%" PRIx64 ", slot: %" PRIu64 "\n", block_num, slot_num);
+        ret = true;
+      }
+    }
+    for (uint64_t slot_num = 0; slot_num < LEVEL2_BLOCK_SIZE; slot_num++) {
+      kv_pair *kv = get_level2_kv_pair(table, pb, slot_num);
+      if (kv->key == key) {
+        printf("Key found in level2 block: 0x%" PRIx64 ", slot: %" PRIu64 "\n", block_num, slot_num);
+        ret = true;
+      }
+    }
+  }
   return ret;
 }

@@ -44,6 +44,8 @@ double   iceberg_load_factor(iceberg_table *table);
 void iceberg_end(iceberg_table *table, uint64_t tid);
 #endif
 
+bool iceberg_scan_for_key(iceberg_table *t, iceberg_key_t key);
+
 #ifdef __cplusplus
 }
 #endif
