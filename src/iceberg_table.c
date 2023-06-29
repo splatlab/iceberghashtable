@@ -135,34 +135,46 @@ static inline void split_hash(uint64_t hash, uint8_t *fprint, uint64_t *index, i
 #define LOCK_MASK 1ULL
 #define UNLOCK_MASK ~1ULL
 
-static inline void lock_block(uint64_t * metadata)
+static inline void lock_block(uint8_t metadata[64])
 {
 #ifdef ENABLE_BLOCK_LOCKING
-  uint64_t *data = metadata + 7;
+  uint64_t *metadata64 = (uint64_t *)metadata;
+  uint64_t *data = metadata64 + 7;
   while ((__sync_fetch_and_or(data, LOCK_MASK) & 1) != 0) { _mm_pause(); }
 #endif
 }
 
-static inline void unlock_block(uint64_t * metadata)
+static inline void unlock_block(uint8_t metadata[64])
 {
 #ifdef ENABLE_BLOCK_LOCKING
-  uint64_t *data = metadata + 7;
-   *data = *data & UNLOCK_MASK;
+  uint64_t *metadata64 = (uint64_t *)metadata;
+  uint64_t *data = metadata64 + 7;
+  *data = *data & UNLOCK_MASK;
 #endif
 }
 
 static inline uint32_t slot_mask_32(uint8_t * metadata, uint8_t fprint) {
+#if defined USE_AVX && __AVX512BW__ && defined __AVX512VL__
   __m256i bcast = _mm256_set1_epi8(fprint);
   __m256i block = _mm256_loadu_si256((const __m256i *)(metadata));
-#if defined __AVX512BW__ && defined __AVX512VL__
   return _mm256_cmp_epi8_mask(bcast, block, _MM_CMPINT_EQ);
-#else
+#elif defined USE_AVX && defined __AVX__ && defined __AVX2__
+  __m256i bcast = _mm256_set1_epi8(fprint);
+  __m256i block = _mm256_loadu_si256((const __m256i *)(metadata));
   __m256i cmp = _mm256_cmpeq_epi8(bcast, block);
   return _mm256_movemask_epi8(cmp);
+#else
+  uint32_t result = 0;
+  for (int i = 0; i < 32; i++) {
+    if (metadata[i] == fprint) {
+      result |= (1 << i);
+    }
+  }
+  return result;
 #endif
 }
 
-#if defined __AVX512F__ && defined __AVX512BW__
+#if defined USE_AVX && defined __AVX512F__ && defined __AVX512BW__
 static inline uint64_t slot_mask_64(uint8_t * metadata, uint8_t fprint) {
   __m512i mask = _mm512_loadu_si512((const __m512i *)(broadcast_mask));
   __m512i bcast = _mm512_set1_epi8(fprint);
@@ -171,7 +183,7 @@ static inline uint64_t slot_mask_64(uint8_t * metadata, uint8_t fprint) {
   block = _mm512_or_epi64(block, mask);
   return _mm512_cmp_epi8_mask(bcast, block, _MM_CMPINT_EQ);
 }
-#else /* ! (defined __AVX512F__ && defined __AVX512BW__) */
+#elif defined USE_AVX && defined __AVX__ && defined __AVX2__
 static inline uint32_t slot_mask_64_half(__m256i fprint, __m256i md, __m256i mask)
 {
   __m256i masked_fp = _mm256_or_si256(fprint, mask);
@@ -193,7 +205,18 @@ static inline uint64_t slot_mask_64(uint8_t * metadata, uint8_t fp) {
 
   return ((uint64_t)result2 << 32) | result1;
 }
-#endif /* ! (defined __AVX512F__ && defined __AVX512BW__) */
+#else
+static inline uint64_t slot_mask_64(uint8_t * metadata, uint8_t fp) {
+  uint64_t result = 0;
+  for (int i = 0; i < 64; i++) {
+    if ((metadata[i] | broadcast_mask[i]) == (fp | broadcast_mask[i])) {
+      result |= (1ULL << i);
+    }
+  }
+
+  return result;
+}
+#endif
 
 
 static inline void atomic_write_128(uint64_t key, uint64_t val, uint64_t *slot) {
@@ -215,7 +238,7 @@ static uint64_t iceberg_block_load(iceberg_table * table, uint64_t index, uint8_
     return table->metadata.lv3_sizes[bindex][boffset];
 }
 
-static uint64_t iceberg_table_load(iceberg_table * table) {
+uint64_t iceberg_table_load(iceberg_table * table) {
   uint64_t total = 0;
 
   for (uint8_t i = 1; i <= 3; ++i) {
@@ -227,7 +250,7 @@ static uint64_t iceberg_table_load(iceberg_table * table) {
   return total;
 }
 
-static double iceberg_block_load_factor(iceberg_table * table, uint64_t index, uint8_t level) {
+double iceberg_block_load_factor(iceberg_table * table, uint64_t index, uint8_t level) {
   if (level == 1)
     return iceberg_block_load(table, index, level) / (double)(1ULL << SLOT_BITS);
   else if (level == 2)
@@ -236,7 +259,7 @@ static double iceberg_block_load_factor(iceberg_table * table, uint64_t index, u
     return iceberg_block_load(table, index, level);
 }
 
-static inline size_t round_up(size_t n, size_t k) {
+inline size_t round_up(size_t n, size_t k) {
   size_t rem = n % k;
   if (rem == 0) {
     return n;
@@ -1197,11 +1220,11 @@ __attribute__ ((always_inline)) inline bool iceberg_insert(iceberg_table * table
   uint64_t bindex, boffset;
   get_index_offset(table->metadata.log_init_size, index, &bindex, &boffset);
 
-  lock_block(&metadata->lv1_md[bindex][boffset].block_md);
+  lock_block(metadata->lv1_md[bindex][boffset].block_md);
   ValueType v;
   if (unlikely(iceberg_get_value(table, key, &v, thread_id))) {
     /*printf("Found!\n");*/
-    unlock_block(&metadata->lv1_md[bindex][boffset].block_md);
+    unlock_block(metadata->lv1_md[bindex][boffset].block_md);
     return true;
   }
 
@@ -1209,7 +1232,7 @@ __attribute__ ((always_inline)) inline bool iceberg_insert(iceberg_table * table
   if (!ret)
     ret = iceberg_lv2_insert(table, key, value, index, thread_id);
 
-  unlock_block(&metadata->lv1_md[bindex][boffset].block_md);
+  unlock_block(metadata->lv1_md[bindex][boffset].block_md);
   return ret;
 }
 
@@ -1433,7 +1456,7 @@ bool iceberg_remove(iceberg_table * table, KeyType key, uint8_t thread_id) {
   }
 #endif
 
-  lock_block(&metadata->lv1_md[bindex][boffset].block_md);
+  lock_block(metadata->lv1_md[bindex][boffset].block_md);
   __mmask64 md_mask = slot_mask_64(metadata->lv1_md[bindex][boffset].block_md, fprint);
   uint8_t popct = __builtin_popcountll(md_mask);
 
@@ -1447,14 +1470,14 @@ bool iceberg_remove(iceberg_table * table, KeyType key, uint8_t thread_id) {
       pmem_persist(&blocks[boffset].slots[slot], sizeof(kv_pair));
 #endif
       pc_add(&metadata->lv1_balls, -1, thread_id);
-      unlock_block(&metadata->lv1_md[bindex][boffset].block_md);
+      unlock_block(metadata->lv1_md[bindex][boffset].block_md);
       return true;
     }
   }
 
   bool ret = iceberg_lv2_remove(table, key, index, thread_id);
 
-  unlock_block(&metadata->lv1_md[bindex][boffset].block_md);
+  unlock_block(metadata->lv1_md[bindex][boffset].block_md);
   return ret;
 }
 
