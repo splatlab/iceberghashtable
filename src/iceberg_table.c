@@ -153,8 +153,6 @@ static inline void unlock_block(uint8_t metadata[64])
 #endif
 }
 
-#define NON_AVX_METHOD 1
-
 static inline uint32_t slot_mask_32(uint8_t * metadata, uint8_t fprint) {
 #if defined USE_AVX && __AVX512BW__ && defined __AVX512VL__
   __m256i bcast = _mm256_set1_epi8(fprint);
@@ -167,8 +165,6 @@ static inline uint32_t slot_mask_32(uint8_t * metadata, uint8_t fprint) {
   return _mm256_movemask_epi8(cmp);
 #else
   uint32_t result = 0;
-
-#if NON_AVX_METHOD == 0
   const uint64_t bcast = 0x0101010101010101ULL;
   const uint64_t fp = bcast * fprint;
   uint64_t *metadata64 = (uint64_t *)metadata;
@@ -177,31 +173,6 @@ static inline uint32_t slot_mask_32(uint8_t * metadata, uint8_t fprint) {
     uint64_t r = _pext_u64(c, bcast);
     result |= r << (8*i);
   }
-
-#elif NON_AVX_METHOD == 1
-
-  const uint64_t hbmask = 0x8080808080808080ULL;
-  uint64_t fp = 0x0101010101010101ULL * fprint;
-  uint64_t *metadata64 = (uint64_t *)metadata;
-  for (int i = 0; i < 8; i++) {
-    uint64_t x = (~(fp ^ metadata64[i]));
-    uint64_t hbs = _pext_u64(x, hbmask);
-    x &= ~hbmask;
-    x += 0x0101010101010101ULL;;
-    uint64_t lbs = _pext_u64(x, hbmask);
-    uint64_t r = hbs & lbs;
-    result |= r << (8*i);
-  }
-
-#elif NON_AVX_METHOD == 2
-
-  for (int i = 0; i < 32; i++) {
-    if (metadata[i] == fprint) {
-      result |= (1 << i);
-    }
-  }
-#endif
-
   return result;
 #endif
 }
@@ -240,24 +211,6 @@ static inline uint64_t slot_mask_64(uint8_t * metadata, uint8_t fp) {
 #else
 static inline uint64_t slot_mask_64(uint8_t * metadata, uint8_t fprint) {
   uint64_t result = 0;
-
-#if NON_AVX_METHOD == 0
-  const uint64_t hbmask = 0x8080808080808080ULL;
-  uint64_t fp = 0x0101010101010101ULL * fprint;
-  uint64_t *metadata64 = (uint64_t *)metadata;
-  uint64_t *broadcast_mask64 = (uint64_t *)broadcast_mask;
-  for (int i = 0; i < 8; i++) {
-    uint64_t x = (~(fp ^ metadata64[i])) | broadcast_mask64[i];
-    uint64_t hbs = _pext_u64(x, hbmask);
-    x &= ~hbmask;
-    x += 0x0101010101010101ULL;;
-    uint64_t lbs = _pext_u64(x, hbmask);
-    uint64_t r = hbs & lbs;
-    result |= r << (8*i);
-  }
-
-#elif NON_AVX_METHOD == 1
-
   const uint64_t bcast = 0x0101010101010101ULL;
   const uint64_t fp = bcast * fprint;
   const uint64_t * broadcast_mask64 = (const uint64_t *)broadcast_mask;
@@ -268,17 +221,6 @@ static inline uint64_t slot_mask_64(uint8_t * metadata, uint8_t fprint) {
     uint64_t r = _pext_u64(c, bcast);
     result |= r << (8*i);
   }
-
-#elif NON_AVX_METHOD == 2
-
-  for (int i = 0; i < 64; i++) {
-    if ((metadata[i] | broadcast_mask[i]) == (fprint | broadcast_mask[i])) {
-      result |= (1ULL << i);
-    }
-  }
-
-#endif
-
   return result;
 }
 #endif
