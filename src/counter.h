@@ -11,15 +11,14 @@ typedef __attribute__((aligned(64))) struct {
 } local_counter;
 
 typedef __attribute__((aligned(64))) struct counter {
-  int64_t        global[8];
-  local_counter *local_counters;
+  int64_t       global[8];
+  local_counter local_counters[NUM_COUNTERS];
 } counter;
 
 static inline void
 counter_init(counter *cntr)
 {
-  size_t local_counter_bytes = NUM_COUNTERS * sizeof(local_counter);
-  cntr->local_counters       = util_mmap(local_counter_bytes);
+  memset(cntr, 0, sizeof(*cntr));
 }
 
 static inline void
