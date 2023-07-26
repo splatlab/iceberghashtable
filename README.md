@@ -1,9 +1,9 @@
 # iceberghashtable
-IcebergDB: High Performance Hash Tables Through Stability and Low Associativity
+IcebergHT: High Performance Hash Tables Through Stability and Low Associativity
 
 Overview
 --------
- IcebergDB is a fast, concurrent, and resizeable hash table implementation. It supports
+ IcebergHT is a fast, concurrent, and resizeable hash table implementation. It supports
  insertions, deletions and queries for 64-bit keys and values.
  
 API
@@ -16,7 +16,7 @@ Build
 -------
 This library depends on libssl, libtbb, and libpmem. 
 
-The code uses AVX512 instructions to speed up operatons. 
+The code uses vector instructions to speed up operatons. 
 
 ```bash
  $ make main
