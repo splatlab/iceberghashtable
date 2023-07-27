@@ -28,7 +28,6 @@ _Static_assert((1 << LEVEL1_LOG_BLOCK_SIZE) == LEVEL1_BLOCK_SIZE,
 
 #define FP_FREE             0
 #define KEY_FREE            0ULL
-#define VALUE_FREE          0ULL
 #define LEVEL2_CHOICE1_MASK 0xff
 #define LEVEL2_CHOICE2_MASK 0xff00
 
@@ -275,13 +274,19 @@ get_level3_block(hash *h)
   return h->raw_block[LEVEL1_BLOCK] % LEVEL3_BLOCKS;
 }
 
-#define LOCK_MASK   1
-#define UNLOCK_MASK ~1
+#define LOCK_MASK        1
+#define UNLOCK_MASK      ~1
+#define LEVEL1_LOCK_SLOT 63
+
+const static __attribute__((aligned(64))) uint8_t broadcast_mask[64] = {
+  [0 ... LEVEL1_LOCK_SLOT - 1] = 0,
+  LOCK_MASK,
+};
 
 static inline void
 lock_block(fingerprint_t *sketch)
 {
-  fingerprint_t *lock_fp = &sketch[63];
+  fingerprint_t *lock_fp = &sketch[LEVEL1_LOCK_SLOT];
   while ((__atomic_fetch_or(lock_fp, LOCK_MASK, __ATOMIC_SEQ_CST) &
           LOCK_MASK) != 0) {
     _mm_pause();
@@ -291,7 +296,7 @@ lock_block(fingerprint_t *sketch)
 static inline void
 unlock_block(fingerprint_t *sketch)
 {
-  fingerprint_t *lock_fp = &sketch[63];
+  fingerprint_t *lock_fp = &sketch[LEVEL1_LOCK_SLOT];
   *lock_fp               = *lock_fp & UNLOCK_MASK;
 }
 
@@ -692,9 +697,7 @@ level1_insert_into_block(iceberg_table  *table,
   verbose_print_sketch(sketch, 64);
   verbose_print_mask_64(match_mask);
 
-  uint8_t popcnt = __builtin_popcountll(match_mask);
-
-  if (unlikely(!popcnt)) {
+  if (unlikely(match_mask == 0)) {
     return false;
   }
 
@@ -703,8 +706,10 @@ level1_insert_into_block(iceberg_table  *table,
   verbose_print_location(1, pb.partition, pb.block, slot, kv);
   atomic_write_128(key, value, kv);
   fingerprint_t fp = h->fingerprint;
-  if (slot == 63) {
-    fp |= 1;
+
+  // Keep the lock on the block
+  if (slot == LEVEL1_LOCK_SLOT) {
+    fp |= LOCK_MASK;
   }
   sketch[slot] = h->fingerprint;
   verbose_print_sketch(sketch, 64);
@@ -720,7 +725,7 @@ delete_from_slot(iceberg_table *table,
                  level_type     lvl,
                  uint64_t       tid)
 {
-  atomic_write_128(KEY_FREE, VALUE_FREE, kv);
+  kv->key = KEY_FREE;
   sketch[slot_num] = FP_FREE;
   counter_decrement(&table->num_items_per_level, lvl, tid);
 }
