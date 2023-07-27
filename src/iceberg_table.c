@@ -1047,14 +1047,11 @@ level2_maybe_move(iceberg_table *table, partition_block pb, uint64_t tid)
     return;
   }
 
+  uint64_t chunk_num = level2_block_to_chunk_num(table, pb);
   if (block_is_new(table, pb)) {
-    uint64_t chunk_num = level2_block_to_chunk_num(table, pb);
-    chunk_num          = level2_old_chunk_num(table, chunk_num);
-    level2_maybe_move_chunk(table, chunk_num, tid);
-  } else {
-    uint64_t chunk_num = level2_block_to_chunk_num(table, pb);
-    level2_maybe_move_chunk(table, chunk_num, tid);
+    chunk_num = level2_old_chunk_num(table, chunk_num);
   }
+  level2_maybe_move_chunk(table, chunk_num, tid);
 }
 
 static inline bool
@@ -1064,7 +1061,6 @@ level2_insert(iceberg_table  *table,
               hash           *h,
               uint64_t        tid)
 {
-
   partition_block pb1     = get_block(table, h, LEVEL2_BLOCK1);
   fingerprint_t  *sketch1 = get_level2_sketch(table, pb1);
   verbose_print_sketch(sketch1, LEVEL2_BLOCK_SIZE);
