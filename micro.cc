@@ -150,10 +150,9 @@ do_mixed(uint8_t   id,
 int
 main(int argc, char **argv)
 {
-  if (argc != 3 && argc != 4) {
+  if (argc != 4 && argc != 5) {
     fprintf(stderr,
-            "Specify the log of the number of slots in the table and the "
-            "number of threads to use.\n");
+            "%s <log_table_size> <number_of_resizes> <threads> [-b]\n", argv[0]);
     exit(1);
   }
 

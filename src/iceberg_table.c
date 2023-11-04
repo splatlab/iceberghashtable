@@ -300,31 +300,38 @@ level1_unlock_block(fingerprint_t *sketch)
   *lock_fp               = *lock_fp & UNLOCK_MASK;
 }
 
+#define LEVEL2_SKETCH_MASK ((0x1 << LEVEL2_BLOCK_SIZE) - 1)
+
 static inline uint32_t
-sketch_match_8(uint8_t *sketch, uint8_t fprint)
+level2_sketch_match(uint8_t *sketch, uint8_t fprint)
 {
   __m256i bcast = _mm256_set1_epi8(fprint);
-  __m256i block = _mm256_maskz_loadu_epi64(1, (const __m256i *)(sketch));
+  __m256i block = _mm256_set1_epi64x(*(long long *)sketch);
 #if defined __AVX512BW__ && defined __AVX512VL__
-  return _mm256_mask_cmp_epi8_mask(0xff, bcast, block, _MM_CMPINT_EQ);
+  return _mm256_mask_cmp_epi8_mask(
+    LEVEL2_SKETCH_MASK, bcast, block, _MM_CMPINT_EQ);
 #else
   __m256i cmp = _mm256_cmpeq_epi8(bcast, block);
-  return _mm256_movemask_epi8(cmp);
+  return _mm256_movemask_epi8(cmp) & LEVEL2_SKETCH_MASK;
 #endif
 }
 
+#define LEVEL2_DOUBLE_SKETCH_MASK ((0x1 << (2 * LEVEL2_BLOCK_SIZE)) - 1)
+
 static inline uint32_t
-double_sketch_match_8(uint8_t *sketch1, uint8_t *sketch2, uint8_t fprint)
+level2_double_sketch_match(uint8_t *sketch1, uint8_t *sketch2, uint8_t fprint)
 {
   __m256i bcast = _mm256_set1_epi8(fprint);
+#if defined __AVX512BW__ && defined __AVX512VL__
   __m256i block = _mm256_maskz_loadu_epi64(0x1, (const __m256i *)sketch1);
   block = _mm256_mask_loadu_epi64(block, 0x2, (const __m256i *)(sketch2 - 8));
-#if defined __AVX512BW__ && defined __AVX512VL__
   return _mm256_mask_cmpeq_epi8_mask(0xffff, bcast, block);
 #else
-  assert(0);
-  __m256i cmp = _mm256_cmpeq_epi8(bcast, block);
-  return _mm256_movemask_epi8(cmp);
+  __m256i block1  = _mm256_set1_epi64x(*(long long *)sketch1);
+  __m256i block2  = _mm256_set1_epi64x(*(long long *)sketch2);
+  __m256i blended = _mm256_blend_epi32(block1, block2, 0xc);
+  __m256i cmp     = _mm256_cmpeq_epi8(bcast, blended);
+  return _mm256_movemask_epi8(cmp) & LEVEL2_DOUBLE_SKETCH_MASK;
 #endif
 }
 
@@ -702,7 +709,7 @@ level1_insert_into_block(iceberg_table  *table,
   }
 
   uint64_t slot = __builtin_ctzll(match_mask);
-  kv_pair *kv = get_level1_kv_pair(table, pb, slot);
+  kv_pair *kv   = get_level1_kv_pair(table, pb, slot);
   verbose_print_location(1, pb.partition, pb.block, slot, kv);
   atomic_write_128(key, value, kv);
   fingerprint_t fp = h->fingerprint;
@@ -711,7 +718,7 @@ level1_insert_into_block(iceberg_table  *table,
   if (slot == LEVEL1_LOCK_SLOT) {
     fp |= LOCK_MASK;
   }
-  sketch[slot] = h->fingerprint;
+  sketch[slot] = fp;
   verbose_print_sketch(sketch, 64);
   counter_increment(&table->num_items_per_level, LEVEL1, tid);
   return true;
@@ -725,7 +732,7 @@ delete_from_slot(iceberg_table *table,
                  level_type     lvl,
                  uint64_t       tid)
 {
-  kv->key = KEY_FREE;
+  kv->key          = KEY_FREE;
   sketch[slot_num] = FP_FREE;
   counter_decrement(&table->num_items_per_level, lvl, tid);
 }
@@ -829,7 +836,7 @@ level2_insert_into_block(iceberg_table  *table,
                          uint64_t        tid)
 {
   fingerprint_t *sketch     = get_level2_sketch(table, pb);
-  uint32_t       match_mask = sketch_match_8(sketch, 0);
+  uint32_t       match_mask = level2_sketch_match(sketch, 0);
   verbose_print_sketch(sketch, 8);
   verbose_print_mask_8(match_mask);
 
@@ -1074,7 +1081,7 @@ level2_insert(iceberg_table  *table,
   verbose_print_sketch(sketch2, LEVEL2_BLOCK_SIZE);
   level2_maybe_move(table, pb2, tid);
 
-  uint32_t match_mask = double_sketch_match_8(sketch1, sketch2, FP_FREE);
+  uint32_t match_mask = level2_double_sketch_match(sketch1, sketch2, FP_FREE);
   verbose_print_double_mask_8(match_mask);
   uint8_t popcnt1 = __builtin_popcount(match_mask & LEVEL2_CHOICE1_MASK);
   uint8_t popcnt2 = __builtin_popcount(match_mask & LEVEL2_CHOICE2_MASK);
@@ -1208,7 +1215,7 @@ level2_delete_from_block(iceberg_table  *table,
                          uint64_t        tid)
 {
   fingerprint_t *sketch     = get_level2_sketch(table, pb);
-  uint32_t       match_mask = sketch_match_8(sketch, h->fingerprint);
+  uint32_t       match_mask = level2_sketch_match(sketch, h->fingerprint);
   verbose_print_sketch(sketch, 8);
   verbose_print_mask_8(match_mask);
   uint8_t popcnt = __builtin_popcount(match_mask);
@@ -1327,7 +1334,7 @@ level2_query_block(iceberg_table   *table,
                    partition_block  pb)
 {
   fingerprint_t *sketch     = get_level2_sketch(table, pb);
-  uint32_t       match_mask = sketch_match_8(sketch, h->fingerprint);
+  uint32_t       match_mask = level2_sketch_match(sketch, h->fingerprint);
   verbose_print_sketch(sketch, 8);
   verbose_print_mask_8(match_mask);
 
@@ -1483,14 +1490,18 @@ iceberg_scan_for_key(iceberg_table *table, iceberg_key_t key)
     for (uint64_t slot_num = 0; slot_num < LEVEL1_BLOCK_SIZE; slot_num++) {
       kv_pair *kv = get_level1_kv_pair(table, pb, slot_num);
       if (kv->key == key) {
-        printf("Key found in level1 block: 0x%" PRIx64 ", slot: %" PRIu64 "\n", block_num, slot_num);
+        printf("Key found in level1 block: 0x%" PRIx64 ", slot: %" PRIu64 "\n",
+               block_num,
+               slot_num);
         ret = true;
       }
     }
     for (uint64_t slot_num = 0; slot_num < LEVEL2_BLOCK_SIZE; slot_num++) {
       kv_pair *kv = get_level2_kv_pair(table, pb, slot_num);
       if (kv->key == key) {
-        printf("Key found in level2 block: 0x%" PRIx64 ", slot: %" PRIu64 "\n", block_num, slot_num);
+        printf("Key found in level2 block: 0x%" PRIx64 ", slot: %" PRIu64 "\n",
+               block_num,
+               slot_num);
         ret = true;
       }
     }
