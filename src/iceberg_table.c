@@ -17,7 +17,7 @@
 
 #define MAX_PARTITIONS        8ULL
 #define RESIZE_THRESHOLD      0.94
-#define MAX_PROCS             64
+#define NUM_TIDS              64
 #define LEVEL1_BLOCK_SIZE     64ULL
 #define LEVEL1_LOG_BLOCK_SIZE 6ULL
 #define LEVEL2_BLOCK_SIZE     8ULL
@@ -77,7 +77,9 @@ typedef struct iceberg_table {
   counter  num_items_per_level;
 
 #ifdef ENABLE_RESIZE
-  volatile uint64_t user_lock;
+  struct __attribute__((aligned(64))) {
+    volatile uint64_t counter;
+  } user_lock[NUM_TIDS];
   volatile bool     resizer_lock;
   uint64_t          resize_threshold;
   volatile uint64_t max_partition_num;
@@ -279,20 +281,20 @@ get_level3_block(hash *h)
 }
 
 void
-get_user_lock(iceberg_table *table)
+release_user_lock(iceberg_table *table, uint64_t tid)
 {
-  __sync_fetch_and_add(&table->user_lock, 1);
-  while (table->resizer_lock) {
-    table->user_lock--;
-    _mm_pause();
-    __sync_fetch_and_add(&table->user_lock, 1);
-  }
+  table->user_lock[tid].counter--;
 }
 
 void
-release_user_lock(iceberg_table *table)
+get_user_lock(iceberg_table *table, uint64_t tid)
 {
-  table->user_lock--;
+  __sync_fetch_and_add(&table->user_lock[tid].counter, 1);
+  while (table->resizer_lock) {
+    release_user_lock(table, tid);
+    _mm_pause();
+    __sync_fetch_and_add(&table->user_lock[tid].counter, 1);
+  }
 }
 
 #define LOCK_MASK        1
@@ -609,8 +611,10 @@ is_resize_active(iceberg_table *table)
 static void
 wait_for_users_to_finish(iceberg_table *table)
 {
-  while (table->user_lock) {
-    _mm_pause();
+  for (uint64_t i = 0; i < NUM_TIDS; i++) {
+    while (table->user_lock[i].counter) {
+      _mm_pause();
+    }
   }
 }
 
@@ -1173,7 +1177,7 @@ iceberg_insert(iceberg_table  *table,
 
   maybe_create_new_partition(table, tid);
 
-  get_user_lock(table);
+  get_user_lock(table, tid);
 
   hash            h  = hash_key(table, &key);
   partition_block pb = get_block(table, &h, LEVEL1_BLOCK);
@@ -1207,7 +1211,7 @@ iceberg_insert(iceberg_table  *table,
 out:
   verbose_end("INSERT", false);
   level1_unlock_block(sketch);
-  release_user_lock(table);
+  release_user_lock(table, tid);
   return ret;
 }
 
@@ -1293,7 +1297,7 @@ iceberg_delete(iceberg_table *table, iceberg_key_t key, uint64_t tid)
   verbose_print_operation("DELETE:", key, 0);
   bool ret = true;
 
-  get_user_lock(table);
+  get_user_lock(table, tid);
 
   hash            h  = hash_key(table, &key);
   partition_block pb = get_block(table, &h, LEVEL1_BLOCK);
@@ -1326,7 +1330,7 @@ iceberg_delete(iceberg_table *table, iceberg_key_t key, uint64_t tid)
 
 out:
   level1_unlock_block(sketch);
-  release_user_lock(table);
+  release_user_lock(table, tid);
   verbose_end("DELETE", false);
   return ret;
 }
@@ -1510,11 +1514,11 @@ iceberg_query(iceberg_table   *table,
   verbose_print_operation("QUERY:", key, 0);
   bool ret = true;
 
-  get_user_lock(table);
+  get_user_lock(table, tid);
   hash h = hash_key(table, &key);
   ret    = iceberg_query_internal(table, key, value, &h, tid);
   verbose_end("QUERY", false);
-  release_user_lock(table);
+  release_user_lock(table, tid);
   return ret;
 }
 
