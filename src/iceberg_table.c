@@ -16,7 +16,7 @@
 #include "xxhash.h"
 
 #define MAX_PARTITIONS        8ULL
-#define RESIZE_THRESHOLD      0.94
+#define MAX_LOAD_FACTOR       0.94
 #define NUM_TIDS              64
 #define LEVEL1_BLOCK_SIZE     64ULL
 #define LEVEL1_LOG_BLOCK_SIZE 6ULL
@@ -76,13 +76,17 @@ typedef struct iceberg_table {
   uint64_t log_initial_num_blocks;
   counter  num_items_per_level;
 
+  // This is used for the capacity of the hashtable even when resizing is
+  // disabled.
+  uint64_t          capacity;
+  volatile uint64_t max_partition_num;
+
 #ifdef ENABLE_RESIZE
-  struct __attribute__((aligned(64))) {
+  bool enable_resize;
+  struct __attribute__((aligned(256))) {
     volatile uint64_t counter;
   } user_lock[NUM_TIDS];
   volatile bool     resizer_lock;
-  uint64_t          resize_threshold;
-  volatile uint64_t max_partition_num;
   volatile uint64_t level1_resize_counter;
   volatile uint64_t level2_resize_counter;
   volatile uint8_t *level1_resize_marker;
@@ -99,8 +103,8 @@ word_select(uint64_t val, int rank)
 
 typedef enum {
   LEVEL1 = 0,
-  LEVEL2,
-  LEVEL3,
+  LEVEL2 = 1,
+  LEVEL3 = 2,
 } level_type;
 
 uint64_t
@@ -111,7 +115,7 @@ level1_load(iceberg_table *table)
   return counter_get(cntr, LEVEL1);
 }
 
-static inline uint64_t
+__attribute__((unused)) static inline uint64_t
 level1_load_approx(iceberg_table *table)
 {
   counter *cntr = &table->num_items_per_level;
@@ -126,7 +130,7 @@ level2_load(iceberg_table *table)
   return counter_get(cntr, LEVEL2);
 }
 
-static inline uint64_t
+__attribute__((unused)) static inline uint64_t
 level2_load_approx(iceberg_table *table)
 {
   counter *cntr = &table->num_items_per_level;
@@ -141,7 +145,7 @@ level3_load(iceberg_table *table)
   return counter_get(cntr, LEVEL3);
 }
 
-static inline uint64_t
+__attribute__((unused)) static inline uint64_t
 level3_load_approx(iceberg_table *table)
 {
   counter *cntr = &table->num_items_per_level;
@@ -170,7 +174,7 @@ raw_capacity(iceberg_table *table)
 uint64_t
 iceberg_capacity(iceberg_table *table)
 {
-  return table->resize_threshold;
+  return table->capacity;
 }
 
 inline double
@@ -183,7 +187,7 @@ iceberg_load_factor(iceberg_table *table)
 static inline bool
 needs_resize(iceberg_table *table)
 {
-  return iceberg_load_approx(table) >= table->resize_threshold;
+  return table->enable_resize && iceberg_load_approx(table) >= table->capacity;
 }
 #endif
 
@@ -207,7 +211,6 @@ typedef struct {
   raw_hash raw;
   uint64_t raw_block[NUM_LEVELS];
   uint8_t  fingerprint;
-  uint64_t table_log_num_blocks;
 } hash;
 
 static inline uint8_t
@@ -226,17 +229,17 @@ truncate_to_current_num_raw_blocks(uint64_t table_log_num_blocks,
 static inline hash
 hash_key(iceberg_table *table, iceberg_key_t *key)
 {
-  hash h                    = {0};
-  h.table_log_num_blocks    = table->log_num_blocks;
-  XXH128_hash_t *raw        = (XXH128_hash_t *)&h.raw;
-  *raw                      = XXH128(key, sizeof(*key), seed);
-  h.fingerprint             = ensure_nonzero_fingerprint(&h.raw);
-  h.raw_block[LEVEL1_BLOCK] = truncate_to_current_num_raw_blocks(
-    h.table_log_num_blocks, h.raw.level1_raw_block);
+  hash           h                    = {0};
+  uint64_t       table_log_num_blocks = table->log_num_blocks;
+  XXH128_hash_t *raw                  = (XXH128_hash_t *)&h.raw;
+  *raw                                = XXH128(key, sizeof(*key), seed);
+  h.fingerprint                       = ensure_nonzero_fingerprint(&h.raw);
+  h.raw_block[LEVEL1_BLOCK]           = truncate_to_current_num_raw_blocks(
+    table_log_num_blocks, h.raw.level1_raw_block);
   h.raw_block[LEVEL2_BLOCK1] = truncate_to_current_num_raw_blocks(
-    h.table_log_num_blocks, h.raw.level2_raw_block1);
+    table_log_num_blocks, h.raw.level2_raw_block1);
   h.raw_block[LEVEL2_BLOCK2] = truncate_to_current_num_raw_blocks(
-    h.table_log_num_blocks, h.raw.level2_raw_block2);
+    table_log_num_blocks, h.raw.level2_raw_block2);
   verbose_print_hash(h.raw_block[LEVEL1_BLOCK],
                      h.raw_block[LEVEL2_BLOCK1],
                      h.raw_block[LEVEL2_BLOCK2],
@@ -280,21 +283,36 @@ get_level3_block(hash *h)
   return h->raw_block[LEVEL1_BLOCK] % LEVEL3_BLOCKS;
 }
 
-void
+static volatile __thread __attribute__((unused)) uint64_t user_lock;
+
+static inline void
 release_user_lock(iceberg_table *table, uint64_t tid)
 {
-  table->user_lock[tid].counter--;
+#ifdef ENABLE_RESIZE
+  if (table->enable_resize) {
+    table->user_lock[tid].counter--;
+    // user_lock = 0;
+    // user_lock--;
+  }
+#endif
 }
 
-void
+static inline void
 get_user_lock(iceberg_table *table, uint64_t tid)
 {
-  __sync_fetch_and_add(&table->user_lock[tid].counter, 1);
-  while (table->resizer_lock) {
-    release_user_lock(table, tid);
-    _mm_pause();
+#ifdef ENABLE_RESIZE
+  if (table->enable_resize) {
     __sync_fetch_and_add(&table->user_lock[tid].counter, 1);
+    // table->user_lock[tid].counter = 1;
+    //__sync_fetch_and_add(&user_lock, 1);
+    //  user_lock = 1;
+    while (table->resizer_lock) {
+      release_user_lock(table, tid);
+      _mm_pause();
+      __sync_fetch_and_add(&table->user_lock[tid].counter, 1);
+    }
   }
+#endif
 }
 
 #define LOCK_MASK        1
@@ -520,53 +538,61 @@ deallocate_partitions(iceberg_table *table)
   }
 }
 
+#ifdef ENABLE_RESIZE
 static inline void
 allocate_resize_metadata(iceberg_table *table, uint64_t num_blocks)
 {
-#ifdef ENABLE_RESIZE
   size_t level1_marker_size =
     sizeof(uint8_t) * num_blocks / LEVEL1_BLOCKS_PER_RESIZE_CHUNK;
   table->level1_resize_marker = util_mmap(level1_marker_size);
   size_t level2_marker_size =
     sizeof(uint8_t) * num_blocks / LEVEL2_BLOCKS_PER_RESIZE_CHUNK;
   table->level2_resize_marker = util_mmap(level2_marker_size);
-#endif
 }
 
 static inline void
-deallocate_resize_metadata(iceberg_table *table, uint64_t num_blocks)
+level1_deallocate_resize_metadata(iceberg_table *table, uint64_t num_blocks)
 {
-#ifdef ENABLE_RESIZE
   size_t level1_marker_size =
     sizeof(uint8_t) * num_blocks / LEVEL1_BLOCKS_PER_RESIZE_CHUNK;
   util_munmap(table->level1_resize_marker, level1_marker_size);
+}
+
+static inline void
+level2_deallocate_resize_metadata(iceberg_table *table, uint64_t num_blocks)
+{
   size_t level2_marker_size =
     sizeof(uint8_t) * num_blocks / LEVEL1_BLOCKS_PER_RESIZE_CHUNK;
   util_munmap(table->level2_resize_marker, level2_marker_size);
-#endif
 }
+#endif
 
 static inline void
 initialize_resize_metadata(iceberg_table *table)
 {
 #ifdef ENABLE_RESIZE
-  table->max_partition_num     = 0;
+  memset(table->user_lock, 0, sizeof(table->user_lock));
+  table->resizer_lock          = 0;
   table->level1_resize_counter = 0;
   table->level2_resize_counter = 0;
-  table->resize_threshold      = RESIZE_THRESHOLD * raw_capacity(table);
 #endif
 }
 
 int
-iceberg_create(iceberg_table **out_table, uint64_t log_slots)
+iceberg_create(iceberg_table **out_table,
+               uint64_t        log_slots,
+               bool            enable_resize)
 {
   iceberg_table *table = malloc(sizeof(*table));
   memset(table, 0, sizeof(*table));
 
+  table->enable_resize          = enable_resize;
   uint64_t num_blocks           = 1 << (log_slots - LEVEL1_LOG_BLOCK_SIZE);
   table->num_blocks             = num_blocks;
   table->log_num_blocks         = log_slots - LEVEL1_LOG_BLOCK_SIZE;
   table->log_initial_num_blocks = table->log_num_blocks;
+  table->max_partition_num      = 0;
+  table->capacity               = MAX_LOAD_FACTOR * raw_capacity(table);
 
   allocate_partition(table, 0, num_blocks);
   counter_init(&table->num_items_per_level);
@@ -576,19 +602,17 @@ iceberg_create(iceberg_table **out_table, uint64_t log_slots)
   return 0;
 }
 
-void
-iceberg_destroy(iceberg_table **table)
+#ifdef ENABLE_RESIZE
+static void
+wait_for_users_to_finish(iceberg_table *table)
 {
-  assert(table);
-
-  deallocate_partitions(*table);
-  deallocate_resize_metadata(*table, (*table)->num_blocks);
-
-  free(*table);
-  *table = NULL;
+  for (uint64_t i = 0; i < NUM_TIDS; i++) {
+    while (table->user_lock[i].counter) {
+      _mm_pause();
+    }
+  }
 }
 
-#ifdef ENABLE_RESIZE
 static inline bool
 level1_resize_active(iceberg_table *table)
 {
@@ -606,16 +630,31 @@ is_resize_active(iceberg_table *table)
 {
   return level2_resize_active(table) || level1_resize_active(table);
 }
+#endif // ENABLE_RESIZE
+
+void
+iceberg_destroy(iceberg_table **table)
+{
+  assert(table);
+
+#ifdef ENABLE_RESIZE
+  while (!lock(&(*table)->resizer_lock)) {
+    _mm_pause();
+  }
+  wait_for_users_to_finish(*table);
+
+  if (level1_resize_active(*table)) {
+    level1_deallocate_resize_metadata(*table, (*table)->num_blocks);
+  }
+  if (level2_resize_active(*table)) {
+    level2_deallocate_resize_metadata(*table, (*table)->num_blocks);
+  }
 #endif
 
-static void
-wait_for_users_to_finish(iceberg_table *table)
-{
-  for (uint64_t i = 0; i < NUM_TIDS; i++) {
-    while (table->user_lock[i].counter) {
-      _mm_pause();
-    }
-  }
+  deallocate_partitions(*table);
+
+  free(*table);
+  *table = NULL;
 }
 
 static void
@@ -647,9 +686,6 @@ maybe_create_new_partition(iceberg_table *table, uint64_t tid)
 
   allocate_partition(table, new_partition_num, new_partition_num_blocks);
 
-  if (table->max_partition_num != 0) {
-    deallocate_resize_metadata(table, table->num_blocks);
-  }
   uint64_t num_blocks = table->num_blocks * 2;
   allocate_resize_metadata(table, num_blocks);
 
@@ -660,70 +696,10 @@ maybe_create_new_partition(iceberg_table *table, uint64_t tid)
   table->level1_resize_counter = table->num_blocks / 2;
   table->level2_resize_counter = table->num_blocks / 2;
 
-  table->resize_threshold = RESIZE_THRESHOLD * raw_capacity(table);
+  table->capacity = MAX_LOAD_FACTOR * raw_capacity(table);
 
   unlock(&table->resizer_lock);
 #endif
-}
-
-#ifdef ENABLE_RESIZE
-static inline void
-level1_decrement_resize_counter(iceberg_table *table)
-{
-  __attribute__((unused)) uint64_t counter_value_pre =
-    __atomic_fetch_sub(&table->level1_resize_counter, 1, __ATOMIC_SEQ_CST);
-  assert(counter_value_pre != 0);
-}
-
-static inline bool
-level1_key_should_move(iceberg_table  *table,
-                       partition_block key_pb,
-                       partition_block new_block_pb)
-{
-  return key_pb.partition == new_block_pb.partition &&
-         key_pb.block == new_block_pb.block;
-}
-
-static inline uint64_t
-block_to_block_num(iceberg_table *table, partition_block pb)
-{
-  uint64_t partition_bit = 1ULL << pb.partition;
-  partition_bit          = partition_bit >> 1;
-  partition_bit          = partition_bit << table->log_initial_num_blocks;
-  return partition_bit + pb.block;
-}
-
-static inline partition_block
-get_new_block(iceberg_table *table, partition_block pb)
-{
-  uint64_t        block_num = block_to_block_num(table, pb);
-  partition_block new_pb    = {.partition = table->max_partition_num,
-                               .block     = block_num};
-  return new_pb;
-}
-
-static inline uint64_t
-level1_num_chunks(iceberg_table *table)
-{
-  return table->num_blocks / LEVEL1_BLOCKS_PER_RESIZE_CHUNK;
-}
-
-static inline uint64_t
-level1_new_chunk_num(iceberg_table *table, uint64_t chunk_num)
-{
-  return chunk_num + level1_num_chunks(table) / 2;
-}
-
-static inline uint64_t
-level2_num_chunks(iceberg_table *table)
-{
-  return table->num_blocks / LEVEL2_BLOCKS_PER_RESIZE_CHUNK;
-}
-
-static inline uint64_t
-level2_new_chunk_num(iceberg_table *table, uint64_t chunk_num)
-{
-  return chunk_num + level2_num_chunks(table) / 2;
 }
 
 static inline bool
@@ -759,6 +735,34 @@ level1_insert_into_block(iceberg_table  *table,
   return true;
 }
 
+static inline bool
+level2_insert_into_block_with_mask(iceberg_table  *table,
+                                   iceberg_key_t   key,
+                                   iceberg_value_t value,
+                                   hash           *h,
+                                   partition_block pb,
+                                   uint8_t        *sketch,
+                                   uint32_t        match_mask,
+                                   uint64_t        tid)
+{
+  while (match_mask != 0) {
+    uint64_t slot = __builtin_ctzll(match_mask);
+    match_mask    = match_mask & ~(1ULL << slot);
+
+    if (__sync_bool_compare_and_swap(&sketch[slot], 0, 1)) {
+      kv_pair *kv = get_level2_kv_pair(table, pb, slot);
+      verbose_print_location(2, pb.partition, pb.block, slot, kv);
+      atomic_write_128(key, value, kv);
+      sketch[slot] = h->fingerprint;
+      verbose_print_sketch(sketch, 8);
+      counter_increment(&table->num_items_per_level, LEVEL2, tid);
+      return true;
+    }
+  }
+
+  return false;
+}
+
 static inline void
 delete_from_slot(iceberg_table *table,
                  kv_pair       *kv,
@@ -770,6 +774,94 @@ delete_from_slot(iceberg_table *table,
   kv->key          = KEY_FREE;
   sketch[slot_num] = FP_FREE;
   counter_decrement(&table->num_items_per_level, lvl, tid);
+}
+
+/**********************************************************************
+ Resize-only functions
+ **********************************************************************/
+
+#ifdef ENABLE_RESIZE
+static inline bool
+level2_insert_into_block(iceberg_table  *table,
+                         iceberg_key_t   key,
+                         iceberg_value_t value,
+                         hash           *h,
+                         partition_block pb,
+                         uint64_t        tid)
+{
+  fingerprint_t *sketch     = get_level2_sketch(table, pb);
+  uint32_t       match_mask = level2_sketch_match(sketch, 0);
+  verbose_print_sketch(sketch, 8);
+  verbose_print_mask_8(match_mask);
+
+  return level2_insert_into_block_with_mask(
+    table, key, value, h, pb, sketch, match_mask, tid);
+}
+
+static inline uint64_t
+level1_decrement_resize_counter(iceberg_table *table)
+{
+  __attribute__((unused)) uint64_t counter_value_pre =
+    __atomic_fetch_sub(&table->level1_resize_counter, 1, __ATOMIC_SEQ_CST);
+  assert(counter_value_pre != 0);
+  return counter_value_pre - 1;
+}
+
+static inline bool
+level1_key_should_move(iceberg_table  *table,
+                       partition_block key_pb,
+                       partition_block new_block_pb)
+{
+  return key_pb.partition == new_block_pb.partition &&
+         key_pb.block == new_block_pb.block;
+}
+
+static inline uint64_t
+block_to_block_num(iceberg_table *table, partition_block pb)
+{
+  uint64_t partition_bit = 1ULL << pb.partition;
+  partition_bit          = partition_bit >> 1;
+  partition_bit          = partition_bit << table->log_initial_num_blocks;
+  return partition_bit + pb.block;
+}
+
+static inline partition_block
+get_new_block(iceberg_table *table, partition_block pb)
+{
+  uint64_t        block_num = block_to_block_num(table, pb);
+  partition_block new_pb    = {.partition = table->max_partition_num,
+                               .block     = block_num};
+  return new_pb;
+}
+
+static inline partition_block
+get_old_block(iceberg_table *table, partition_block pb)
+{
+  return decode_raw_block(table, pb.block);
+}
+
+static inline uint64_t
+level1_num_chunks(iceberg_table *table)
+{
+  return table->num_blocks / LEVEL1_BLOCKS_PER_RESIZE_CHUNK;
+}
+
+static inline uint64_t
+level1_new_chunk_num(iceberg_table *table, uint64_t chunk_num)
+{
+  return chunk_num + level1_num_chunks(table) / 2;
+}
+
+static inline uint64_t
+level2_num_chunks(iceberg_table *table)
+{
+  return table->num_blocks / LEVEL2_BLOCKS_PER_RESIZE_CHUNK;
+}
+
+static inline uint64_t
+level2_new_chunk_num(iceberg_table *table, uint64_t chunk_num)
+{
+  return chunk_num + level2_num_chunks(table) / 2;
 }
 
 __attribute__((unused)) static inline bool
@@ -814,15 +906,18 @@ level1_move_block(iceberg_table *table, partition_block pb, uint64_t tid)
   level1_unlock_block(old_sketch);
 
   verbose_end("MOVE", true);
-  level1_decrement_resize_counter(table);
+  if (level1_decrement_resize_counter(table) == 0) {
+    level1_deallocate_resize_metadata(table, table->num_blocks / 2);
+  }
 }
 
-static inline void
+static inline uint64_t
 level2_decrement_resize_counter(iceberg_table *table)
 {
   __attribute__((unused)) uint64_t counter_value_pre =
     __atomic_fetch_sub(&table->level2_resize_counter, 1, __ATOMIC_SEQ_CST);
   assert(counter_value_pre != 0);
+  return counter_value_pre - 1;
 }
 
 static inline bool
@@ -832,51 +927,6 @@ level2_key_should_move(iceberg_table  *table,
 {
   return key_pb.partition == new_block_pb.partition &&
          key_pb.block == new_block_pb.block;
-}
-
-static inline bool
-level2_insert_into_block_with_mask(iceberg_table  *table,
-                                   iceberg_key_t   key,
-                                   iceberg_value_t value,
-                                   hash           *h,
-                                   partition_block pb,
-                                   uint8_t        *sketch,
-                                   uint32_t        match_mask,
-                                   uint64_t        tid)
-{
-  while (match_mask != 0) {
-    uint64_t slot = __builtin_ctzll(match_mask);
-    match_mask    = match_mask & ~(1ULL << slot);
-
-    if (__sync_bool_compare_and_swap(&sketch[slot], 0, 1)) {
-      kv_pair *kv = get_level2_kv_pair(table, pb, slot);
-      verbose_print_location(2, pb.partition, pb.block, slot, kv);
-      atomic_write_128(key, value, kv);
-      sketch[slot] = h->fingerprint;
-      verbose_print_sketch(sketch, 8);
-      counter_increment(&table->num_items_per_level, LEVEL2, tid);
-      return true;
-    }
-  }
-
-  return false;
-}
-
-static inline bool
-level2_insert_into_block(iceberg_table  *table,
-                         iceberg_key_t   key,
-                         iceberg_value_t value,
-                         hash           *h,
-                         partition_block pb,
-                         uint64_t        tid)
-{
-  fingerprint_t *sketch     = get_level2_sketch(table, pb);
-  uint32_t       match_mask = level2_sketch_match(sketch, 0);
-  verbose_print_sketch(sketch, 8);
-  verbose_print_mask_8(match_mask);
-
-  return level2_insert_into_block_with_mask(
-    table, key, value, h, pb, sketch, match_mask, tid);
 }
 
 static inline void
@@ -910,7 +960,9 @@ level2_move_block(iceberg_table *table, partition_block pb, uint64_t tid)
     }
   }
 
-  level2_decrement_resize_counter(table);
+  if (level2_decrement_resize_counter(table) == 0) {
+    level2_deallocate_resize_metadata(table, table->num_blocks / 2);
+  }
 }
 
 static inline bool
@@ -1035,7 +1087,73 @@ iceberg_end(iceberg_table *table, uint64_t tid)
     }
   }
 }
+
+static inline uint64_t
+level2_block_to_chunk_num(iceberg_table *table, partition_block pb)
+{
+  uint64_t block_num = block_to_block_num(table, pb);
+  return block_num / LEVEL2_BLOCKS_PER_RESIZE_CHUNK;
+}
+
+static inline uint64_t
+level2_old_chunk_num(iceberg_table *table, uint64_t chunk_num)
+{
+  return chunk_num - level2_num_chunks(table) / 2;
+}
+
+static inline uint64_t
+level1_block_to_chunk_num(iceberg_table *table, partition_block pb)
+{
+  uint64_t block_num = block_to_block_num(table, pb);
+  return block_num / LEVEL1_BLOCKS_PER_RESIZE_CHUNK;
+}
+
+static inline uint64_t
+level1_old_chunk_num(iceberg_table *table, uint64_t chunk_num)
+{
+  return chunk_num - level1_num_chunks(table) / 2;
+}
 #endif
+
+static inline void
+level2_maybe_move(iceberg_table *table, partition_block pb, uint64_t tid)
+{
+#ifdef ENABLE_RESIZE
+  if (likely(!level2_resize_active(table))) {
+    return;
+  }
+
+  uint64_t chunk_num = level2_block_to_chunk_num(table, pb);
+  if (block_is_new(table, pb)) {
+    chunk_num = level2_old_chunk_num(table, chunk_num);
+  }
+  level2_maybe_move_chunk(table, chunk_num, tid);
+#endif
+}
+
+static inline void
+level1_maybe_move(iceberg_table *table, partition_block pb, uint64_t tid)
+{
+#ifdef ENABLE_RESIZE
+  if (likely(!level1_resize_active(table))) {
+    return;
+  }
+
+  uint64_t chunk_num;
+  if (block_is_new(table, pb)) {
+    chunk_num = level1_block_to_chunk_num(table, pb);
+    chunk_num = level1_old_chunk_num(table, chunk_num);
+  } else {
+    chunk_num = level1_block_to_chunk_num(table, pb);
+  }
+  level1_maybe_move_chunk(table, chunk_num, tid);
+#endif
+}
+
+
+/************************************************
+ * End of resize-only functions
+ ************************************************/
 
 static inline void
 level3_lock_block(iceberg_table *table, uint64_t block)
@@ -1070,33 +1188,6 @@ level3_insert(iceberg_table  *table,
   counter_increment(&table->num_items_per_level, LEVEL3, tid);
   level3_unlock_block(table, block);
   return true;
-}
-
-static inline uint64_t
-level2_block_to_chunk_num(iceberg_table *table, partition_block pb)
-{
-  uint64_t block_num = block_to_block_num(table, pb);
-  return block_num / LEVEL2_BLOCKS_PER_RESIZE_CHUNK;
-}
-
-static inline uint64_t
-level2_old_chunk_num(iceberg_table *table, uint64_t chunk_num)
-{
-  return chunk_num - level2_num_chunks(table) / 2;
-}
-
-static inline void
-level2_maybe_move(iceberg_table *table, partition_block pb, uint64_t tid)
-{
-  if (likely(!level2_resize_active(table))) {
-    return;
-  }
-
-  uint64_t chunk_num = level2_block_to_chunk_num(table, pb);
-  if (block_is_new(table, pb)) {
-    chunk_num = level2_old_chunk_num(table, chunk_num);
-  }
-  level2_maybe_move_chunk(table, chunk_num, tid);
 }
 
 static inline bool
@@ -1136,36 +1227,6 @@ static inline bool iceberg_query_internal(iceberg_table   *table,
                                           iceberg_value_t *value,
                                           hash            *h,
                                           uint64_t         tid);
-
-static inline uint64_t
-level1_block_to_chunk_num(iceberg_table *table, partition_block pb)
-{
-  uint64_t block_num = block_to_block_num(table, pb);
-  return block_num / LEVEL1_BLOCKS_PER_RESIZE_CHUNK;
-}
-
-static inline uint64_t
-level1_old_chunk_num(iceberg_table *table, uint64_t chunk_num)
-{
-  return chunk_num - level1_num_chunks(table) / 2;
-}
-
-static inline void
-level1_maybe_move(iceberg_table *table, partition_block pb, uint64_t tid)
-{
-  if (likely(!level1_resize_active(table))) {
-    return;
-  }
-
-  uint64_t chunk_num;
-  if (block_is_new(table, pb)) {
-    chunk_num = level1_block_to_chunk_num(table, pb);
-    chunk_num = level1_old_chunk_num(table, chunk_num);
-  } else {
-    chunk_num = level1_block_to_chunk_num(table, pb);
-  }
-  level1_maybe_move_chunk(table, chunk_num, tid);
-}
 
 __attribute__((always_inline)) inline bool
 iceberg_insert(iceberg_table  *table,
@@ -1391,12 +1452,6 @@ level2_query_block(iceberg_table   *table,
   return false;
 }
 
-static inline partition_block
-get_old_block(iceberg_table *table, partition_block pb)
-{
-  return decode_raw_block(table, pb.block);
-}
-
 static inline bool
 level2_maybe_query_old_block(iceberg_table   *table,
                              iceberg_key_t    key,
@@ -1404,11 +1459,15 @@ level2_maybe_query_old_block(iceberg_table   *table,
                              hash            *h,
                              partition_block  pb)
 {
+#ifdef ENABLE_RESIZE
   if (likely(!level2_resize_active(table) || !block_is_new(table, pb))) {
     return false;
   }
   partition_block old_pb = get_old_block(table, pb);
   return level2_query_block(table, key, value, h, old_pb);
+#else
+  return false;
+#endif
 }
 
 static inline bool
@@ -1473,11 +1532,15 @@ level1_maybe_query_old_block(iceberg_table   *table,
                              hash            *h,
                              partition_block  pb)
 {
+#ifdef ENABLE_RESIZE
   if (likely(!level1_resize_active(table) || !block_is_new(table, pb))) {
     return false;
   }
   partition_block old_pb = get_old_block(table, pb);
   return level1_query_block(table, key, value, h, old_pb);
+#else
+  return false;
+#endif
 }
 
 __attribute__((always_inline)) inline bool

@@ -150,25 +150,26 @@ do_mixed(uint8_t   id,
 int
 main(int argc, char **argv)
 {
-  if (argc != 4 && argc != 5) {
+  if (argc != 5 && argc != 6) {
     fprintf(stderr,
-            "%s <log_table_size> <number_of_resizes> <threads> [-b]\n", argv[0]);
+            "%s <log_table_size> <enable_resizes> <number_of_resizes> <threads> [-b]\n", argv[0]);
     exit(1);
   }
 
+  uint64_t tbits     = atoi(argv[1]);
+  bool enable_resize = atoi(argv[2]);
+  uint64_t resizes   = atoi(argv[3]);
+  uint64_t threads   = atoi(argv[4]);
+
   bool is_benchmark = false;
-  if (argc == 5) {
-    assert(strcmp(argv[3], "-b") == 0);
+  if (argc == 6) {
+    assert(strcmp(argv[5], "-b") == 0);
     is_benchmark = true;
   }
 
-  uint64_t tbits   = atoi(argv[1]);
-  uint64_t resizes = atoi(argv[2]);
-  uint64_t threads = atoi(argv[3]);
-
   high_resolution_clock::time_point t1 = high_resolution_clock::now();
 
-  int ret = iceberg_create(&table, tbits - resizes);
+  int ret = iceberg_create(&table, tbits - resizes, enable_resize);
   assert(!ret);
 
   uint64_t capacity = iceberg_capacity(table);

@@ -15,9 +15,9 @@
 #define BATCH_SIZE 1024
 
 int
-open(iceberg_table **table, uint64_t *capacity)
+open(iceberg_table **table, uint64_t *capacity, bool enable_resize)
 {
-  int rc    = iceberg_create(table, TEST_LOG_SLOTS);
+  int rc    = iceberg_create(table, TEST_LOG_SLOTS, enable_resize);
   *capacity = iceberg_capacity(*table);
   return rc;
 }
@@ -60,7 +60,7 @@ run_open_close()
   print_start_message("Open and Close");
   iceberg_table *table;
   uint64_t       capacity;
-  int            rc = open(&table, &capacity);
+  int            rc = open(&table, &capacity, false);
   if (rc) {
     print_fail_message(
       "iceberg_create failed with error: %d -- %s", rc, strerror(rc));
@@ -76,7 +76,7 @@ run_basic()
   print_start_message("Basic Operations");
   iceberg_table *table;
   uint64_t       capacity;
-  int            rc = open(&table, &capacity);
+  int            rc = open(&table, &capacity, false);
   if (rc) {
     print_fail_message(
       "iceberg_create failed with error: %d -- %s", rc, strerror(rc));
@@ -241,7 +241,7 @@ run_resize()
   print_start_message("Resize");
   iceberg_table *table;
   uint64_t       initial_capacity;
-  int            rc = open(&table, &initial_capacity);
+  int            rc = open(&table, &initial_capacity, true);
   if (rc) {
     print_fail_message(
       "iceberg_create failed with error: %d -- %s", rc, strerror(rc));
@@ -408,7 +408,7 @@ run_multithreaded_inserts(uint64_t num_threads)
   print_start_message(op_name);
   iceberg_table *table;
   uint64_t       initial_capacity;
-  int            rc = open(&table, &initial_capacity);
+  int            rc = open(&table, &initial_capacity, false);
   if (rc) {
     print_fail_message(
       "iceberg_create failed with error: %d -- %s", rc, strerror(rc));
@@ -468,7 +468,7 @@ run_multithreaded_inserts_with_resize(uint64_t num_threads)
   print_start_message(op_name);
   iceberg_table *table;
   uint64_t       initial_capacity;
-  int            rc = open(&table, &initial_capacity);
+  int            rc = open(&table, &initial_capacity, true);
   if (rc) {
     print_fail_message(
       "iceberg_create failed with error: %d -- %s", rc, strerror(rc));
@@ -562,13 +562,17 @@ main(int argc, char *argv[])
 
   run_basic();
 
+#ifdef ENABLE_RESIZE
   run_resize();
+#endif
 
   run_multithreaded_inserts(2);
   run_multithreaded_inserts(4);
   run_multithreaded_inserts(8);
 
+#ifdef ENABLE_RESIZE
   run_multithreaded_inserts_with_resize(2);
   run_multithreaded_inserts_with_resize(4);
   run_multithreaded_inserts_with_resize(8);
+#endif
 }

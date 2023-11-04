@@ -15,7 +15,9 @@ typedef uint64_t iceberg_value_t;
 
 typedef struct iceberg_table iceberg_table;
 
-int iceberg_create(iceberg_table **table, uint64_t log_slots);
+int iceberg_create(iceberg_table **table,
+                   uint64_t        log_slots,
+                   bool            enable_resize);
 
 void iceberg_destroy(iceberg_table **table);
 

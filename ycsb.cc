@@ -191,7 +191,7 @@ ycsb_load_run_randint(int                    index_type,
 
   if (index_type == TYPE_ICEBERG) {
     iceberg_table *hashtable;
-    int            rc = iceberg_create(&hashtable, 24);
+    int            rc = iceberg_create(&hashtable, 24, true);
     assert(!rc);
 
     thread_data_t *tds =
