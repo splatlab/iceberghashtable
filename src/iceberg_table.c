@@ -74,6 +74,8 @@ typedef struct iceberg_table {
   uint64_t num_blocks;
   uint64_t log_num_blocks;
   uint64_t log_initial_num_blocks;
+
+  uint64_t prefetch_avoision1[8];
   counter  num_items_per_level;
 
   // This is used for the capacity of the hashtable even when resizing is
@@ -83,9 +85,12 @@ typedef struct iceberg_table {
 
 #ifdef ENABLE_RESIZE
   bool enable_resize;
-  struct __attribute__((aligned(256))) {
+
+  uint64_t prefetch_avoision2[8];
+  struct __attribute__((aligned(64))) {
     volatile uint64_t counter;
   } user_lock[NUM_TIDS];
+
   volatile bool     resizer_lock;
   volatile uint64_t level1_resize_counter;
   volatile uint64_t level2_resize_counter;
@@ -291,8 +296,6 @@ release_user_lock(iceberg_table *table, uint64_t tid)
 #ifdef ENABLE_RESIZE
   if (table->enable_resize) {
     table->user_lock[tid].counter--;
-    // user_lock = 0;
-    // user_lock--;
   }
 #endif
 }
@@ -303,9 +306,6 @@ get_user_lock(iceberg_table *table, uint64_t tid)
 #ifdef ENABLE_RESIZE
   if (table->enable_resize) {
     __sync_fetch_and_add(&table->user_lock[tid].counter, 1);
-    // table->user_lock[tid].counter = 1;
-    //__sync_fetch_and_add(&user_lock, 1);
-    //  user_lock = 1;
     while (table->resizer_lock) {
       release_user_lock(table, tid);
       _mm_pause();
@@ -606,9 +606,11 @@ iceberg_create(iceberg_table **out_table,
 static void
 wait_for_users_to_finish(iceberg_table *table)
 {
-  for (uint64_t i = 0; i < NUM_TIDS; i++) {
-    while (table->user_lock[i].counter) {
-      _mm_pause();
+  if (table->enable_resize) {
+    for (uint64_t i = 0; i < NUM_TIDS; i++) {
+      while (table->user_lock[i].counter) {
+        _mm_pause();
+      }
     }
   }
 }

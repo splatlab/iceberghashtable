@@ -12,6 +12,7 @@
 #include <time.h>
 #include <tmmintrin.h>
 #include <unistd.h>
+#include <new>
 
 #include <sys/resource.h>
 #include <sys/time.h>
@@ -279,6 +280,8 @@ main(int argc, char **argv)
     printf("Number level 3 inserts: %" PRIu64 "\n", level3_load(table));
     printf("Total inserts: %" PRIu64 "\n", iceberg_load(table));
   }
+
+  exit(0);
 
   // uint64_t max_size = 0, sum_sizes = 0;
   // for(uint64_t i = 0; i < LEVEL3_BLOCKS; ++i) {
