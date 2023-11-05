@@ -1403,13 +1403,17 @@ level1_query_block(iceberg_table   *table,
   verbose_print_mask_64(match_mask);
 
   while (match_mask != 0) {
-    int slot   = __builtin_ctzll(match_mask);
-    match_mask = match_mask & ~(1ULL << slot);
+    int slot_in_block = __builtin_ctzll(match_mask);
+    match_mask        = match_mask & ~(1ULL << slot_in_block);
 
-    kv_pair *candidate_kv = get_level1_kv_pair(table, pb, slot);
-    if (candidate_kv->key == key) {
-      verbose_print_location(1, pb.partition, pb.block, slot, candidate_kv);
-      *value = candidate_kv->val;
+    uint64_t slot = kv_pair_offset(pb, LEVEL1_BLOCK_SIZE, slot_in_block);
+    __m128d  a = _mm_load_si128((__m128i *)&table->level1[pb.partition][slot]);
+    kv_pair  candidate_kv;
+    _mm_store_si128((__m128i *)&candidate_kv, a);
+
+    if (candidate_kv.key == key) {
+      // verbose_print_location(1, pb.partition, pb.block, slot, candidate_kv);
+      *value = candidate_kv.val;
       return true;
     }
   }
