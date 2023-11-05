@@ -1172,113 +1172,6 @@ level3_unlock_block(iceberg_table *table, uint64_t block)
   __atomic_clear(&table->level3[block].lock, __ATOMIC_SEQ_CST);
 }
 
-static inline bool
-level3_insert(iceberg_table  *table,
-              iceberg_key_t   key,
-              iceberg_value_t value,
-              hash           *h,
-              uint64_t        tid)
-{
-  uint64_t block = get_level3_block(h);
-  level3_lock_block(table, block);
-  level3_node *new_node = malloc(sizeof(level3_node));
-  assert(new_node);
-  verbose_print_location(3, 0, block, 0, new_node);
-  new_node->key             = key;
-  new_node->val             = value;
-  new_node->next            = table->level3[block].head;
-  table->level3[block].head = new_node;
-  counter_increment(&table->num_items_per_level, LEVEL3, tid);
-  level3_unlock_block(table, block);
-  return true;
-}
-
-static inline bool
-level2_insert(iceberg_table  *table,
-              iceberg_key_t   key,
-              iceberg_value_t value,
-              hash           *h,
-              uint64_t        tid)
-{
-  partition_block pb1     = get_block(table, h, LEVEL2_BLOCK1);
-  fingerprint_t  *sketch1 = get_level2_sketch(table, pb1);
-  verbose_print_sketch(sketch1, LEVEL2_BLOCK_SIZE);
-  level2_maybe_move(table, pb1, tid);
-
-  partition_block pb2     = get_block(table, h, LEVEL2_BLOCK2);
-  fingerprint_t  *sketch2 = get_level2_sketch(table, pb2);
-  verbose_print_sketch(sketch2, LEVEL2_BLOCK_SIZE);
-  level2_maybe_move(table, pb2, tid);
-
-  uint32_t match_mask = level2_double_sketch_match(sketch1, sketch2, FP_FREE);
-  verbose_print_double_mask_8(match_mask);
-  uint8_t popcnt1 = __builtin_popcount(match_mask & LEVEL2_CHOICE1_MASK);
-  uint8_t popcnt2 = __builtin_popcount(match_mask & LEVEL2_CHOICE2_MASK);
-
-  if (popcnt2 > popcnt1) {
-    pb1     = pb2;
-    sketch1 = sketch2;
-    match_mask >>= 8;
-  }
-
-  return level2_insert_into_block_with_mask(
-    table, key, value, h, pb1, sketch1, match_mask, tid);
-}
-
-static inline bool iceberg_query_internal(iceberg_table   *table,
-                                          iceberg_key_t    key,
-                                          iceberg_value_t *value,
-                                          hash            *h,
-                                          uint64_t         tid);
-
-ALWAYS_INLINE bool
-iceberg_insert(iceberg_table  *table,
-               iceberg_key_t   key,
-               iceberg_value_t value,
-               uint64_t        tid)
-{
-  verbose_print_operation("INSERT:", key, value);
-
-  maybe_create_new_partition(table, tid);
-
-  get_user_lock(table, tid);
-
-  hash            h  = hash_key(table, &key);
-  partition_block pb = get_block(table, &h, LEVEL1_BLOCK);
-
-  level1_maybe_move(table, pb, tid);
-
-  fingerprint_t *sketch = get_level1_sketch(table, pb);
-  level1_lock_block(sketch);
-  verbose_print_sketch(sketch, 64);
-
-  iceberg_value_t v;
-  verbose_print_operation("INTERNAL QUERY:", key, value);
-  bool ret = false;
-  if (unlikely(iceberg_query_internal(table, key, &v, &h, tid))) {
-    goto out;
-  }
-  verbose_end("INTERNAL QUERY", true);
-
-  ret = level1_insert_into_block(table, key, value, &h, pb, tid);
-  if (ret) {
-    goto out;
-  }
-
-  ret = level2_insert(table, key, value, &h, tid);
-  if (ret) {
-    goto out;
-  }
-
-  ret = level3_insert(table, key, value, &h, tid);
-
-out:
-  verbose_end("INSERT", false);
-  level1_unlock_block(sketch);
-  release_user_lock(table, tid);
-  return ret;
-}
-
 static bool
 level3_delete(iceberg_table *table, iceberg_key_t key, hash *h, uint64_t tid)
 {
@@ -1569,6 +1462,107 @@ iceberg_query(iceberg_table   *table,
   hash h = hash_key(table, &key);
   ret    = iceberg_query_internal(table, key, value, &h, tid);
   verbose_end("QUERY", false);
+  release_user_lock(table, tid);
+  return ret;
+}
+
+static inline bool
+level3_insert(iceberg_table  *table,
+              iceberg_key_t   key,
+              iceberg_value_t value,
+              hash           *h,
+              uint64_t        tid)
+{
+  uint64_t block = get_level3_block(h);
+  level3_lock_block(table, block);
+  level3_node *new_node = malloc(sizeof(level3_node));
+  assert(new_node);
+  verbose_print_location(3, 0, block, 0, new_node);
+  new_node->key             = key;
+  new_node->val             = value;
+  new_node->next            = table->level3[block].head;
+  table->level3[block].head = new_node;
+  counter_increment(&table->num_items_per_level, LEVEL3, tid);
+  level3_unlock_block(table, block);
+  return true;
+}
+
+static inline bool
+level2_insert(iceberg_table  *table,
+              iceberg_key_t   key,
+              iceberg_value_t value,
+              hash           *h,
+              uint64_t        tid)
+{
+  partition_block pb1     = get_block(table, h, LEVEL2_BLOCK1);
+  fingerprint_t  *sketch1 = get_level2_sketch(table, pb1);
+  verbose_print_sketch(sketch1, LEVEL2_BLOCK_SIZE);
+  level2_maybe_move(table, pb1, tid);
+
+  partition_block pb2     = get_block(table, h, LEVEL2_BLOCK2);
+  fingerprint_t  *sketch2 = get_level2_sketch(table, pb2);
+  verbose_print_sketch(sketch2, LEVEL2_BLOCK_SIZE);
+  level2_maybe_move(table, pb2, tid);
+
+  uint32_t match_mask = level2_double_sketch_match(sketch1, sketch2, FP_FREE);
+  verbose_print_double_mask_8(match_mask);
+  uint8_t popcnt1 = __builtin_popcount(match_mask & LEVEL2_CHOICE1_MASK);
+  uint8_t popcnt2 = __builtin_popcount(match_mask & LEVEL2_CHOICE2_MASK);
+
+  if (popcnt2 > popcnt1) {
+    pb1     = pb2;
+    sketch1 = sketch2;
+    match_mask >>= 8;
+  }
+
+  return level2_insert_into_block_with_mask(
+    table, key, value, h, pb1, sketch1, match_mask, tid);
+}
+
+ALWAYS_INLINE bool
+iceberg_insert(iceberg_table  *table,
+               iceberg_key_t   key,
+               iceberg_value_t value,
+               uint64_t        tid)
+{
+  verbose_print_operation("INSERT:", key, value);
+
+  maybe_create_new_partition(table, tid);
+
+  get_user_lock(table, tid);
+
+  hash            h  = hash_key(table, &key);
+  partition_block pb = get_block(table, &h, LEVEL1_BLOCK);
+
+  level1_maybe_move(table, pb, tid);
+
+  fingerprint_t *sketch = get_level1_sketch(table, pb);
+  level1_lock_block(sketch);
+  verbose_print_sketch(sketch, 64);
+
+  iceberg_value_t v;
+  verbose_print_operation("INTERNAL QUERY:", key, value);
+  bool ret = false;
+  if (unlikely(iceberg_query_internal(table, key, &v, &h, tid))) {
+    goto out;
+  }
+  verbose_end("INTERNAL QUERY", true);
+
+  ret = level1_insert_into_block(table, key, value, &h, pb, tid);
+  if (ret) {
+    goto out;
+  }
+
+  ret = level2_insert(table, key, value, &h, tid);
+  if (ret) {
+    goto out;
+  }
+
+  ret = level3_insert(table, key, value, &h, tid);
+
+out:
+  verbose_end("INSERT", false);
+  level1_unlock_block(sketch);
   release_user_lock(table, tid);
   return ret;
 }
