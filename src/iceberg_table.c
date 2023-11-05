@@ -23,6 +23,8 @@
 #define LEVEL2_BLOCK_SIZE     8ULL
 #define LEVEL3_BLOCKS         1024ULL
 
+#define ALWAYS_INLINE __attribute__((always_inline)) inline
+
 _Static_assert((1 << LEVEL1_LOG_BLOCK_SIZE) == LEVEL1_BLOCK_SIZE,
                "Level1 block width inconsistent with level1 block size");
 
@@ -119,7 +121,7 @@ level1_load(iceberg_table *table)
   return counter_get(cntr, LEVEL1);
 }
 
-__attribute__((unused)) static inline uint64_t
+static inline uint64_t
 level1_load_approx(iceberg_table *table)
 {
   counter *cntr = &table->num_items_per_level;
@@ -134,7 +136,7 @@ level2_load(iceberg_table *table)
   return counter_get(cntr, LEVEL2);
 }
 
-__attribute__((unused)) static inline uint64_t
+static inline uint64_t
 level2_load_approx(iceberg_table *table)
 {
   counter *cntr = &table->num_items_per_level;
@@ -149,7 +151,7 @@ level3_load(iceberg_table *table)
   return counter_get(cntr, LEVEL3);
 }
 
-__attribute__((unused)) static inline uint64_t
+static inline uint64_t
 level3_load_approx(iceberg_table *table)
 {
   counter *cntr = &table->num_items_per_level;
@@ -1229,7 +1231,7 @@ static inline bool iceberg_query_internal(iceberg_table   *table,
                                           hash            *h,
                                           uint64_t         tid);
 
-__attribute__((always_inline)) inline bool
+ALWAYS_INLINE bool
 iceberg_insert(iceberg_table  *table,
                iceberg_key_t   key,
                iceberg_value_t value,
@@ -1353,7 +1355,7 @@ level2_delete(iceberg_table *table, iceberg_key_t key, hash *h, uint64_t tid)
   return level3_delete(table, key, h, tid);
 }
 
-__attribute__((always_inline)) inline bool
+ALWAYS_INLINE bool
 iceberg_delete(iceberg_table *table, iceberg_key_t key, uint64_t tid)
 {
   verbose_print_operation("DELETE:", key, 0);
@@ -1397,7 +1399,7 @@ out:
   return ret;
 }
 
-__attribute__((always_inline)) static inline bool
+static ALWAYS_INLINE bool
 level3_query(iceberg_table   *table,
              iceberg_key_t    key,
              iceberg_value_t *value,
@@ -1471,7 +1473,7 @@ level2_maybe_query_old_block(iceberg_table   *table,
 #endif
 }
 
-__attribute__((always_inline)) static inline bool
+static ALWAYS_INLINE bool
 level2_query(iceberg_table   *table,
              iceberg_key_t    key,
              iceberg_value_t *value,
@@ -1495,7 +1497,7 @@ level2_query(iceberg_table   *table,
   return level2_query_block(table, key, value, h, pb2);
 }
 
-__attribute__((always_inline)) static inline bool
+static ALWAYS_INLINE bool
 level1_query_block(iceberg_table   *table,
                    iceberg_key_t    key,
                    iceberg_value_t *value,
@@ -1521,7 +1523,7 @@ level1_query_block(iceberg_table   *table,
   return false;
 }
 
-__attribute__((always_inline)) static inline bool
+static ALWAYS_INLINE bool
 level1_maybe_query_old_block(iceberg_table   *table,
                              iceberg_key_t    key,
                              iceberg_value_t *value,
@@ -1539,7 +1541,7 @@ level1_maybe_query_old_block(iceberg_table   *table,
 #endif
 }
 
-__attribute__((always_inline)) inline bool
+static ALWAYS_INLINE bool
 iceberg_query_internal(iceberg_table   *table,
                        iceberg_key_t    key,
                        iceberg_value_t *value,
@@ -1554,7 +1556,7 @@ iceberg_query_internal(iceberg_table   *table,
          level3_query(table, key, value, h);
 }
 
-__attribute__((always_inline)) inline bool
+ALWAYS_INLINE bool
 iceberg_query(iceberg_table   *table,
               iceberg_key_t    key,
               iceberg_value_t *value,
