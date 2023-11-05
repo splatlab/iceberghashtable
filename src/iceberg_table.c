@@ -75,8 +75,7 @@ typedef struct iceberg_table {
   uint64_t log_num_blocks;
   uint64_t log_initial_num_blocks;
 
-  uint64_t prefetch_avoision1[8];
-  counter  num_items_per_level;
+  counter num_items_per_level;
 
   // This is used for the capacity of the hashtable even when resizing is
   // disabled.
@@ -86,7 +85,7 @@ typedef struct iceberg_table {
 #ifdef ENABLE_RESIZE
   bool enable_resize;
 
-  uint64_t prefetch_avoision2[8];
+  uint64_t prefetch_avoision[8];
   struct __attribute__((aligned(64))) {
     volatile uint64_t counter;
   } user_lock[NUM_TIDS];
