@@ -129,30 +129,80 @@ void do_mixed(uint8_t id, uint64_t *keys, uint64_t *values, uint64_t start, uint
       iceberg_insert(&table, keys[i], values[i], id);
 }
 
-int main (int argc, char** argv) {
-  if (argc != 3 && argc != 4) {
-    fprintf(stderr, "Specify the log of the number of slots in the table and the number of threads to use.\n");
-    exit(1);
-  }
+void usage(char *argv0)
+{
+#ifdef PMEM
+  printf("%s [-p pmem-dir] [-s log-of-number-of-slots] [-t number-of-threads]\n", argv0);
+  #else
+  printf("%s [-s log-of-number-of-slots] [-t number-of-threads]\n", argv0);
+#endif
+  exit(EXIT_FAILURE);
+}
 
+int main (int argc, char** argv) {
+  const char *pmem_dir = "/mnt/pmem";
+  uint64_t tbits = 20;
+  uint64_t threads = 1;
+
+
+  int opt;
+  char *endptr;
+  while ((opt = getopt(argc, argv, ":s:p:t:")) != -1) {
+    switch (opt) {
+    case 's':
+      tbits = strtoull(optarg, &endptr, 0);
+      if (*endptr != '\0') {
+        printf("Invalid log-of-slots: %s\n", optarg);
+        usage(argv[0]);
+      }
+      break;
+    case 't':
+      threads = strtoull(optarg, &endptr, 0);
+      if (*endptr != '\0') {
+        printf("Invalid number of threads: %s\n", optarg);
+        usage(argv[0]);
+      }
+      break;
+    case 'p':
+#ifdef PMEM
+      pmem_dir = optarg;
+#else
+      printf("-p is only supported when compiled with PMEM support\n");
+      usage(argv[0]);
+#endif
+      break;
+    case ':':
+      printf("Option -%c requires an operand\n", optopt);
+      usage(argv[0]);
+    default:
+      printf("Unknown option: -%c\n", optopt);
+      usage(argv[0]);
+    }
+  }
+  
   bool is_benchmark = false;
   if (argc == 4) {
     assert(strcmp(argv[3], "-b") == 0);
     is_benchmark = true;
   }
 
-  uint64_t tbits = atoi(argv[1]);
-  uint64_t threads = atoi(argv[2]);
   uint64_t N = (1ULL << tbits) * 1.07;
   //uint64_t N = (1ULL << tbits) * 1.07 * 1.90;
 
   high_resolution_clock::time_point t1 = high_resolution_clock::now();
 
+ #ifdef PMEM
+  if (iceberg_init(&table, tbits, pmem_dir)) {
+    fprintf(stderr, "Can't allocate iceberg table.\n");
+    exit(EXIT_FAILURE);
+  }
+#else
   if (iceberg_init(&table, tbits)) {
     fprintf(stderr, "Can't allocate iceberg table.\n");
     exit(EXIT_FAILURE);
   }
-
+#endif
+  
   high_resolution_clock::time_point t2 = high_resolution_clock::now();
   if (!is_benchmark) {
     printf("Creation time: %f\n", elapsed(t1, t2));
@@ -364,7 +414,7 @@ int main (int argc, char** argv) {
 #if PMEM
   iceberg_dismount(&table);
   t1 = high_resolution_clock::now();
-  iceberg_mount(&table, tbits, 0);
+  iceberg_mount(&table, tbits, 0, pmem_dir);
   t2 = high_resolution_clock::now();
   printf("throughput: mount: %f ops/sec\n", N / 2 / elapsed(t1, t2));
 #endif

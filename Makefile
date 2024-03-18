@@ -45,7 +45,7 @@ LIBS = -lssl -lcrypto -ltbb
 
 ifdef PMEM
 INCLUDE += -I ./pmdk/src/PMDK/src/include
-LIBS +=  -L ./pmdk/src/PMDK/src/nondebug -lpmem -lpmemobj
+LIBS += -lpmem -lpmemobj
 endif
 
 all: main ycsb
