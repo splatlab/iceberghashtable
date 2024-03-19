@@ -8,7 +8,7 @@
 #include <stdlib.h>
 #include <atomic>
 #include <thread>
-#include "tbb/tbb.h"
+//#include "tbb/tbb.h"
 
 #include "iceberg_table.h"
 
@@ -160,7 +160,7 @@ void ycsb_load_run_randint(int index_type, int wl, int kt, int ap, int num_threa
         txn_count++;
     }
     txn_count--;
-    fprintf(stderr, "Loaded %d txn keys\n", txn_count);
+    fprintf(stderr, "Loaded %" PRIu64 " txn keys\n", txn_count);
 
     std::atomic<int> range_complete, range_incomplete;
     range_complete.store(0);
@@ -387,7 +387,7 @@ int main(int argc, char **argv) {
 #ifdef PMEM
     pmem_dir = argv[6];
 #endif
-    tbb::task_scheduler_init init(num_thread);
+    //tbb::task_scheduler_init init(num_thread);
 
     if (kt != STRING_KEY) {
         std::vector<uint64_t> init_keys;
