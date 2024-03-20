@@ -26,10 +26,6 @@ extern "C" {
     ValueType val;
   } kv_pair;
 
-  typedef struct __attribute__ ((__packed__)) iceberg_lv1_block {
-    kv_pair slots[1 << SLOT_BITS];
-  } iceberg_lv1_block;
-
   typedef struct __attribute__ ((__packed__)) iceberg_lv1_block_md {
     uint8_t block_md[1 << SLOT_BITS];
   } iceberg_lv1_block_md;
@@ -95,7 +91,7 @@ extern "C" {
   typedef struct iceberg_table {
     iceberg_metadata metadata;
     /* Only things that are persisted on PMEM */
-    iceberg_lv1_block * level1[MAX_RESIZES];
+    kv_pair * level1[MAX_RESIZES];
     iceberg_lv2_block * level2[MAX_RESIZES];
     iceberg_lv3_list * level3[MAX_RESIZES];
 #ifdef PMEM
