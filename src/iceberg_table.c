@@ -26,7 +26,6 @@
 /*#define RESIZE_THRESHOLD 0.85 // For YCSB*/
 
 #ifdef PMEM
-#define PMEM_PATH "/mnt/pmem1"
 #define FILENAME_LEN 1024
 #define NUM_LEVEL3_NODES 2048
 #define FILE_SIZE (10ULL * 1024 * 1024 * 1024)
@@ -246,7 +245,12 @@ static inline size_t round_up(size_t n, size_t k) {
   return n;
 }
 
-int iceberg_init(iceberg_table *table, uint64_t log_slots) {
+#ifdef PMEM
+int iceberg_init(iceberg_table *table, uint64_t log_slots, const char *pmem_dir)
+#else
+int iceberg_init(iceberg_table *table, uint64_t log_slots)
+#endif
+{
   memset(table, 0, sizeof(*table));
 
   uint64_t total_blocks = 1 << (log_slots - SLOT_BITS);
@@ -265,7 +269,7 @@ int iceberg_init(iceberg_table *table, uint64_t log_slots) {
   int is_pmem;
 
   char level1_filename[FILENAME_LEN];
-  sprintf(level1_filename, "%s/level1", PMEM_PATH);
+  snprintf(level1_filename, FILENAME_LEN, "%s/level1", pmem_dir);
   if ((table->level1[0] = (iceberg_lv1_block *)pmem_map_file(level1_filename, FILE_SIZE, PMEM_FILE_CREATE | PMEM_FILE_SPARSE, 0666, &mapped_len, &is_pmem)) == NULL) {
     perror("pmem_map_file");
     exit(1);
@@ -274,7 +278,7 @@ int iceberg_init(iceberg_table *table, uint64_t log_slots) {
   assert(mapped_len == FILE_SIZE);
 
   char level2_filename[FILENAME_LEN];
-  sprintf(level2_filename, "%s/level2", PMEM_PATH);
+  snprintf(level2_filename, FILENAME_LEN, "%s/level2", pmem_dir);
   if ((table->level2[0] = (iceberg_lv2_block *)pmem_map_file(level2_filename, FILE_SIZE, PMEM_FILE_CREATE | PMEM_FILE_SPARSE, 0666, &mapped_len, &is_pmem)) == NULL) {
     perror("pmem_map_file");
   }
@@ -282,7 +286,7 @@ int iceberg_init(iceberg_table *table, uint64_t log_slots) {
   assert(mapped_len == FILE_SIZE);
 
   char level3_filename[FILENAME_LEN];
-  sprintf(level3_filename, "%s/level3", PMEM_PATH);
+  snprintf(level3_filename, FILENAME_LEN, "%s/level3", pmem_dir);
   if ((table->level3[0] = (iceberg_lv3_list *)pmem_map_file(level3_filename, FILE_SIZE, PMEM_FILE_CREATE | PMEM_FILE_SPARSE, 0666, &mapped_len, &is_pmem)) == NULL) {
     perror("pmem_map_file");
     exit(1);
@@ -292,7 +296,7 @@ int iceberg_init(iceberg_table *table, uint64_t log_slots) {
 
   size_t level3_nodes_size = NUM_LEVEL3_NODES * sizeof(iceberg_lv3_node);
   char level3_nodes_filename[FILENAME_LEN];
-  sprintf(level3_nodes_filename, "%s/level3_data", PMEM_PATH);
+  snprintf(level3_nodes_filename, FILENAME_LEN, "%s/level3_data", pmem_dir);
   table->level3_nodes =
     (iceberg_lv3_node *)pmem_map_file(level3_nodes_filename,
         level3_nodes_size, PMEM_FILE_CREATE | PMEM_FILE_SPARSE, 0666,
@@ -463,7 +467,7 @@ uint64_t iceberg_dismount(iceberg_table * table) {
   return table->metadata.block_bits + SLOT_BITS;
 }
 
-int iceberg_mount(iceberg_table *table, uint64_t log_slots, uint64_t resize_cnt) {
+int iceberg_mount(iceberg_table *table, uint64_t log_slots, uint64_t resize_cnt, const char *pmem_dir) {
   memset(table, 0, sizeof(*table));
 
   uint64_t init_log_slots = log_slots;
@@ -484,7 +488,7 @@ int iceberg_mount(iceberg_table *table, uint64_t log_slots, uint64_t resize_cnt)
 
   /* map the file for first partition */
   char level1_filename[FILENAME_LEN];
-  sprintf(level1_filename, "%s/level1", PMEM_PATH);
+  snprintf(level1_filename, FILENAME_LEN, "%s/level1", pmem_dir);
   if ((table->level1[0] = (iceberg_lv1_block *)pmem_map_file(level1_filename, 0, 0, 0666, &mapped_len, &is_pmem)) == NULL) {
     perror("pmem_map_file");
     exit(1);
@@ -493,7 +497,7 @@ int iceberg_mount(iceberg_table *table, uint64_t log_slots, uint64_t resize_cnt)
   assert(mapped_len == FILE_SIZE);
 
   char level2_filename[FILENAME_LEN];
-  sprintf(level2_filename, "%s/level2", PMEM_PATH);
+  snprintf(level2_filename, FILENAME_LEN, "%s/level2", pmem_dir);
   if ((table->level2[0] = (iceberg_lv2_block *)pmem_map_file(level2_filename, 0, 0, 0666, &mapped_len, &is_pmem)) == NULL) {
     perror("pmem_map_file");
     exit(1);
@@ -502,7 +506,7 @@ int iceberg_mount(iceberg_table *table, uint64_t log_slots, uint64_t resize_cnt)
   assert(mapped_len == FILE_SIZE);
 
   char level3_filename[FILENAME_LEN];
-  sprintf(level3_filename, "%s/level3", PMEM_PATH);
+  snprintf(level3_filename, FILENAME_LEN, "%s/level3", pmem_dir);
   if ((table->level3[0] = (iceberg_lv3_list *)pmem_map_file(level3_filename, 0, 0, 0666, &mapped_len, &is_pmem)) == NULL) {
     perror("pmem_map_file");
     exit(1);
@@ -512,7 +516,7 @@ int iceberg_mount(iceberg_table *table, uint64_t log_slots, uint64_t resize_cnt)
 
   size_t level3_nodes_size = NUM_LEVEL3_NODES * sizeof(iceberg_lv3_node);
   char level3_nodes_filename[FILENAME_LEN];
-  sprintf(level3_nodes_filename, "%s/level3_data", PMEM_PATH);
+  snprintf(level3_nodes_filename, FILENAME_LEN, "%s/level3_data", pmem_dir);
   table->level3_nodes = (iceberg_lv3_node *)pmem_map_file(level3_nodes_filename, 0, 0, 0666, &mapped_len, &is_pmem);
   if (table->level3_nodes == NULL) {
     perror("pmem_map_file");

@@ -20,12 +20,16 @@ The code uses vector instructions to speed up operatons.
 
 ```bash
  $ make main
- $ ./main 24 4
+ $ ./main -s 24 -t 4
 ```
 
- The argument to main is the log of the number of slots in the hash table and
- the number of threads. For example, to create a hash table with 2^30 slots, the
- argument will be 30.
+The -s flag specifies the log of the number of slots, and the -t flag specifies the number of threads.
+
+To build for PMEM,
+```bash
+ $ PMEM=1 make main
+ $ ./main -p /path/to/pmem -s 24 -t 4
+```
 
 Contributing
 ------------

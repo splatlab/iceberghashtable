@@ -8,7 +8,7 @@
 #include <stdlib.h>
 #include <atomic>
 #include <thread>
-#include "tbb/tbb.h"
+//#include "tbb/tbb.h"
 
 #include "iceberg_table.h"
 
@@ -61,10 +61,11 @@ static uint64_t LOAD_SIZE = 64000000;
 static uint64_t RUN_SIZE = 1280000000;
 
 void ycsb_load_run_randint(int index_type, int wl, int kt, int ap, int num_thread,
-        std::vector<uint64_t> &init_keys,
-        std::vector<uint64_t> &keys,
-        std::vector<int> &ranges,
-        std::vector<int> &ops)
+			   std::vector<uint64_t> &init_keys,
+			   std::vector<uint64_t> &keys,
+			   std::vector<int> &ranges,
+			   std::vector<int> &ops,
+			   char *pmem_dir)
 {
     std::string init_file;
     std::string txn_file;
@@ -159,7 +160,7 @@ void ycsb_load_run_randint(int index_type, int wl, int kt, int ap, int num_threa
         txn_count++;
     }
     txn_count--;
-    fprintf(stderr, "Loaded %d txn keys\n", txn_count);
+    fprintf(stderr, "Loaded %" PRIu64 " txn keys\n", txn_count);
 
     std::atomic<int> range_complete, range_incomplete;
     range_complete.store(0);
@@ -167,8 +168,11 @@ void ycsb_load_run_randint(int index_type, int wl, int kt, int ap, int num_threa
 
     if (index_type == TYPE_ICEBERG) {
         iceberg_table hashtable;
+#ifdef PMEM
+        iceberg_init(&hashtable, 24, pmem_dir);
+#else
         iceberg_init(&hashtable, 24);
-
+#endif
         thread_data_t *tds = (thread_data_t *) malloc(num_thread * sizeof(thread_data_t));
 
         std::atomic<int> next_thread_id;
@@ -307,13 +311,26 @@ void ycsb_load_run_randint(int index_type, int wl, int kt, int ap, int num_threa
 }
 
 int main(int argc, char **argv) {
-    if (argc != 6) {
-        std::cout << "Usage: ./ycsb [index type] [ycsb workload type] [key distribution] [access pattern] [number of threads]\n";
+#ifdef PMEM
+#define NARGS 7
+#else
+#define NARGS 6
+#endif
+  
+    if (argc != NARGS) {
+#ifdef PMEM
+        std::cout << "Usage: ./ycsb <index type> <ycsb workload type> <key distribution> <access pattern> <number of threads> <pmem directory>\n";
+#else
+        std::cout << "Usage: ./ycsb <index type> <ycsb workload type> <key distribution> <access pattern> <number of threads>\n";
+#endif
         std::cout << "1. index type: iceberg cuckoo dash\n";
         std::cout << "2. ycsb workload type: a, b, c, e\n";
         std::cout << "3. key distribution: randint\n";
         std::cout << "4. access pattern: uniform\n";
         std::cout << "5. number of threads (integer)\n";
+#ifdef PMEM
+	std::cout << "6. directory where pmme files should be stored.\n";
+#endif
         return 1;
     }
 
@@ -366,7 +383,11 @@ int main(int argc, char **argv) {
     }
 
     int num_thread = atoi(argv[5]);
-    tbb::task_scheduler_init init(num_thread);
+    char *pmem_dir = NULL;
+#ifdef PMEM
+    pmem_dir = argv[6];
+#endif
+    //tbb::task_scheduler_init init(num_thread);
 
     if (kt != STRING_KEY) {
         std::vector<uint64_t> init_keys;
@@ -384,7 +405,7 @@ int main(int argc, char **argv) {
         memset(&ranges[0], 0x00, RUN_SIZE * sizeof(int));
         memset(&ops[0], 0x00, RUN_SIZE * sizeof(int));
 
-        ycsb_load_run_randint(index_type, wl, kt, ap, num_thread, init_keys, keys, ranges, ops);
+        ycsb_load_run_randint(index_type, wl, kt, ap, num_thread, init_keys, keys, ranges, ops, pmem_dir);
     }
     /*
     else {

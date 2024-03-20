@@ -108,8 +108,12 @@ extern "C" {
   uint64_t lv3_balls(iceberg_table * table);
   uint64_t tot_balls(iceberg_table * table);
 
+#ifdef PMEM
+  int iceberg_init(iceberg_table *table, uint64_t log_slots, const char *pmem_dir);
+#else
   int iceberg_init(iceberg_table *table, uint64_t log_slots);
-
+#endif
+  
   double iceberg_load_factor(iceberg_table * table);
 
   bool iceberg_insert(iceberg_table * table, KeyType key, ValueType value, uint8_t thread_id);
@@ -120,7 +124,7 @@ extern "C" {
 
 #ifdef PMEM
   uint64_t iceberg_dismount(iceberg_table *table);
-  int iceberg_mount(iceberg_table *table, uint64_t log_slots, uint64_t resize_cnt);
+  int iceberg_mount(iceberg_table *table, uint64_t log_slots, uint64_t resize_cnt, const char *pmem_dir);
 #endif
 
 #ifdef ENABLE_RESIZE
