@@ -68,7 +68,6 @@ extern "C" {
     uint64_t block_bits;
     uint64_t init_size;
     uint64_t log_init_size;
-    uint64_t resize_threshold;
     int64_t lv1_ctr;
     int64_t lv2_ctr;
     int64_t lv3_ctr;
