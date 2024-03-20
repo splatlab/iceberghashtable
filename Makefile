@@ -44,7 +44,6 @@ OBJECTS = $(subst src/,obj/,$(subst .c,.o,$(SOURCES)))
 LIBS = -lssl -lcrypto
 
 ifdef PMEM
-INCLUDE += -I ./pmdk/src/PMDK/src/include
 LIBS += -lpmem -lpmemobj
 endif
 
