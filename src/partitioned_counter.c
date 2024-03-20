@@ -6,6 +6,8 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <sched.h>
+#include <sys/sysinfo.h>
+#include <linux/unistd.h>
 #include <sys/syscall.h>
 #include <errno.h>
 
