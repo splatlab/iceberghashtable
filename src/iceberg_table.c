@@ -232,6 +232,7 @@ static inline void atomic_write_128(uint64_t key, uint64_t val, uint64_t *slot) 
   _mm_store_pd ((double*)slot, a);
 }
 
+#if 0
 static uint64_t iceberg_block_load(iceberg_table * table, uint64_t index, uint8_t level) {
   uint64_t bindex, boffset;
   get_index_offset(table->metadata.log_init_size, index, &bindex, &boffset);
@@ -245,7 +246,7 @@ static uint64_t iceberg_block_load(iceberg_table * table, uint64_t index, uint8_
     return table->metadata.lv3_sizes[bindex][boffset];
 }
 
-uint64_t iceberg_table_load(iceberg_table * table) {
+static uint64_t iceberg_table_load(iceberg_table * table) {
   uint64_t total = 0;
 
   for (uint8_t i = 1; i <= 3; ++i) {
@@ -257,7 +258,7 @@ uint64_t iceberg_table_load(iceberg_table * table) {
   return total;
 }
 
-double iceberg_block_load_factor(iceberg_table * table, uint64_t index, uint8_t level) {
+static double iceberg_block_load_factor(iceberg_table * table, uint64_t index, uint8_t level) {
   if (level == 1)
     return iceberg_block_load(table, index, level) / (double)(1ULL << SLOT_BITS);
   else if (level == 2)
@@ -266,7 +267,7 @@ double iceberg_block_load_factor(iceberg_table * table, uint64_t index, uint8_t 
     return iceberg_block_load(table, index, level);
 }
 
-inline size_t round_up(size_t n, size_t k) {
+static inline size_t round_up(size_t n, size_t k) {
   size_t rem = n % k;
   if (rem == 0) {
     return n;
@@ -274,6 +275,7 @@ inline size_t round_up(size_t n, size_t k) {
   n += k - rem;
   return n;
 }
+#endif
 
 #ifdef PMEM
 int iceberg_init(iceberg_table *table, uint64_t log_slots, const char *pmem_dir)
