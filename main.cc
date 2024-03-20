@@ -140,7 +140,9 @@ void usage(char *argv0)
 }
 
 int main (int argc, char** argv) {
+#ifdef PMEM
   const char *pmem_dir = "/mnt/pmem";
+#endif
   uint64_t tbits = 20;
   uint64_t threads = 1;
 

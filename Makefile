@@ -10,6 +10,12 @@ else
    HUGE=
 endif
 
+ifdef NO_AVX
+   AVX_FLAGS=
+else
+   AVX_FLAGS= -DUSE_AVX
+endif
+
 RESIZE_POLICY = -DENABLE_RESIZE
 BLOCK_LOCKING = -DENABLE_BLOCK_LOCKING
 
@@ -33,11 +39,11 @@ ifdef PMEM
 	PMEM_POLICY = -DPMEM
 endif
 
-OPT += $(RESIZE_POLICY) $(BLOCK_LOCKING) $(THRPT_POLICY) $(LATENCY_POLICY) $(PMEM_POLICY)
+OPT += $(RESIZE_POLICY) $(BLOCK_LOCKING) $(THRPT_POLICY) $(LATENCY_POLICY) $(PMEM_POLICY) $(AVX_FLAGS)
 
 CC = clang
 CPP = clang++
-CFLAGS = $(OPT) -Wall -march=native -pthread $(HUGE)
+CFLAGS = $(OPT) -Wall -Werror -march=native -pthread $(HUGE)
 INCLUDE = -I ./include
 SOURCES = src/iceberg_table.c src/hashutil.c src/partitioned_counter.c src/lock.c
 OBJECTS = $(subst src/,obj/,$(subst .c,.o,$(SOURCES)))
