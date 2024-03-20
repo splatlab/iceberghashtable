@@ -37,9 +37,9 @@ OPT += $(RESIZE_POLICY) $(BLOCK_LOCKING) $(THRPT_POLICY) $(LATENCY_POLICY) $(PME
 
 CC = clang
 CPP = clang++
-CFLAGS = $(OPT) -Wall -march=native -pthread -Werror -Wfatal-errors $(HUGE)
+CFLAGS = $(OPT) -Wall -march=native -pthread -Werror -Wfatal-errors $(HUGE) -DXXH_INLINE_ALL
 CPPFLAGS = $(OPT) -Wall -march=native -pthread -Werror -Wfatal-errors $(HUGE) -std=c++11
-INCLUDE = -I ./include
+INCLUDE = -I ./include -I ./src -I ./xxhash
 SOURCES = src/iceberg_table.c src/hashutil.c src/partitioned_counter.c src/lock.c
 OBJECTS = $(subst src/,obj/,$(subst .c,.o,$(SOURCES)))
 
@@ -48,13 +48,13 @@ INCLUDE += -I ./pmdk/src/PMDK/src/include
 LIBS +=  -L ./pmdk/src/PMDK/src/nondebug -lpmem -lpmemobj
 endif
 
-all: main ycsb
+all: micro ycsb
 
 obj/%.o: src/%.c
 	@ mkdir -p obj
 	$(CC) $(CFLAGS) $(INCLUDE) -c $< -o $@
 
-obj/main.o: main.cc
+obj/micro.o: micro.cc
 	@ mkdir -p obj
 	$(CPP) $(CPPFLAGS) $(INCLUDE) -c $< -o $@
 
@@ -62,7 +62,7 @@ obj/ycsb.o: ycsb.cc
 	@ mkdir -p obj
 	$(CPP) $(CPPFLAGS) $(INCLUDE) -c $< -o $@
 
-main: $(OBJECTS) obj/main.o
+micro: $(OBJECTS) obj/micro.o
 	$(CPP) $(CFLAGS) $^ -o $@ $(LIBS)
 
 ycsb: $(OBJECTS) obj/ycsb.o
@@ -71,4 +71,4 @@ ycsb: $(OBJECTS) obj/ycsb.o
 .PHONY: clean directories
 
 clean:
-	rm -f main ycsb $(OBJECTS) obj/main.o obj/ycsb.o
+	rm -f micro ycsb $(OBJECTS) obj/micro.o obj/ycsb.o
