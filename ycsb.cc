@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <atomic>
 #include <thread>
+#include "tbb/tbb.h"
 
 #include "iceberg_table.h"
 
@@ -158,7 +159,7 @@ void ycsb_load_run_randint(int index_type, int wl, int kt, int ap, int num_threa
         txn_count++;
     }
     txn_count--;
-    fprintf(stderr, "Loaded %" PRIu64 " txn keys\n", txn_count);
+    fprintf(stderr, "Loaded %d txn keys\n", txn_count);
 
     std::atomic<int> range_complete, range_incomplete;
     range_complete.store(0);
@@ -252,7 +253,7 @@ void ycsb_load_run_randint(int index_type, int wl, int kt, int ap, int num_threa
                         insert_times.emplace_back(std::chrono::duration_cast<std::chrono::nanoseconds>(t2-t1).count());
 #endif
                     } else if (ops[i] == OP_READ) {
-                        ValueType val;
+                        uintptr_t val;
 #ifdef LATENCY
                         std::chrono::high_resolution_clock::time_point t1 = std::chrono::high_resolution_clock::now();
 #endif
@@ -365,6 +366,7 @@ int main(int argc, char **argv) {
     }
 
     int num_thread = atoi(argv[5]);
+    tbb::task_scheduler_init init(num_thread);
 
     if (kt != STRING_KEY) {
         std::vector<uint64_t> init_keys;
