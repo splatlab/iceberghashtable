@@ -169,7 +169,7 @@ static inline uint32_t slot_mask_32(uint8_t * metadata, uint8_t fprint) {
   const uint64_t fp = bcast * fprint;
   uint64_t *metadata64 = (uint64_t *)metadata;
   for (int i = 0; i < 4; i++) {
-    uint64_t c = _mm_cmpeq_pi8((__m64)fp, (__m64)metadata64[i]);
+    uint64_t c = _mm_cvtm64_si64(_mm_cmpeq_pi8((__m64)fp, (__m64)metadata64[i]));
     uint64_t r = _pext_u64(c, bcast);
     result |= r << (8*i);
   }
@@ -217,7 +217,7 @@ static inline uint64_t slot_mask_64(uint8_t * metadata, uint8_t fprint) {
   uint64_t *metadata64 = (uint64_t *)metadata;
   for (int i = 0; i < 8; i++) {
     uint64_t x = (fp ^ metadata64[i]) | broadcast_mask64[i];
-    uint64_t c = _mm_cmpeq_pi8((__m64)x, (__m64)broadcast_mask64[i]);
+    uint64_t c = _mm_cvtm64_si64(_mm_cmpeq_pi8((__m64)x, (__m64)broadcast_mask64[i]));
     uint64_t r = _pext_u64(c, bcast);
     result |= r << (8*i);
   }
